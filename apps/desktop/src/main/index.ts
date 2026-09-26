@@ -8,13 +8,15 @@ import {
   WorkspaceManager,
   createSandboxedToolDefinitions,
 } from "@vela/workspace";
-import { app, BrowserWindow, nativeTheme, shell } from "electron";
+import { app, BrowserWindow, nativeImage, nativeTheme, shell } from "electron";
 import { writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { installApplicationMenu } from "./menu";
 import { ProjectHost } from "./project-host";
 import { SessionHost } from "./session-host";
 import { prepareVelaHome, resolveVelaHome } from "./vela-home";
+import appIconPath from "../../resources/icon.png?asset";
 
 app.setName("Vela");
 
@@ -32,6 +34,8 @@ function createWindow(): BrowserWindow {
     minHeight: 640,
     show: false,
     title: "Vela",
+    // Windows/Linux 的窗口图标;macOS 用 Dock 图标,见 whenReady。
+    icon: appIconPath,
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 16, y: 18 },
     // 与渲染层默认主题的底色一致,深色系统下启动和缩放时不闪白。
@@ -144,6 +148,17 @@ async function start(): Promise<void> {
 }
 
 app.whenReady().then(() => {
+  // dev 模式下 Dock 显示的是 Electron 二进制自带的图标,手动指到项目图标;打包后由 bundle 提供。
+  if (process.platform === "darwin" && app.dock && !app.isPackaged) {
+    app.dock.setIcon(nativeImage.createFromPath(appIconPath));
+  }
+  app.setAboutPanelOptions({
+    applicationName: "Vela",
+    applicationVersion: app.getVersion(),
+    credits: "在你选定的代码仓库中工作的桌面 AI 编程助手。",
+  });
+  installApplicationMenu();
+
   void start();
 
   app.on("activate", () => {

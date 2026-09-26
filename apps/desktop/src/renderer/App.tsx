@@ -47,6 +47,20 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [platform]);
 
+  useEffect(() => {
+    const vela = window.vela;
+    if (!vela) return;
+    // 应用菜单的「新建会话/设置」经主进程转发到这里,行为与侧边栏按钮一致。
+    return vela.onMenuAction((action) => {
+      if (action === "new-chat") {
+        setSettingsOpen(false);
+        void session.newChat();
+      } else {
+        setSettingsOpen((open) => !open);
+      }
+    });
+  }, [session.newChat]);
+
   if (!session.available) {
     return (
       <div className="boot-fallback">

@@ -1,0 +1,22 @@
+appId: com.vela.desktop
+productName: Vela
+directories:
+  buildResources: resources
+  output: dist
+files:
+  - out/**
+  # @vela/* 是工作区源码包,已由 electron-vite 打进 out,不需要进 asar
+  - "!node_modules/@vela/**"
+npmRebuild: false
+asarUnpack:
+  - "**/*.node"
+  - "**/*.wasm"
+mac:
+  category: public.app-category.developer-tools
+  icon: resources/icon.png
+  target:
+    - target: dmg
+      arch:
+        - arm64
+dmg:
+  title: Vela ${version}

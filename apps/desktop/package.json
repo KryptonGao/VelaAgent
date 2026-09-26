@@ -6,9 +6,12 @@
   "scripts": {
     "dev": "electron-vite dev --watch",
     "build": "electron-vite build",
+    "dist:mac": "electron-vite build && electron-builder --mac --arm64",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit"
   },
   "dependencies": {
+    "@earendil-works/pi-ai": "^0.87.1",
+    "@earendil-works/pi-coding-agent": "^0.87.1",
     "@vela/agent": "workspace:*",
     "@vela/shared": "workspace:*",
     "@vela/workspace": "workspace:*",
@@ -24,7 +27,8 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.2.0",
-    "electron": "^44.4.5",
+    "electron": "44.4.5",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "vite": "^7.3.6"
   }

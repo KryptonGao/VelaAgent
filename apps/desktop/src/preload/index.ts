@@ -183,6 +183,16 @@ const api: VelaApi = {
       ipcRenderer.removeListener(IpcChannel.questionEvent, wrapped);
     };
   },
+  onMenuAction: (listener) => {
+    const wrapped = (_event: IpcRendererEvent, action: unknown) => {
+      if (action !== "new-chat" && action !== "toggle-settings") return;
+      listener(action);
+    };
+    ipcRenderer.on(IpcChannel.appMenuAction, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IpcChannel.appMenuAction, wrapped);
+    };
+  },
 };
 
 if (process.contextIsolated) {

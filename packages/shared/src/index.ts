@@ -51,6 +51,7 @@ export const IpcChannel = {
   questionReply: "session:question-reply",
   appPickAttachments: "app:pick-attachments",
   appHydrateAttachments: "app:hydrate-attachments",
+  appMenuAction: "app:menu-action",
   workspaceFileRead: "workspace:file-read",
   workspaceFileList: "workspace:file-list",
   workspaceSearch: "workspace:code-search",
@@ -631,6 +632,9 @@ export interface PromptInput {
 
 export type AttachmentPickKind = "file" | "image";
 
+/** 应用菜单里指向渲染层的动作;主进程通过 app:menu-action 转发。 */
+export type MenuAction = "new-chat" | "toggle-settings";
+
 export interface FileAttachmentPayload {
   path: string;
   name: string;
@@ -712,6 +716,8 @@ export interface VelaApi {
   /** 回答 agent 提出的问题;answer 为 null 表示跳过。 */
   replyQuestion(id: string, answer: string | null): Promise<void>;
   onQuestionEvent(listener: (event: AskUserQuestionEvent) => void): () => void;
+  /** 订阅应用菜单动作(新建会话、打开设置等);返回取消订阅函数。 */
+  onMenuAction(listener: (action: MenuAction) => void): () => void;
   pickAttachments(kind: AttachmentPickKind): Promise<FileAttachmentPayload[]>;
   hydrateAttachments(paths: string[]): Promise<FileAttachmentPayload[]>;
   /** file 为渲染层的 DOM File 对象(shared 包无 DOM lib,类型放宽为 unknown) */

@@ -1,7 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "types": ["node"],
+    "types": ["node", "electron-vite/node"],
     "paths": {
       "@vela/shared": ["../../packages/shared/src/index.ts"],
       "@vela/agent": ["../../packages/agent/src/index.ts"],

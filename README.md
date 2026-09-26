@@ -61,11 +61,14 @@ pnpm build       # 编译桌面端代码
 pnpm typecheck   # 检查 TypeScript 类型
 ```
 
+安装依赖时，`postinstall` 会把 Electron 开发二进制改名为 `Vela.app`、修改其应用名并重新签名（`scripts/brand-electron-dev.mjs`，仅 macOS），这样菜单栏和 Dock 显示的就是 Vela 的名字和图标，而不是 Electron 的默认模板。应用图标 `apps/desktop/resources/icon.png` 由 `scripts/generate-app-icon.py` 从 `assets/icon/VelaAgentIcon.png` 生成（圆角与留白按 macOS 图标网格加工），更换原图后重跑该脚本即可。
+
 | 快捷键 | 操作 |
 | --- | --- |
 | `⌘B` / `Ctrl+B` | 折叠或展开左侧栏 |
 | `⌘J` / `Ctrl+J` | 折叠或展开右侧栏 |
 | `⌘,` / `Ctrl+,` | 打开或关闭设置 |
+| `⌘N` / `Ctrl+N` | 新建会话 |
 | `Enter` | 发送消息 |
 | `Shift+Enter` | 输入换行 |
 
