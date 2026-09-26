@@ -10,7 +10,7 @@ import {
   type ProviderSummary,
   type ThinkingLevel,
 } from "@vela/shared";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useEscapeKey } from "../hooks/useDismissable";
 import type { LoginState } from "../hooks/useModels";
 import { SheetPresence } from "./Presence";
@@ -41,9 +41,25 @@ export function ModelControls(props: ModelControlsProps) {
   const [menu, setMenu] = useState<"model" | "thinking" | null>(null);
   const [accountsOpen, setAccountsOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [sliderLevel, setSliderLevel] = useState(props.thinkingLevel);
   const rootRef = useRef<HTMLDivElement>(null);
+  const thinkingRequestRef = useRef(0);
+  const thinkingPopoverId = useId();
   const thinkingChoices = props.thinkingLevels.length > 0 ? props.thinkingLevels : (["off"] as ThinkingLevel[]);
   const shownThinking = thinkingChoices.includes(props.thinkingLevel) ? props.thinkingLevel : thinkingChoices[0] ?? "off";
+  const sliderThinking = thinkingChoices.includes(sliderLevel) ? sliderLevel : shownThinking;
+  const sliderIndex = Math.max(0, thinkingChoices.indexOf(sliderThinking));
+  const sliderMax = Math.max(0, thinkingChoices.length - 1);
+  const hasOffChoice = thinkingChoices[0] === "off";
+  const sliderOffset = hasOffChoice ? 0 : 1;
+  const sliderRangeMax = sliderMax + sliderOffset;
+  const sliderValue = sliderIndex + sliderOffset;
+  const sliderProgress = sliderRangeMax > 0 ? sliderValue / sliderRangeMax : 0;
+  const particleDuration = `${(3.4 - sliderProgress * 2.65).toFixed(2)}s`;
+
+  useEffect(() => {
+    if (menu !== "thinking") setSliderLevel(shownThinking);
+  }, [menu, shownThinking]);
 
   useEffect(() => {
     if (!menu) return;
@@ -68,29 +84,86 @@ export function ModelControls(props: ModelControlsProps) {
           className="model-choice-pill"
           type="button"
           title={thinkingChoices.length < 2 ? "当前模型不支持调整思考强度" : "思考强度"}
-          aria-haspopup="true"
+          aria-controls={thinkingPopoverId}
           aria-expanded={menu === "thinking"}
           disabled={props.disabled || thinkingChoices.length < 2}
-          onClick={() => setMenu((current) => (current === "thinking" ? null : "thinking"))}
+          onClick={() => {
+            if (menu === "thinking") {
+              setMenu(null);
+              return;
+            }
+            setSliderLevel(shownThinking);
+            setMenu("thinking");
+          }}
         >
           <span>{thinkingLevelLabel[shownThinking]}</span>
           <Chevron />
         </button>
         {menu === "thinking" ? (
-          <div className="dock-popover thinking-popover">
-            {thinkingChoices.map((level) => (
-              <button
-                key={level}
-                className={`menu-row${level === shownThinking ? " active" : ""}`}
-                type="button"
-                onClick={() => {
-                  setMenu(null);
-                  void props.onThinking(level);
+          <div id={thinkingPopoverId} className="dock-popover thinking-popover" role="group" aria-label="思考强度">
+            <div className="thinking-popover-heading">
+              <span className="thinking-level-value" aria-live="polite">{thinkingLevelLabel[sliderThinking]}</span>
+              <span className="thinking-model-label">{props.modelLabel ?? "选择模型"}</span>
+            </div>
+            <div
+              className="thinking-slider"
+              style={{
+                "--thinking-progress": `${sliderProgress * 100}%`,
+                "--thinking-particle-duration": particleDuration,
+              } as CSSProperties}
+            >
+              <div className="thinking-slider-track" aria-hidden="true">
+                <div className="thinking-fill-frame">
+                  {sliderProgress > 0 ? (
+                    <div className="thinking-slider-fill">
+                      <div className="thinking-particles">
+                        {[0, 1, 2, 3, 4].map((particle) => (
+                          <span
+                            key={particle}
+                            className={`thinking-particle particle-${particle + 1}`}
+                            style={{ "--thinking-particle-delay": `${particle * -0.31}s` } as CSSProperties}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+                <div className="thinking-slider-markers">
+                  {thinkingChoices.map((level, index) => (
+                    <span
+                      key={level}
+                      className={index <= sliderIndex ? "is-active" : undefined}
+                      style={{ left: `${sliderRangeMax > 0 ? ((index + sliderOffset) / sliderRangeMax) * 100 : 0}%` }}
+                    />
+                  ))}
+                </div>
+              </div>
+              <input
+                className="thinking-slider-input"
+                aria-label="思考强度"
+                aria-valuetext={thinkingLevelLabel[sliderThinking]}
+                type="range"
+                min={0}
+                max={sliderRangeMax}
+                step={1}
+                value={sliderValue}
+                disabled={props.disabled || thinkingChoices.length < 2}
+                onChange={(event) => {
+                  const nextIndex = Number(event.currentTarget.value) - sliderOffset;
+                  const nextLevel = thinkingChoices[nextIndex];
+                  if (!nextLevel || nextLevel === sliderThinking) return;
+                  setSliderLevel(nextLevel);
+                  const request = ++thinkingRequestRef.current;
+                  void props.onThinking(nextLevel).then((result) => {
+                    if (request === thinkingRequestRef.current && typeof result === "string") {
+                      setSliderLevel(shownThinking);
+                    }
+                  }).catch(() => {
+                    if (request === thinkingRequestRef.current) setSliderLevel(shownThinking);
+                  });
                 }}
-              >
-                <span>{thinkingLevelLabel[level]}</span>
-              </button>
-            ))}
+              />
+            </div>
           </div>
         ) : null}
       </div>
