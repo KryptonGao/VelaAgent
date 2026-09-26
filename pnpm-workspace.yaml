@@ -1,0 +1,12 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+nodeLinker: hoisted
+confirmModulesPurge: false
+
+allowBuilds:
+  electron: true
+  esbuild: true
+  protobufjs: false
+  "@google/genai": false

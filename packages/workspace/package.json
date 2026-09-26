@@ -1,0 +1,16 @@
+{
+  "name": "@vela/workspace",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.87.1",
+    "@vela/shared": "workspace:*"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

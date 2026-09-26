@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vela</title>
+    <script>
+      try {
+        var root = document.documentElement;
+        var appearance = localStorage.getItem("vela.appearance");
+        var scheme =
+          appearance === "light" || appearance === "dark"
+            ? appearance
+            : window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
+        var light = localStorage.getItem("vela.theme.light");
+        var dark = localStorage.getItem("vela.theme.dark");
+        root.dataset.scheme = scheme;
+        root.dataset.theme =
+          scheme === "dark"
+            ? ["midnight", "graphite", "ember"].indexOf(dark) >= 0 ? dark : "midnight"
+            : ["daylight", "paper", "celadon"].indexOf(light) >= 0 ? light : "daylight";
+        if (localStorage.getItem("vela.locale") === "en") root.lang = "en";
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>

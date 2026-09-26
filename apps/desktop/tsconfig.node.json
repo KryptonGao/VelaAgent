@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "paths": {
+      "@vela/shared": ["../../packages/shared/src/index.ts"],
+      "@vela/agent": ["../../packages/agent/src/index.ts"],
+      "@vela/context": ["../../packages/context/src/index.ts"],
+      "@vela/tools": ["../../packages/tools/src/index.ts"],
+      "@vela/workspace": ["../../packages/workspace/src/index.ts"]
+    }
+  },
+  "include": ["electron.vite.config.ts", "src/main/**/*.ts", "src/preload/**/*.ts"]
+}

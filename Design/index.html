@@ -1,0 +1,961 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vela — Intelligent Desktop Agent</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="desktop-viewport">
+  <div class="vela-window" id="app-window">
+
+    <!-- ====================================================================
+         LEFT SIDEBAR: FROSTED BLUE GLASS, CLEAN ROUNDED NAVIGATION (NO BORDER)
+         ==================================================================== -->
+    <aside class="sidebar-left" id="sidebar-left">
+      <!-- Top macOS Traffic Lights & Navigation Buttons -->
+      <div class="sidebar-left-header">
+        <div class="titlebar-traffic-nav">
+          <div class="traffic-lights">
+            <span class="traffic-dot close" title="关闭"></span>
+            <span class="traffic-dot min" title="最小化"></span>
+            <span class="traffic-dot zoom" title="缩放"></span>
+          </div>
+
+          <div class="nav-history-buttons">
+            <button class="icon-btn-ghost" id="btn-toggle-sidebar" title="折叠侧边栏 (Cmd+B)" onclick="toggleLeftSidebar()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="9" y1="3" x2="9" y2="21"></line>
+              </svg>
+            </button>
+            <button class="icon-btn-ghost" title="后退">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <polyline points="15 18 9 12 15 6"></polyline>
+              </svg>
+            </button>
+            <button class="icon-btn-ghost" title="前进">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <polyline points="9 18 15 12 9 6"></polyline>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Workspace Dropdown Row (Codex / Vela) -->
+        <div class="workspace-title-row">
+          <div class="workspace-dropdown-trigger" onclick="showToast('切换工作区：Vela')">
+            <span>Vela</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </div>
+
+          <div class="workspace-header-actions">
+            <button class="icon-btn-ghost" title="搜索 (Cmd+K)" onclick="focusSearch()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+            </button>
+            <button class="icon-btn-ghost" title="通知消息" onclick="showToast('暂无未读系统通知')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Action List -->
+      <div class="sidebar-quick-actions">
+        <div class="quick-action-item" onclick="createNewChat()">
+          <div class="quick-action-item-left">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+            </svg>
+            <span>新对话</span>
+          </div>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="16"></line>
+            <line x1="8" y1="12" x2="16" y2="12"></line>
+          </svg>
+        </div>
+
+        <div class="quick-action-item" onclick="showToast('Pull Request 列表')">
+          <div class="quick-action-item-left">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="18" cy="18" r="3"></circle>
+              <circle cx="6" cy="6" r="3"></circle>
+              <path d="M13 6h3a2 2 0 0 1 2 2v7"></path>
+              <line x1="6" y1="9" x2="6" y2="21"></line>
+            </svg>
+            <span>Pull Request</span>
+          </div>
+        </div>
+
+        <div class="quick-action-item" onclick="showToast('定时任务中心')">
+          <div class="quick-action-item-left">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+            <span>定时任务</span>
+          </div>
+        </div>
+
+        <div class="quick-action-item" onclick="showToast('插件与 MCP 扩展中心')">
+          <div class="quick-action-item-left">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="4"></circle>
+              <path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.92 7.94"></path>
+            </svg>
+            <span>插件</span>
+          </div>
+        </div>
+
+        <div class="quick-action-item" onclick="showToast('探索与模板')">
+          <div class="quick-action-item-left">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="1"></circle>
+              <circle cx="19" cy="12" r="1"></circle>
+              <circle cx="5" cy="12" r="1"></circle>
+            </svg>
+            <span>探索</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Scrollable Projects & Chats Navigation -->
+      <div class="sidebar-scroll-area">
+        <!-- Section: 置顶 -->
+        <div class="sidebar-section-title">置顶</div>
+        <div class="folder-tree-group">
+          <div class="folder-item" onclick="toggleFolder('studypulse-cloud')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <span>studypulse-cloud-ai</span>
+          </div>
+          <div class="folder-item" onclick="toggleFolder('agent-doctor')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <span>AgentDoctor</span>
+          </div>
+          <div class="folder-item" onclick="toggleFolder('study-pulse')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <span>StudyPulse</span>
+          </div>
+          <div class="folder-item" onclick="toggleFolder('deeptutor')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <span>DeepTutor-1.6.10</span>
+          </div>
+
+          <!-- Project: Glance (Expanded with chats) -->
+          <div class="folder-item open" onclick="toggleFolder('glance')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <span>Glance</span>
+          </div>
+
+          <!-- Sub-chats list under Glance -->
+          <div class="subchat-list" id="subchats-glance">
+            <div class="subchat-item active" data-chat="chat-provider-key" onclick="switchChatSession('chat-provider-key')">
+              <span class="subchat-title">修复 Provider 设置页密钥逻辑</span>
+            </div>
+            <div class="subchat-item" data-chat="chat-share-retry" onclick="switchChatSession('chat-share-retry')">
+              <span class="subchat-title">修复分享扩展分析重试</span>
+            </div>
+            <div class="subchat-item" data-chat="chat-photo-picker" onclick="switchChatSession('chat-photo-picker')">
+              <span class="subchat-title">Add Photo Picker entry</span>
+            </div>
+            <div class="subchat-item" data-chat="chat-toast-optimize" onclick="switchChatSession('chat-toast-optimize')">
+              <span class="subchat-title">优化全局消息提示</span>
+            </div>
+            <div class="subchat-item" data-chat="chat-feedback-actions" onclick="switchChatSession('chat-feedback-actions')">
+              <span class="subchat-title">修复动作项已添加状态反馈</span>
+            </div>
+            <div class="subchat-item" style="color: var(--text-muted); font-size: 11.5px;" onclick="showToast('已展开全部会话')">
+              <span>展开显示</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section: 项目 -->
+        <div class="sidebar-section-title" style="margin-top: 6px;">项目</div>
+        <div class="folder-tree-group">
+          <div class="folder-item" onclick="toggleFolder('studypulse-client')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <span>StudyPulseClient</span>
+          </div>
+          <div class="folder-item" onclick="toggleFolder('voyara')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <span>Voyara</span>
+          </div>
+          <div class="folder-item" onclick="toggleFolder('program')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <span>Program</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer User Bar -->
+      <div class="sidebar-left-footer">
+        <div class="sidebar-user-pill" onclick="showToast('当前登录账户: Chenkai Gao')">
+          <div class="user-avatar-circle">C</div>
+          <span class="user-name-text">Chenkai Gao</span>
+        </div>
+        <div class="footer-aux-actions">
+          <div class="aux-pill-btn" onclick="showToast('语音输入待命中')">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+              <line x1="12" y1="19" x2="12" y2="23"></line>
+              <line x1="8" y1="23" x2="16" y2="23"></line>
+            </svg>
+            <span>语音</span>
+          </div>
+          <button class="icon-btn-ghost" title="帮助与说明" onclick="showToast('Vela Agent v2.4')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+              <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ====================================================================
+         CENTER PANEL: MAIN CONVERSATION AREA (Clean White, Soft Cards, NO BORDER)
+         ==================================================================== -->
+    <main class="main-chat-view" id="main-chat-view">
+      <!-- Top Clean Header Bar -->
+      <div class="main-chat-header">
+        <div class="chat-title-group">
+          <svg class="doc-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+            <polyline points="10 9 9 9 8 9"></polyline>
+          </svg>
+          <span class="chat-active-title" id="chat-header-title">修复 Provider 设置页密钥逻辑</span>
+        </div>
+
+        <div class="chat-header-actions">
+          <button class="action-pill-btn" onclick="showToast('更多会话选项')">
+            <span>···</span>
+          </button>
+          <button class="action-pill-btn" onclick="showToast('已复制会话分享链接')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+              <polyline points="16 6 12 2 8 6"></polyline>
+              <line x1="12" y1="2" x2="12" y2="15"></line>
+            </svg>
+            <span>分享</span>
+          </button>
+
+          <!-- Layout switchers (toggle right inspector) -->
+          <div class="view-toggle-group">
+            <button class="view-icon-btn" title="网格视图" onclick="showToast('已切换至列表视图')">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="7" height="7"></rect>
+                <rect x="14" y="3" width="7" height="7"></rect>
+                <rect x="14" y="14" width="7" height="7"></rect>
+                <rect x="3" y="14" width="7" height="7"></rect>
+              </svg>
+            </button>
+            <button class="view-icon-btn" title="双栏视图" onclick="showToast('双栏模式')">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="12" y1="3" x2="12" y2="21"></line>
+              </svg>
+            </button>
+            <button class="view-icon-btn active" id="btn-toggle-inspector" title="折叠/展开右侧面板 (Cmd+J)" onclick="toggleRightSidebar()">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="16" y1="3" x2="16" y2="21"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Messages Scroll Area -->
+      <div class="chat-scroll-area" id="chat-messages-container">
+        <!-- Blue Recommendation Card (Matching Screenshot) -->
+        <div class="agent-blue-card">
+          <div class="agent-blue-card-title">• 建议：</div>
+          <ul>
+            <li>增加“测试连接（Test Connection）”按钮，发送不带图片的 1 token 请求；</li>
+            <li>提供“清除密钥”按钮。</li>
+          </ul>
+        </div>
+
+        <!-- Expandable Time Spent & Execution Stream (Expanded as in screenshot) -->
+        <div class="time-spent-collapsible expanded" id="time-spent-collapsible">
+          <div class="time-spent-trigger" onclick="toggleTimeSpentStream()">
+            <span>用时 2分钟 53秒</span>
+            <svg class="time-spent-trigger-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+          </div>
+
+          <div class="time-spent-divider"></div>
+
+          <!-- Expandable Stream Body -->
+          <div class="time-spent-stream-body">
+            <!-- Phase 1 Thought -->
+            <div class="stream-prose-block">
+              我先检查 Provider 设置页、Keychain 封装和现有 API 客户端，确认能复用的探测请求与保存路径，再做局部修改。
+            </div>
+
+            <!-- Single Line Tool Summary -->
+            <div class="stream-summary-pill-row">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+                <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+              </svg>
+              <span>已读取文件运行了命令</span>
+            </div>
+
+            <!-- Phase 2 Thought -->
+            <div class="stream-prose-block">
+              我会沿用项目的 SwiftUI 组件写法来补设置页交互，并先读一下相关的 UI 技能说明。探测会向配置的 <span class="code-inline-pill">/chat/completions</span> 发一个 1 token 的小请求，使用当前输入值和 Keychain 中已有的密钥。
+            </div>
+
+            <!-- Secondary Substream Tool Execution Stream -->
+            <div class="substream-collapsible" id="substream-collapsible">
+              <div class="substream-header-trigger" onclick="toggleSubstream()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 20h9"></path>
+                  <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                </svg>
+                <span>编辑了文件读取文件运行了命令</span>
+                <svg class="substream-arrow" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+              </div>
+
+              <!-- Expanded Detailed Tool Steps List -->
+              <div class="substream-list">
+                <div class="substream-step-row">
+                  <span class="step-icon-col">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="4 17 10 11 4 5"></polyline>
+                      <line x1="12" y1="19" x2="20" y2="19"></line>
+                    </svg>
+                  </span>
+                  <span class="step-text-col" title="cat '/Users/chenkaigao/.codex/skills/build-ios-apps/skills/swiftui-ui-patterns/SKILL.md'">已运行 cat '/Users/chenkaigao/.codex/skills/build-ios-apps/skills/swiftui-ui-patterns/SKILL.md' 2&gt;/d...</span>
+                </div>
+
+                <div class="substream-step-row">
+                  <span class="step-icon-col">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="11" cy="11" r="8"></circle>
+                      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                  </span>
+                  <span class="step-text-col">已在 Localizable.xcstrings 中搜索"AI Provider|Save|API Key|Saved|Clear|Test Connection|Connection"</span>
+                </div>
+
+                <div class="substream-step-row">
+                  <span class="step-icon-col">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="11" cy="11" r="8"></circle>
+                      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                  </span>
+                  <span class="step-text-col">已对"KeychainStore\"进行搜索</span>
+                </div>
+
+                <div class="substream-step-row">
+                  <span class="step-icon-col">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+                      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+                    </svg>
+                  </span>
+                  <span class="step-text-col">已读取 <span class="file-dotted-link" onclick="openFilePreview('Localizable.xcstrings')">Localizable.xcstrings</span></span>
+                </div>
+
+                <div class="substream-step-row">
+                  <span class="step-icon-col">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+                      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+                    </svg>
+                  </span>
+                  <span class="step-text-col">已读取 <span class="file-dotted-link" onclick="openFilePreview('Localizable.xcstrings')">Localizable.xcstrings</span></span>
+                </div>
+
+                <div class="substream-step-row">
+                  <span class="step-icon-col">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+                      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+                    </svg>
+                  </span>
+                  <span class="step-text-col">已读取 <span class="file-dotted-link" onclick="openFilePreview('Localizable.xcstrings')">Localizable.xcstrings</span></span>
+                </div>
+
+                <div class="substream-step-row">
+                  <span class="step-icon-col">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+                      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+                    </svg>
+                  </span>
+                  <span class="step-text-col">已读取 <span class="file-dotted-link" onclick="openFilePreview('Localizable.xcstrings')">Localizable.xcstrings</span></span>
+                </div>
+
+                <div class="substream-step-row">
+                  <span class="step-icon-col">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M12 20h9"></path>
+                      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                    </svg>
+                  </span>
+                  <span class="step-text-col">已编辑 <span class="file-dotted-link" onclick="openFilePreview('ProviderSettingsView.swift')">ProviderSettingsView.swift</span> <span class="step-diff-pill"><span style="color:#16a34a;">+65</span> <span style="color:#dc2626;">-0</span></span></span>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--text-muted); cursor:pointer;" onclick="toggleDiffDetails()">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                  </svg>
+                </div>
+              </div>
+            </div>
+
+            <!-- Phase 3 Thought -->
+            <div class="stream-prose-block">
+              核心改动已完成：连接测试不依赖先保存配置，空白密钥输入仍表示保留现有密钥，而“清除 API 密钥”会显式调用 Keychain 删除。接下来我会检查字符串目录格式并编译 iOS target，验证 SwiftUI 与网络代码能否通过编译；
+            </div>
+          </div>
+        </div>
+
+        <!-- Narrative Reply -->
+        <div class="agent-reply-prose">
+          已在 Provider 设置页添加“测试连接”按钮：它使用当前填写的 URL、模型和密钥，发送不带图片的 1 token 请求，并显示成功或错误信息。可在保存前测试；若密钥框留空，会使用 Keychain 中已有的密钥。<br/>
+          <span class="file-link-tag" onclick="openFilePreview('ProviderSettingsView.swift')">&lt;/&gt; ProviderSettingsView.swift (line 34)</span> · 
+          <span class="file-link-tag" onclick="openFilePreview('OpenAICompatibleProvider.swift')">&lt;/&gt; OpenAICompatibleProvider.swift (line 9)</span>
+          <br/><br/>
+          添加了“清除 API 密钥”按钮，显式删除 Keychain 中的密钥并清空输入框。留空后点“保存”仍会保留已存密钥。<br/>
+          <span class="file-link-tag" onclick="openFilePreview('GlanceStorage.swift')">&lt;/&gt; GlanceStorage.swift (line 130)</span>
+          <br/><br/>
+          中英文字符串目录检查通过，iOS Simulator 构建成功；未向实际服务发送连通请求。
+        </div>
+
+        <!-- ==============================================================
+             TOOL CALLS / EDITED FILES CARD (Codex Card Style, No Border)
+             ============================================================== -->
+        <div class="tool-summary-card" id="tool-summary-card">
+          <div class="tool-summary-card-header" onclick="toggleToolCard()">
+            <div class="tool-summary-card-title-left">
+              <div class="tool-badge-icon">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <circle cx="12" cy="13" r="2"></circle>
+                </svg>
+              </div>
+              <div>
+                <div class="tool-summary-heading">已编辑 4 个文件</div>
+                <div class="tool-summary-sub">查看更改 ↗</div>
+              </div>
+            </div>
+
+            <div class="tool-summary-actions-right">
+              <button class="card-pill-btn" onclick="event.stopPropagation(); showToast('已撤回本次文件变更')">
+                <span>撤销 ↶</span>
+              </button>
+              <button class="card-pill-btn" style="background:#eef2f6; font-weight:600;" onclick="event.stopPropagation(); showToast('进入代码审核模式')">
+                <span>审核</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- File Changes Diff Rows -->
+          <div class="edited-files-list">
+            <div class="edited-file-row" style="cursor:pointer;" onclick="openFilePreview('ProviderSettingsView.swift')">
+              <span class="edited-file-path">Glance/ProviderSettingsView.swift</span>
+              <div class="diff-count-badge">
+                <span class="diff-add">+65</span>
+                <span class="diff-del">-0</span>
+              </div>
+            </div>
+
+            <div class="edited-file-row" style="cursor:pointer;" onclick="openFilePreview('GlanceStorage.swift')">
+              <span class="edited-file-path">Shared/GlanceStorage.swift</span>
+              <div class="diff-count-badge">
+                <span class="diff-add">+7</span>
+                <span class="diff-del">-0</span>
+              </div>
+            </div>
+
+            <div class="edited-file-row" style="cursor:pointer;" onclick="openFilePreview('OpenAICompatibleProvider.swift')">
+              <span class="edited-file-path">Shared/OpenAICompatibleProvider.swift</span>
+              <div class="diff-count-badge">
+                <span class="diff-add">+31</span>
+                <span class="diff-del">-0</span>
+              </div>
+            </div>
+
+            <div class="expand-files-trigger" onclick="toggleDiffDetails()">
+              <span id="expand-files-text">再显示 1 个文件</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+          </div>
+
+          <!-- Inline Expandable Diff Preview -->
+          <div class="diff-detail-content" id="diff-detail-block">
+            <div class="diff-detail-line ctx">@@ -34,6 +34,12 @@ struct ProviderSettingsView: View {</div>
+            <div class="diff-detail-line add">+    @State private var isTestingConnection = false</div>
+            <div class="diff-detail-line add">+    Button("测试连接") {</div>
+            <div class="diff-detail-line add">+        testAPIConnection(url: endpoint, key: apiKey)</div>
+            <div class="diff-detail-line add">+    }</div>
+            <div class="diff-detail-line del">-    // fallback to static keychain entry</div>
+            <div class="diff-detail-line ctx">     Text("Key stored securely in Keychain")</div>
+          </div>
+
+          <!-- Bottom Card Meta -->
+          <div class="card-bottom-meta" style="padding-left: 18px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <polyline points="12 6 12 12 14 14"></polyline>
+            </svg>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="18" cy="18" r="3"></circle>
+              <circle cx="6" cy="6" r="3"></circle>
+              <path d="M13 6h3a2 2 0 0 1 2 2v7"></path>
+              <line x1="6" y1="9" x2="6" y2="21"></line>
+            </svg>
+            <span>21:56</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ====================================================================
+           BOTTOM FLOATING DOCK (Ultra Soft Radii, No Borders, Soft Shadow)
+           ==================================================================== -->
+      <div class="chat-dock-wrapper">
+        <div class="floating-input-card">
+          <!-- Floating Scroll to Bottom Button (Dynamically appears only when scrolled up, anchored above dock) -->
+          <button class="scroll-to-bottom-float-btn" id="btn-scroll-bottom" title="滚动到底部" onclick="scrollToBottom()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <polyline points="19 12 12 19 5 12"></polyline>
+            </svg>
+          </button>
+
+          <textarea 
+            id="user-prompt-input"
+            class="input-textarea" 
+            placeholder="随心输入" 
+            rows="1"></textarea>
+
+          <div class="dock-controls-row">
+            <div class="dock-controls-left">
+              <button class="round-add-btn" title="添加文件或图片" onclick="showToast('添加上下文附件')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+              </button>
+
+              <div class="security-tag-pill" onclick="showToast('安全沙箱: 完全访问模式')">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                </svg>
+                <span>完全访问</span>
+              </div>
+            </div>
+
+            <div class="dock-controls-right">
+              <button class="icon-btn-ghost" title="重置上下文" onclick="pruneContext()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="1 4 1 10 7 10"></polyline>
+                  <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                </svg>
+              </button>
+
+              <div class="model-choice-pill" onclick="showToast('当前模型：GPT-6 Luna (最高)')">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"></path>
+                </svg>
+                <span>GPT-6 Luna 最高</span>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+              </div>
+
+              <button class="dock-mic-btn" title="语音录制" onclick="showToast('开始语音录制')">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                  <line x1="12" y1="19" x2="12" y2="23"></line>
+                  <line x1="8" y1="23" x2="16" y2="23"></line>
+                </svg>
+              </button>
+
+              <button class="send-action-blue-btn" id="btn-submit-prompt" title="发送 (Enter)" onclick="handleUserSend()">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <path d="M22 2L11 13"></path>
+                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- ====================================================================
+         RIGHT SIDEBAR: TODO LIST / AGENT PLAN + CONTEXT (NO BORDERS, SOFT CARDS)
+         ==================================================================== -->
+    <aside class="sidebar-right" id="sidebar-right">
+      <!-- ==================================================================
+           VIEW A: TODO LIST & CONTEXT PANEL (Default view)
+           ================================================================== -->
+      <div class="panel-todo-context-view" id="panel-todo-context-view">
+        <!-- Right Top Header with Project Branch Pill (Matching Screenshot Glance / main) -->
+        <div class="sidebar-right-header">
+          <div class="branch-overview-card">
+            <div class="branch-info-left">
+              <span class="branch-project-title">Glance</span>
+              <div class="branch-name-row">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+                <span id="current-branch-label">main</span>
+              </div>
+            </div>
+            <button class="icon-btn-ghost" title="分支选项" onclick="showToast('分支设置: main (已同步)')">
+              <span>···</span>
+            </button>
+          </div>
+
+          <button class="sidebar-collapse-btn" title="折叠右侧栏 (Cmd+J)" onclick="toggleRightSidebar()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Right Scroll Content Area -->
+        <div class="sidebar-right-scroll">
+          <!-- Upper Half: Todo List / Agent Plan -->
+          <section>
+            <div class="side-panel-title-row">
+              <span class="side-panel-heading">Todo List &amp; Plan</span>
+              <span class="side-panel-counter" id="plan-progress-text">3/5 完成 (60%)</span>
+            </div>
+
+            <div class="plan-progress-pill">
+              <div class="plan-progress-fill" id="plan-progress-fill" style="width: 60%;"></div>
+            </div>
+
+            <div class="todo-cards-column" id="todo-cards-column">
+              <!-- Rendered by app.js -->
+            </div>
+
+            <div style="margin-top: 6px;">
+              <button class="action-pill-btn" style="width: 100%; justify-content: center;" onclick="addNewTodoTask()">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                <span>添加待办项</span>
+              </button>
+            </div>
+          </section>
+
+          <!-- Lower Half: Context & Token Metrics -->
+          <section style="margin-top: 10px;">
+            <div class="side-panel-title-row">
+              <span class="side-panel-heading">Context &amp; Token 使用量</span>
+              <button class="icon-btn-ghost" title="修剪未锁定文件" onclick="pruneContext()">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M3 6h18"></path>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
+                </svg>
+              </button>
+            </div>
+
+            <!-- Token Card -->
+            <div class="context-metrics-card">
+              <div class="context-metrics-header">
+                <span class="context-metrics-label">活跃上下文</span>
+                <span class="context-metrics-value" id="token-total-display">
+                  48,290 <span>/ 128,000 (38%)</span>
+                </span>
+              </div>
+
+              <!-- 4-Color Segment Bar -->
+              <div class="segmented-pill-bar">
+                <div class="token-seg system" id="bar-system" style="width: 3.2%;" title="System Tokens"></div>
+                <div class="token-seg conversation" id="bar-conversation" style="width: 13.1%;" title="Conversation Tokens"></div>
+                <div class="token-seg files" id="bar-files" style="width: 16.7%;" title="Files Tokens"></div>
+                <div class="token-seg tools" id="bar-tools" style="width: 4.6%;" title="Tool Results Tokens"></div>
+              </div>
+
+              <!-- Legend Grid -->
+              <div class="token-breakdown-legend">
+                <div class="legend-stat-item">
+                  <div><span class="legend-color-dot" style="background:var(--ctx-system);"></span>System</div>
+                  <span id="legend-system">4,120</span>
+                </div>
+                <div class="legend-stat-item">
+                  <div><span class="legend-color-dot" style="background:var(--ctx-conversation);"></span>Conversation</div>
+                  <span id="legend-conversation">16,840</span>
+                </div>
+                <div class="legend-stat-item">
+                  <div><span class="legend-color-dot" style="background:var(--ctx-files);"></span>Files</div>
+                  <span id="legend-files">21,430</span>
+                </div>
+                <div class="legend-stat-item">
+                  <div><span class="legend-color-dot" style="background:var(--ctx-tools);"></span>Tool Results</div>
+                  <span id="legend-tools">5,900</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Context Files -->
+            <div class="side-panel-title-row" style="margin-top: 10px;">
+              <span class="side-panel-heading" style="font-size: 11px; color: var(--text-muted);">已进入 Context 的文件</span>
+              <span class="side-panel-counter">4 个文件</span>
+            </div>
+
+            <div class="context-files-column" id="context-files-column">
+              <!-- Rendered by app.js -->
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <!-- ==================================================================
+           VIEW B: FILE PREVIEW & CODE INSPECTOR (Shown when clicking files)
+           Matching User Screenshot 3 exactly
+           ================================================================== -->
+      <div class="panel-file-preview-view" id="panel-file-preview-view">
+        <!-- Top Tabs Bar -->
+        <div class="preview-tabs-bar">
+          <div class="preview-tabs-left" id="preview-tabs-list">
+            <div class="preview-tab-item" onclick="openFilePreview('Localizable.xcstrings')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              </svg>
+              <span>Localizable.xcstrings</span>
+            </div>
+
+            <div class="preview-tab-item active" id="active-preview-tab">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="16 18 22 12 16 6"></polyline>
+                <polyline points="8 6 2 12 8 18"></polyline>
+              </svg>
+              <span id="preview-tab-filename">ProviderSettingsView.swift</span>
+              <span class="preview-tab-close" title="关闭预览返回 Todo/Context" onclick="event.stopPropagation(); closeFilePreview();">×</span>
+            </div>
+
+            <div class="icon-btn-ghost" title="新建标签页" onclick="showToast('新建文件标签页')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+            </div>
+          </div>
+
+          <div class="preview-tabs-right">
+            <button class="icon-btn-ghost" title="全屏查看" onclick="showToast('全屏代码模式')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <polyline points="9 21 3 21 3 15"></polyline>
+                <line x1="21" y1="3" x2="14" y2="10"></line>
+                <line x1="3" y1="21" x2="10" y2="14"></line>
+              </svg>
+            </button>
+            <button class="icon-btn-ghost" title="切换回 Todo/Context" onclick="closeFilePreview()">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="9" y1="3" x2="9" y2="21"></line>
+              </svg>
+            </button>
+            <button class="icon-btn-ghost" title="关闭预览" onclick="closeFilePreview()">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Breadcrumbs & Quick Action Subbar -->
+        <div class="preview-subbar">
+          <div class="preview-breadcrumbs-text">
+            <span>Glance</span>
+            <span>&gt;</span>
+            <span>Glance</span>
+            <span>&gt;</span>
+            <strong id="preview-breadcrumb-leaf">ProviderSettingsView.swift</strong>
+          </div>
+
+          <div class="preview-actions-group">
+            <button class="icon-btn-ghost" title="复制文件内容" onclick="showToast('已复制文件代码至剪贴板')">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+            </button>
+            <div class="action-pill-btn" style="padding: 3px 8px; font-size: 11px;" onclick="showToast('在外部 IDE 打开')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+              </svg>
+              <span>打开</span>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+          </div>
+        </div>
+
+        <!-- Two Column Main Body: Code on Left, Tree on Right -->
+        <div class="preview-main-split">
+          <!-- Left: Code Lines View -->
+          <div class="preview-code-pane" id="preview-code-pane">
+            <div class="code-gutter-numbers" id="code-gutter-numbers">
+              <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span>
+              <span>6</span><span>7</span><span>8</span><span>9</span><span class="gutter-num-active">10</span>
+              <span class="gutter-num-active">11</span><span>12</span><span>13</span><span>14</span><span>15</span>
+              <span>16</span><span>17</span><span>18</span><span>19</span><span>20</span>
+            </div>
+            <div class="code-lines-view" id="code-lines-content">
+<span class="syn-kw">import</span> <span class="syn-type">SwiftUI</span>
+
+<span class="syn-kw">struct</span> <span class="syn-type">ProviderSettingsView</span>: <span class="syn-type">View</span> 
+{
+    <span class="syn-mod">@State</span> <span class="syn-kw">private var</span> name = <span class="syn-str">""</span>
+    <span class="syn-mod">@State</span> <span class="syn-kw">private var</span> baseURL = <span class="syn-str">""</span>
+
+    <span class="syn-mod">@State</span> <span class="syn-kw">private var</span> modelID = <span class="syn-str">""</span>
+
+    <span class="syn-mod">@State</span> <span class="syn-kw">private var</span> apiKey = <span class="syn-str">""</span>
+
+    <span class="syn-mod">@State</span> <span class="syn-kw">private var</span> hasStoredKey = <span class="syn-kw">false</span>
+    <span class="syn-mod">@State</span> <span class="syn-kw">private var</span> searchEngine: <span class="syn-type">SearchEngine</span> = .google
+
+    <span class="syn-mod">@State</span> <span class="syn-kw">private var</span> statusMessage: <span class="syn-type">String?</span>
+    <span class="syn-mod">@State</span> <span class="syn-kw">private var</span> isTestingConnection = <span class="syn-kw">false</span>
+
+    <span class="syn-kw">var</span> body: <span class="syn-kw">some</span> <span class="syn-type">View</span> {
+        <span class="syn-func">Form</span> {
+            <span class="syn-func">Section</span> {
+                <span class="syn-func">TextField</span>(<span class="syn-str">"Name"</span>, text: $name, prompt: <span class="syn-func">Text</span>(<span class="syn-str">"OpenAI"</span>))
+                <span class="syn-func">TextField</span>(<span class="syn-str">"Base URL"</span>, text: $baseURL, prompt: <span class="syn-func">Text</span>(<span class="syn-str">"https://api.openai.com/v1"</span>))
+            }
+        }
+    }
+}</div>
+          </div>
+
+          <!-- Right: Project File Explorer Pane -->
+          <div class="preview-explorer-pane">
+            <input type="text" class="explorer-search-input" placeholder="筛选文件...">
+            <div class="explorer-tree-item dir">
+              <span>›</span> <span>.git</span>
+            </div>
+            <div class="explorer-tree-item dir">
+              <span>›</span> <span>docs</span>
+            </div>
+            <div class="explorer-tree-item dir">
+              <span>▾</span> <span>Glance</span>
+            </div>
+            <div style="padding-left: 8px;">
+              <div class="explorer-tree-item dir">
+                <span>›</span> <span>Assets.xcassets</span>
+              </div>
+              <div class="explorer-tree-item" onclick="openFilePreview('Glance.entitlements')">
+                <span>📄</span> <span>Glance.entitlements</span>
+              </div>
+              <div class="explorer-tree-item" onclick="openFilePreview('GlanceApp.swift')">
+                <span style="color:#f97316;">🕊</span> <span>GlanceApp.swift</span>
+              </div>
+              <div class="explorer-tree-item" onclick="openFilePreview('HistoryView.swift')">
+                <span style="color:#f97316;">🕊</span> <span>HistoryView.swift</span>
+              </div>
+              <div class="explorer-tree-item" onclick="openFilePreview('HomeView.swift')">
+                <span style="color:#f97316;">🕊</span> <span>HomeView.swift</span>
+              </div>
+              <div class="explorer-tree-item" onclick="openFilePreview('PermissionsView.swift')">
+                <span style="color:#f97316;">🕊</span> <span>PermissionsView.swift</span>
+              </div>
+              <div class="explorer-tree-item active" id="tree-node-active" onclick="openFilePreview('ProviderSettingsView.swift')">
+                <span style="color:#f97316;">🕊</span> <span>ProviderSettingsView.swift</span>
+              </div>
+            </div>
+            <div class="explorer-tree-item dir">
+              <span>›</span> <span>Glance.xcodeproj</span>
+            </div>
+            <div class="explorer-tree-item dir">
+              <span>›</span> <span>GlanceIcon.icon</span>
+            </div>
+            <div class="explorer-tree-item dir">
+              <span>›</span> <span>GlanceShare</span>
+            </div>
+            <div class="explorer-tree-item dir">
+              <span>▾</span> <span>Shared</span>
+            </div>
+            <div style="padding-left: 8px;">
+              <div class="explorer-tree-item" onclick="openFilePreview('AIProvider.swift')">
+                <span style="color:#f97316;">🕊</span> <span>AIProvider.swift</span>
+              </div>
+              <div class="explorer-tree-item" onclick="openFilePreview('GlanceStorage.swift')">
+                <span style="color:#f97316;">🕊</span> <span>GlanceStorage.swift</span>
+              </div>
+              <div class="explorer-tree-item" onclick="openFilePreview('Localizable.xcstrings')">
+                <span>📄</span> <span>Localizable.xcstrings</span>
+              </div>
+              <div class="explorer-tree-item" onclick="openFilePreview('OpenAICompatibleProvider.swift')">
+                <span style="color:#f97316;">🕊</span> <span>OpenAICompatibleProvider.swift</span>
+              </div>
+            </div>
+            <div class="explorer-tree-item">
+              <span>📄</span> <span>.DS_Store</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- macOS Toast Notification -->
+  <div class="mac-toast-notification" id="mac-toast">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#10b981;">
+      <polyline points="20 6 9 17 4 12"></polyline>
+    </svg>
+    <span id="mac-toast-text">通知消息</span>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

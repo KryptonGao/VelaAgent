@@ -1,0 +1,131 @@
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { isAbsolute, resolve } from "node:path";
+import {
+  createBashToolDefinition,
+  createEditToolDefinition,
+  createLocalBashOperations,
+  createWriteToolDefinition,
+  defineTool,
+  generateDiffString,
+  type BashOperations,
+  type EditOperations,
+  type ToolDefinition,
+  type WriteOperations,
+} from "@earendil-works/pi-coding-agent";
+import { isPathInside } from "./git-service";
+import type { SandboxPermissionManager } from "./sandbox-permission-manager";
+
+export interface SandboxToolFactoryInput {
+  /** Agent 会话 cwd(Pi 需要它来构造内置工具) */
+  cwd: string;
+  /** 工作区边界;null 时退化为会话 cwd */
+  workspace: string | null;
+  permission: SandboxPermissionManager;
+}
+
+/**
+ * 包装 Pi 内置 bash/edit/write 工具:名称与内置一致,经 customTools
+ * 注入后同名覆盖。bash 在 ask 模式下逐条审批;文件写入只在越过
+ * 工作区边界时审批,工作区内自由读写。
+ */
+export function createSandboxedToolDefinitions(input: SandboxToolFactoryInput): ToolDefinition[] {
+  const boundary = input.workspace ?? input.cwd;
+  const insideBoundary = (target: string): boolean => isPathInside(target, boundary);
+
+  const bashOperations: BashOperations = {
+    exec: async (command, cwd, options) => {
+      const allowed = await input.permission.request({ kind: "bash", command, cwd });
+      if (!allowed) throw new Error(`用户拒绝了命令执行:${command}`);
+      return createLocalBashOperations().exec(command, cwd, options);
+    },
+  };
+
+  const guardFileWrite = async (kind: "edit" | "write" | "mkdir", path: string): Promise<void> => {
+    if (insideBoundary(path)) return;
+    const allowed = await input.permission.request({ kind, path, cwd: null });
+    if (!allowed) throw new Error(`用户拒绝了工作区外的文件修改:${path}`);
+  };
+
+  const editOperations: EditOperations = {
+    readFile: (absolutePath) => readFile(absolutePath),
+    access: async (absolutePath) => {
+      await guardFileWrite("edit", absolutePath);
+    },
+    writeFile: async (absolutePath, content) => {
+      await guardFileWrite("edit", absolutePath);
+      await writeFile(absolutePath, content, "utf8");
+    },
+  };
+
+  const writeOperations: WriteOperations = {
+    writeFile: async (absolutePath, content) => {
+      await guardFileWrite("write", absolutePath);
+      await writeFile(absolutePath, content, "utf8");
+    },
+    mkdir: async (dir) => {
+      await guardFileWrite("mkdir", dir);
+      await mkdir(dir, { recursive: true });
+    },
+  };
+
+  // defineTool 保留参数推断,同时让具体类型满足 customTools 的宽接口。
+  return [
+    defineTool(createBashToolDefinition(input.cwd, { operations: bashOperations })),
+    defineTool(createEditToolDefinition(input.cwd, { operations: editOperations })),
+    withWriteDiff(input.cwd, defineTool(createWriteToolDefinition(input.cwd, { operations: writeOperations }))),
+  ];
+}
+
+const maxWriteDiffChars = 100_000;
+
+/**
+ * write 工具本身只回报「写成功了」。这里在写入前读旧内容，
+ * 成功后把展示用 diff 放进 details，界面才能画出增删。
+ */
+function withWriteDiff(cwd: string, tool: ToolDefinition): ToolDefinition {
+  return {
+    ...tool,
+    async execute(toolCallId, params, signal, onUpdate, ctx) {
+      const path = stringParam(params, "path");
+      const content = stringParam(params, "content") ?? "";
+      const previous = path ? await readPreviousFile(resolveToolPath(path, ctx.cwd || cwd)) : { text: "" };
+      const result = await tool.execute(toolCallId, params, signal, onUpdate, ctx);
+      let diff = "";
+      try {
+        diff = generateDiffString(normalizeNewlines(previous.text), normalizeNewlines(content)).diff;
+      } catch {
+        diff = "";
+      }
+      const clipped = diff.length > maxWriteDiffChars ? `${diff.slice(0, maxWriteDiffChars)}\n… 内容过长，已截断` : diff;
+      const details = previous.note ? { diff: clipped, note: previous.note } : { diff: clipped };
+      return { ...result, details };
+    },
+  };
+}
+
+async function readPreviousFile(absolute: string): Promise<{ text: string; note?: string }> {
+  try {
+    const info = await stat(absolute);
+    if (!info.isFile()) return { text: "" };
+    if (info.size > 1_000_000) return { text: "", note: "原文件较大，只展示本次写入的内容" };
+    return { text: await readFile(absolute, "utf8") };
+  } catch {
+    return { text: "" };
+  }
+}
+
+function resolveToolPath(filePath: string, cwd: string): string {
+  const expanded = filePath === "~" || filePath.startsWith("~/") ? `${homedir()}${filePath.slice(1)}` : filePath;
+  return isAbsolute(expanded) ? expanded : resolve(cwd, expanded);
+}
+
+function normalizeNewlines(text: string): string {
+  return text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+function stringParam(params: unknown, key: string): string | undefined {
+  if (!params || typeof params !== "object") return undefined;
+  const value = (params as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : undefined;
+}

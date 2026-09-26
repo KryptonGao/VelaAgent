@@ -1,0 +1,21 @@
+{
+  "name": "@vela/agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "^0.87.1",
+    "@earendil-works/pi-ai": "^0.87.1",
+    "@earendil-works/pi-coding-agent": "^0.87.1",
+    "@vela/shared": "workspace:*",
+    "@vela/tools": "workspace:*",
+    "typebox": "1.3.27"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import ./test/register-ts.mjs --experimental-strip-types --test test/skill-migration.test.ts test/question-manager.test.ts test/subagent.test.ts test/plan.test.ts"
+  }
+}
