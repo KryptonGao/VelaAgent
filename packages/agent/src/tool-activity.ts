@@ -225,6 +225,16 @@ function modeToolSummary(toolName: string, args: unknown): string | null {
     return [question, ...readOptionLabels(args, "options").map((label) => `· ${label}`)].join("\n");
   }
   if (toolName === "submit_plan") return planSummary(args);
+  if (toolName === "record_goal_validation") {
+    const risk = readString(args, "risk");
+    const counts = (key: string) => {
+      if (!args || typeof args !== "object") return 0;
+      const value = (args as Record<string, unknown>)[key];
+      return Array.isArray(value) ? value.length : 0;
+    };
+    const riskLabel = risk === "high" ? "高风险" : risk === "medium" ? "中风险" : "低风险";
+    return `${riskLabel} · 检查 ${counts("checks")} 项 · 跳过 ${counts("skipped")} 项 · 已知问题 ${counts("knownIssues")} 项`;
+  }
   if (toolName === "update_goal") {
     const status = readString(args, "status");
     const label = status === "complete" ? "完成" : status === "active" ? "进行中" : status;

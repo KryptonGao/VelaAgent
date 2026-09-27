@@ -534,6 +534,7 @@ function KindIcon({ kind }: { kind: ToolKind }): ReactNode {
 
 function toolLabel(name: string, kind: ToolKind): string {
   if (name === "submit_plan") return "计划";
+  if (name === "record_goal_validation") return "验证";
   if (name === "update_goal") return "目标";
   if (name === "complete_step") return "步骤";
   return kindLabels[kind];
@@ -551,7 +552,12 @@ function subjectOf(kind: ToolKind, activity: ToolActivity, name: string): { name
   }
   const path = activity.path?.trim();
   if (!path) {
-    if (name === "submit_plan" || name === "update_goal" || name === "complete_step") {
+    if (
+      name === "submit_plan" ||
+      name === "record_goal_validation" ||
+      name === "update_goal" ||
+      name === "complete_step"
+    ) {
       const line = activity.body?.split("\n").find((item) => item.trim())?.trim();
       return { name: line || name, dir: "" };
     }

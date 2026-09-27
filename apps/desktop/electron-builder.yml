@@ -5,6 +5,11 @@ directories:
   output: dist
 files:
   - out/**
+  # Preserve pnpm's nested dependency layout to prevent fallback to incompatible root-hoisted versions.
+  - from: ../../node_modules
+    to: node_modules
+    filter:
+      - "**/node_modules/**"
   # @vela/* 是工作区源码包,已由 electron-vite 打进 out,不需要进 asar
   - "!node_modules/@vela/**"
 npmRebuild: false

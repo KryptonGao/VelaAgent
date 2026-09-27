@@ -1,4 +1,5 @@
-import type { ConversationGoal, ConversationPlan, GoalStatus, InteractionMode, PlanStep } from "@vela/shared";
+import type { ConversationGoal, ConversationPlan, InteractionMode, PlanStep } from "@vela/shared";
+import { normalizeStoredGoal } from "./goal-validation";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -130,7 +131,7 @@ function normalize(entry: unknown): StoredConversation | null {
     instructions: typeof record.instructions === "string" ? record.instructions : "",
     mode: normalizeMode(record.mode),
     plan: normalizePlan(record.plan),
-    goal: normalizeGoal(record.goal),
+    goal: normalizeStoredGoal(record.goal),
     archivedAt: numberOr(record.archivedAt, 0) > 0 ? (record.archivedAt as number) : null,
   };
 }
@@ -159,38 +160,6 @@ function normalizePlan(value: unknown): ConversationPlan | null {
     steps,
     updatedAt: numberOr(record.updatedAt, Date.now()),
   };
-}
-
-function normalizeGoal(value: unknown): ConversationGoal | null {
-  if (!value || typeof value !== "object") return null;
-  const record = value as Record<string, unknown>;
-  if (typeof record.id !== "string" || !record.id || typeof record.objective !== "string" || !record.objective.trim()) {
-    return null;
-  }
-  const status = normalizeGoalStatus(record.status);
-  if (!status) return null;
-  const note = typeof record.note === "string" && record.note.trim() ? record.note : null;
-  // 重启时没有正在跑的循环，进行中的目标改为暂停，避免自己接着跑。
-  if (status === "active") {
-    return {
-      id: record.id,
-      objective: record.objective,
-      status: "paused",
-      note: note ?? "应用重启后已暂停，可以继续",
-      updatedAt: numberOr(record.updatedAt, Date.now()),
-    };
-  }
-  return {
-    id: record.id,
-    objective: record.objective,
-    status,
-    note,
-    updatedAt: numberOr(record.updatedAt, Date.now()),
-  };
-}
-
-function normalizeGoalStatus(value: unknown): GoalStatus | null {
-  return value === "active" || value === "paused" || value === "complete" ? value : null;
 }
 
 function numberOr(value: unknown, fallback: number): number {

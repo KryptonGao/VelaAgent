@@ -2632,6 +2632,56 @@ button.environment-row:not(:disabled):hover { background: var(--bg-surface-subtl
 .mode-status.mode-active { background: var(--violet-tint); color: var(--violet); }
 .mode-status.mode-paused { background: var(--warning-tint); color: var(--warning); }
 .mode-status.mode-complete { background: var(--success-tint); color: var(--success); }
+.goal-validation {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  max-height: 360px;
+  overflow-y: auto;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 8px;
+}
+.goal-validation-heading,
+.goal-validation-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.goal-validation-status { color: var(--success); }
+.goal-validation-status.is-known_issues,
+.goal-validation-status.is-pending { color: var(--warning); }
+.goal-validation-status.is-skipped { color: var(--text-muted); }
+.goal-validation-note,
+.goal-validation-item > p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.goal-validation-note.is-stale { color: var(--warning); }
+.goal-validation-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-left: 2px solid var(--success);
+  padding-left: 7px;
+  min-width: 0;
+}
+.goal-validation-item.is-failed,
+.goal-validation-item.is-skipped { border-color: var(--warning); }
+.goal-validation-item.is-stale { opacity: 0.72; border-color: var(--warning); }
+.goal-validation-row { font-size: 10.5px; color: var(--text-secondary); }
+.goal-validation-item code {
+  color: var(--text-primary);
+  font: 10.5px/1.4 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 
 /* ---------- 附件 ---------- */
 .attach-btn {

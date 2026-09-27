@@ -18,6 +18,7 @@ import {
   type ConversationSummary,
   type CustomModelInput,
   type GoalStatus,
+  type GoalValidation,
   type ImageAttachment,
   type InteractionMode,
   type ModelAuthEvent,
@@ -42,6 +43,12 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { emptyContextSegments, measureSessionContext } from "./context-usage";
 import { ConversationStore } from "./conversation-store";
+import {
+  createGoalValidation,
+  goalCompletionBlocker,
+  type GoalValidationDraft,
+  type GoalValidationEvidence,
+} from "./goal-validation";
 import { ModelDirectory } from "./model-directory";
 import {
   acceptPlanDraft,
@@ -112,6 +119,9 @@ interface Conversation {
   driving: boolean;
   /** 用户在计划确认提问里选了「执行计划」,本轮回复结束后自动开始执行。 */
   planExecutionQueued: boolean;
+  /** 当前 Goal 中已结束的 bash 工具结果，可供验证记录引用。 */
+  goalValidationEvidence: Map<string, GoalValidationEvidence>;
+  goalValidationSequence: number;
   /** 非空表示已归档:侧边栏隐藏、工作区恢复跳过,可在设置里搜索后取消归档。 */
   archivedAt: number | null;
 }
@@ -131,6 +141,8 @@ export class AgentRuntime {
   private readonly questionListeners = new Set<(event: AskUserQuestionEvent) => void>();
   /** toolCallId -> 已校验参数。结果事件本身不带参数，用来还原命令和路径。 */
   private readonly toolArgs = new Map<string, unknown>();
+  /** toolCallId -> Goal id 与执行时工作区修订号。 */
+  private readonly toolGoalContexts = new Map<string, { goalId: string; workRevision: number }>();
   private readonly questions = new QuestionManager();
   /** 同一对话的 task 排队执行，避免一轮里多个子会话同时改工作区。 */
   private readonly subagentTail = new Map<string, Promise<void>>();
@@ -161,7 +173,7 @@ export class AgentRuntime {
       tools: [...snapshot.tools],
       thinkingLevels: [...snapshot.thinkingLevels],
       plan: clonePlan(snapshot.plan),
-      goal: snapshot.goal ? { ...snapshot.goal } : null,
+      goal: cloneGoal(snapshot.goal),
     };
   }
 
@@ -522,6 +534,7 @@ export class AgentRuntime {
     for (const entry of this.conversations.values()) this.detachEntry(entry);
     this.conversations.clear();
     this.toolArgs.clear();
+    this.toolGoalContexts.clear();
     this.subagentTail.clear();
     this.activeId = null;
     this.store.flushSync();
@@ -553,6 +566,8 @@ export class AgentRuntime {
         stopRequested: false,
         driving: false,
         planExecutionQueued: false,
+        goalValidationEvidence: new Map(),
+        goalValidationSequence: Math.max(0, ...(stored.goal?.validation?.checks.map((check) => check.sequence) ?? [0])),
         archivedAt: stored.archivedAt,
       });
     }
@@ -598,6 +613,8 @@ export class AgentRuntime {
       stopRequested: false,
       driving: false,
       planExecutionQueued: false,
+      goalValidationEvidence: new Map(),
+      goalValidationSequence: 0,
       archivedAt: null,
     };
     this.conversations.set(entry.id, entry);
@@ -653,6 +670,7 @@ export class AgentRuntime {
             submitPlan: (draft) => this.submitPlan(entry, draft),
             completeStep: (id) => this.completeStep(entry, id),
             updateGoal: (status, note) => this.updateGoal(entry, status, note),
+            recordGoalValidation: (draft) => this.recordGoalValidation(entry, draft),
             askUser: (input) => this.askUser(entry, input),
           }),
           createSubagentTool({
@@ -742,6 +760,21 @@ export class AgentRuntime {
     }
 
     if (event.type === "tool_execution_start") {
+      const entry = this.conversations.get(conversationId);
+      const goalBeforeTool = entry?.snapshot.goal;
+      const hasFreshValidation = Boolean(
+        goalBeforeTool && goalBeforeTool.validation?.workRevision === goalBeforeTool.workRevision,
+      );
+      if (
+        entry && goalBeforeTool && goalBeforeTool.status !== "complete" && isPotentialGoalMutation(event.toolName, event.args) &&
+        (event.toolName !== "bash" || hasFreshValidation)
+      ) {
+        this.advanceGoalWorkRevision(entry);
+      }
+      const goal = entry?.snapshot.goal;
+      if (entry?.snapshot.mode === "goal" && goal?.status === "active") {
+        this.toolGoalContexts.set(event.toolCallId, { goalId: goal.id, workRevision: goal.workRevision });
+      }
       this.toolArgs.set(event.toolCallId, event.args);
       this.emit({
         type: "tool_start",
@@ -763,13 +796,33 @@ export class AgentRuntime {
     if (event.type === "tool_execution_end") {
       const args = this.toolArgs.get(event.toolCallId);
       this.toolArgs.delete(event.toolCallId);
+      const goalContext = this.toolGoalContexts.get(event.toolCallId);
+      this.toolGoalContexts.delete(event.toolCallId);
+      const activity = activityFromExecution(event.toolName, args, event.result, event.isError);
+      const entry = this.conversations.get(conversationId);
+      const goal = entry?.snapshot.goal;
+      if (entry && goalContext && event.toolName === "bash" && goal?.id === goalContext.goalId) {
+        const command = activity.command?.trim();
+        if (command) {
+          entry.goalValidationSequence += 1;
+          entry.goalValidationEvidence.set(event.toolCallId, {
+            toolCallId: event.toolCallId,
+            command: command.slice(0, 1000),
+            result: event.isError ? "failed" : "passed",
+            output: (activity.body ?? "").slice(0, 1200),
+            completedAt: Date.now(),
+            sequence: entry.goalValidationSequence,
+            workRevision: goalContext.workRevision,
+          });
+        }
+      }
       this.emit({
         type: "tool_end",
         conversationId,
         toolCallId: event.toolCallId,
         toolName: event.toolName,
         isError: event.isError,
-        activity: activityFromExecution(event.toolName, args, event.result, event.isError),
+        activity,
       });
     }
   }
@@ -1065,12 +1118,16 @@ export class AgentRuntime {
   private beginGoal(entry: Conversation, text: string): void {
     const current = entry.snapshot.goal;
     if (!current || current.status === "complete") {
+      entry.goalValidationEvidence.clear();
+      entry.goalValidationSequence = 0;
       this.patchEntry(entry, {
         goal: {
           id: randomUUID(),
           objective: clipObjective(text),
           status: "active",
           note: null,
+          workRevision: 0,
+          validation: null,
           updatedAt: Date.now(),
         },
       });
@@ -1092,6 +1149,14 @@ export class AgentRuntime {
         note: note ?? goal.note,
         updatedAt: Date.now(),
       },
+    });
+  }
+
+  private advanceGoalWorkRevision(entry: Conversation): void {
+    const goal = entry.snapshot.goal;
+    if (!goal || goal.status === "complete") return;
+    this.patchEntry(entry, {
+      goal: { ...goal, workRevision: goal.workRevision + 1, updatedAt: Date.now() },
     });
   }
 
@@ -1178,10 +1243,40 @@ export class AgentRuntime {
     const goal = entry.snapshot.goal;
     if (!goal) return { ok: false, text: "当前没有目标。" };
     if (goal.status === "paused") return { ok: false, text: "目标已暂停，等用户继续后再更新。" };
+    if (status === "complete") {
+      const blocker = goalCompletionBlocker(goal);
+      if (blocker) return { ok: false, text: blocker };
+    }
     const nextNote = note ? clipField(note, 400) : goal.note;
     const next: ConversationGoal = { ...goal, status, note: nextNote || null, updatedAt: Date.now() };
     this.patchEntry(entry, { goal: next });
-    return { ok: true, text: status === "complete" ? "目标已完成。" : `目标仍在进行。${next.note ?? ""}`.trim() };
+    if (status === "complete" && next.validation?.status === "known_issues") {
+      return { ok: true, text: "目标已完成，验证记录中包含已知问题。请在最终回复中列出失败检查和依据。" };
+    }
+    return { ok: true, text: status === "complete" ? "目标已完成，交付验证已记录。" : `目标仍在进行。${next.note ?? ""}`.trim() };
+  }
+
+  private recordGoalValidation(entry: Conversation, draft: GoalValidationDraft): ToolOutcome {
+    const goal = entry.snapshot.goal;
+    if (!goal) return { ok: false, text: "当前没有目标。" };
+    if (goal.status !== "active") return { ok: false, text: "目标未处于进行中，不能更新验证记录。" };
+    const result = createGoalValidation(goal, draft, entry.goalValidationEvidence.values());
+    if (!result.ok) return { ok: false, text: result.text };
+    this.patchEntry(entry, {
+      goal: { ...goal, validation: result.validation, updatedAt: Date.now() },
+    });
+    const checks = result.validation.checks.length;
+    const skipped = result.validation.skipped.length;
+    const failures = result.validation.knownIssues.length;
+    const status = result.validation.status === "known_issues"
+      ? "已记录，含已知失败"
+      : result.validation.status === "skipped"
+        ? "已记录，检查均已说明跳过原因"
+        : "已记录，未发现未说明的失败";
+    return {
+      ok: true,
+      text: `${status}。命令 ${checks} 项，跳过 ${skipped} 项，已知失败 ${failures} 项。完成前若再运行可能修改工作区的工具，需要重新记录验证。`,
+    };
   }
 }
 
@@ -1225,6 +1320,26 @@ function clipField(text: string, max: number): string {
 function clonePlan(plan: ConversationPlan | null): ConversationPlan | null {
   if (!plan) return null;
   return { ...plan, steps: plan.steps.map((step) => ({ ...step })) };
+}
+
+function cloneGoal(goal: ConversationGoal | null): ConversationGoal | null {
+  if (!goal) return null;
+  const validation: GoalValidation | null = goal.validation
+    ? {
+        ...goal.validation,
+        checks: goal.validation.checks.map((check) => ({ ...check })),
+        skipped: goal.validation.skipped.map((item) => ({ ...item })),
+        knownIssues: goal.validation.knownIssues.map((item) => ({ ...item })),
+      }
+    : null;
+  return { ...goal, validation };
+}
+
+function isPotentialGoalMutation(toolName: string, args: unknown): boolean {
+  if (toolName === "bash" || toolName === "edit" || toolName === "write") return true;
+  if (toolName !== subagentToolName) return false;
+  if (!args || typeof args !== "object") return true;
+  return (args as { agent?: unknown }).agent !== "explore";
 }
 
 function readSessionError(session: AgentSession): string | null {

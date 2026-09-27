@@ -5,17 +5,22 @@ import {
   type ExtensionFactory,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import type { ConversationPlan, GoalStatus, InteractionMode } from "@vela/shared";
+import {
+  type ConversationPlan,
+  type GoalStatus,
+  type InteractionMode,
+} from "@vela/shared";
 import { Type } from "typebox";
 import { isPlanSafeCommand } from "./plan-command";
 import { subagentToolName } from "./subagent";
+import type { GoalValidationDraft } from "./goal-validation";
 
 export const goalContinuePrompt =
-  "继续执行当前目标。若已经完成，调用 update_goal 将状态设为 complete。若还没完成，直接做下一步，不要重复已经做过的事。";
+  "继续执行当前目标。若已经完成，先调用 record_goal_validation 记录检查，再调用 update_goal 将状态设为 complete。若还没完成，直接做下一步，不要重复已经做过的事。";
 
 export const goalTurnLimit = 20;
 
-export const goalTurnLimitNote = "已达到本轮自动执行上限，可以继续";
+export const goalTurnLimitNote = "已达到本轮自动执行上限，可以继续；完成前仍需提交交付验证。";
 
 const planPrompt = `你正处于 Plan 模式，只能查阅代码，不能修改文件或执行会改动系统的命令。
 
@@ -29,6 +34,10 @@ const planPrompt = `你正处于 Plan 模式，只能查阅代码，不能修改
 const goalPrompt = `你正处于 Goal 模式。目标已经记录在对话里，你要持续做到完成。
 
 可以读取、编辑和运行命令。每推进一段就调用 update_goal：还在做就保持 active，并写一句进展；真正做完再设为 complete。
+完成前必须先调用 record_goal_validation。按风险级别检查 diff、定向测试、构建、类型检查和回归；未运行的类别要说明原因。只引用本目标中实际完成的 bash 工具调用 id，不能编造命令结果。
+检查命令之后如果还运行了其他 bash 命令，也要归类为「other」记录，或在它之后重跑检查；运行时会把未记录的后续命令视为可能修改工作区。
+中高风险改动必须检查 diff 并运行定向测试；高风险改动还必须运行更广范围的回归。失败后修复并重跑，或记录失败调用及其确实与本次改动无关的依据。验证后如果又运行 bash、edit、write 或 general task，必须重新验证。
+最终回复列出跑过的检查及结果、跳过的检查及原因，以及带已知问题完成时仍失败的项目。
 不要把目标标成 complete，除非要求的结果已经达成。你不能暂停目标，暂停由用户决定。
 如果这一轮还没完成，做下一步能做的事，不要停下来等用户说继续。`;
 
@@ -46,7 +55,7 @@ const workTools = ["read", "bash", "edit", "write", subagentToolName];
 
 export function toolNamesFor(mode: InteractionMode, hasPlan: boolean): string[] {
   if (mode === "plan") return ["read", "bash", "submit_plan", "ask_user_question"];
-  if (mode === "goal") return [...workTools, "update_goal"];
+  if (mode === "goal") return [...workTools, "record_goal_validation", "update_goal"];
   return hasPlan ? [...workTools, "complete_step", "ask_user_question"] : [...workTools, "ask_user_question"];
 }
 
@@ -163,7 +172,7 @@ export type ToolOutcome = { ok: true; text: string } | { ok: false; text: string
  * Pi 的 createAgentSession 把 tools 参数当作注册表白名单(内置与自定义都过滤),
  * 这些名字必须并入 tools,否则工具进不了注册表,setActiveToolsByName 会静默忽略。
  */
-export const modeToolNames = ["submit_plan", "complete_step", "update_goal", "ask_user_question"];
+export const modeToolNames = ["submit_plan", "complete_step", "update_goal", "record_goal_validation", "ask_user_question"];
 
 export interface AskUserInput {
   toolCallId: string;
@@ -188,6 +197,7 @@ export interface ModeToolHost {
   submitPlan(draft: PlanDraft): ToolOutcome;
   completeStep(id: string): ToolOutcome;
   updateGoal(status: Extract<GoalStatus, "active" | "complete">, note: string | null): ToolOutcome;
+  recordGoalValidation(draft: GoalValidationDraft): ToolOutcome;
   askUser(input: AskUserInput): Promise<AskUserOutcome>;
 }
 
@@ -233,11 +243,54 @@ export function createModeTools(host: ModeToolHost): ToolDefinition[] {
     label: "更新目标",
     description: "更新当前目标。还在做就保持 active，并写一句进展；真正做完再设为 complete。不能用来暂停。",
     promptSnippet: "更新目标状态为 active 或 complete",
+    executionMode: "sequential",
     parameters: Type.Object({
       status: Type.Union([Type.Literal("active"), Type.Literal("complete")]),
       note: Type.Optional(Type.String({ description: "一句进展说明" })),
     }),
     execute: async (_toolCallId, params) => outcome(host.updateGoal(params.status, params.note ?? null)),
+  });
+
+  const category = Type.Union([
+    Type.Literal("diff"),
+    Type.Literal("test"),
+    Type.Literal("build"),
+    Type.Literal("typecheck"),
+    Type.Literal("regression"),
+    Type.Literal("other"),
+  ]);
+  const recordGoalValidation = defineTool({
+    name: "record_goal_validation",
+    label: "记录验证",
+    description:
+      "提交当前 Goal 的交付验证。检查结果必须引用本目标中已完成的 bash 工具调用 id；运行时从实际结果读取命令、状态和输出。检查之后其他 bash 命令也需归类为 other 或在其后重跑检查。每类未运行的检查都要写原因。",
+    promptSnippet: "记录 Goal 的检查命令、实际结果和跳过原因",
+    executionMode: "sequential",
+    parameters: Type.Object({
+      risk: Type.Union([Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")]),
+      checks: Type.Array(
+        Type.Object({
+          category,
+          toolCallId: Type.String({ description: "已完成的 bash 工具调用 id" }),
+        }),
+        { description: "实际运行的检查及其工具调用 id" },
+      ),
+      skipped: Type.Array(
+        Type.Object({
+          category,
+          reason: Type.String({ description: "未运行原因；中高风险 diff/test、高风险 regression 不可跳过" }),
+        }),
+        { description: "明确记录未运行的检查类别与原因" },
+      ),
+      knownIssues: Type.Array(
+        Type.Object({
+          toolCallId: Type.String({ description: "失败的 bash 工具调用 id" }),
+          reason: Type.String({ description: "说明失败与本次改动无关的证据" }),
+        }),
+        { description: "允许带问题完成的失败检查；只填最新且仍失败的检查" },
+      ),
+    }),
+    execute: async (_toolCallId, params) => outcome(host.recordGoalValidation(params as GoalValidationDraft)),
   });
 
   const askUserQuestion = defineTool({
@@ -279,7 +332,7 @@ export function createModeTools(host: ModeToolHost): ToolDefinition[] {
     },
   });
 
-  return [submitPlan, completeStep, updateGoal, askUserQuestion];
+  return [submitPlan, completeStep, updateGoal, recordGoalValidation, askUserQuestion];
 }
 
 function outcome(result: ToolOutcome): AgentToolResult<undefined> {

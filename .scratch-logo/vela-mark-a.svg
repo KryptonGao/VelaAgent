@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="gA-v" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4F8CFF"/>
+      <stop offset="1" stop-color="#1D4ED8"/>
+    </linearGradient>
+    <linearGradient id="gA-star" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7DD3FC"/>
+      <stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#gA-v)" d="M92 96
+    C128 226 186 356 256 444
+    C326 356 384 226 420 96
+    L316 96
+    C302 186 282 262 256 322
+    C230 262 210 186 196 96
+    Z"/>
+  <path fill="url(#gA-star)" d="M256 96 Q264 134 304 142 Q264 150 256 188 Q248 150 208 142 Q248 134 256 96 Z"/>
+</svg>

@@ -6,6 +6,7 @@ import {
   type ContextUsage,
   type ConversationGoal,
   type ConversationPlan,
+  type GoalValidationCategory,
   type GoalStatus,
 } from "@vela/shared";
 import type { ProjectApi } from "../hooks/useProject";
@@ -150,6 +151,27 @@ const goalStatusLabel: Record<GoalStatus, string> = {
   complete: "已完成",
 };
 
+const validationCategoryLabel: Record<GoalValidationCategory, string> = {
+  diff: "Diff 检查",
+  test: "定向测试",
+  build: "构建",
+  typecheck: "类型检查",
+  regression: "回归检查",
+  other: "其他检查",
+};
+
+const validationStatusLabel = {
+  passed: "已通过",
+  known_issues: "带已知问题",
+  skipped: "已说明跳过",
+} as const;
+
+const validationRiskLabel = {
+  low: "低风险",
+  medium: "中风险",
+  high: "高风险",
+} as const;
+
 function PlanCard({
   plan,
   busy,
@@ -210,6 +232,44 @@ function GoalCard({
       </div>
       <p className="mode-card-copy">{goal.objective}</p>
       {goal.note ? <p className="mode-card-note">{goal.note}</p> : null}
+      <div className="goal-validation">
+        <div className="goal-validation-heading">
+          <span>交付验证</span>
+          <span className={`goal-validation-status${goal.validation ? ` is-${goal.validation.status}` : " is-pending"}`}>
+            {goal.validation
+              ? `${validationRiskLabel[goal.validation.risk]} · ${validationStatusLabel[goal.validation.status]}`
+              : "待验证"}
+          </span>
+        </div>
+        {!goal.validation ? <p className="goal-validation-note">完成目标前需要记录检查结果和跳过原因。</p> : null}
+        {goal.validation && goal.validation.workRevision !== goal.workRevision ? (
+          <p className="goal-validation-note is-stale">验证后工作区又有变化，请重新检查。</p>
+        ) : null}
+        {goal.validation?.checks.map((check) => {
+          const issue = goal.validation?.knownIssues.find((item) => item.toolCallId === check.toolCallId);
+          const oldCheck = check.workRevision !== goal.workRevision;
+          return (
+            <div className={`goal-validation-item is-${check.result}${oldCheck ? " is-stale" : ""}`} key={check.toolCallId}>
+              <div className="goal-validation-row">
+                <span>{validationCategoryLabel[check.category]}</span>
+                <span>{oldCheck ? "旧结果" : check.result === "passed" ? "通过" : issue ? "已知失败" : "失败"}</span>
+              </div>
+              <code>{check.command}</code>
+              {check.output ? <p>{check.output}</p> : null}
+              {issue ? <p className="goal-validation-note">依据：{issue.reason}</p> : null}
+            </div>
+          );
+        })}
+        {goal.validation?.skipped.map((item, index) => (
+          <div className="goal-validation-item is-skipped" key={`${item.category}-${index}`}>
+            <div className="goal-validation-row">
+              <span>{validationCategoryLabel[item.category]}</span>
+              <span>未运行</span>
+            </div>
+            <p>{item.reason}</p>
+          </div>
+        ))}
+      </div>
       {goal.status === "paused" ? (
         <button className="mode-card-action" type="button" disabled={busy} onClick={onResume}>
           继续

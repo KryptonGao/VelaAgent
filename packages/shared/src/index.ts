@@ -305,12 +305,54 @@ export const goalStatuses = ["active", "paused", "complete"] as const;
 
 export type GoalStatus = (typeof goalStatuses)[number];
 
+export const goalValidationCategories = ["diff", "test", "build", "typecheck", "regression", "other"] as const;
+
+export type GoalValidationCategory = (typeof goalValidationCategories)[number];
+
+export type GoalValidationRisk = "low" | "medium" | "high";
+
+export interface GoalValidationCheck {
+  toolCallId: string;
+  category: GoalValidationCategory;
+  command: string;
+  result: "passed" | "failed";
+  output: string;
+  completedAt: number;
+  /** Goal 内 bash 调用的递增序号，用于判断检查后是否还有未记录的命令。 */
+  sequence: number;
+  /** 该命令执行时的工作区修订序号。 */
+  workRevision: number;
+}
+
+export interface GoalValidationSkipped {
+  category: GoalValidationCategory;
+  reason: string;
+}
+
+export interface GoalValidationKnownIssue {
+  toolCallId: string;
+  reason: string;
+}
+
+export interface GoalValidation {
+  risk: GoalValidationRisk;
+  status: "passed" | "known_issues" | "skipped";
+  workRevision: number;
+  checkedAt: number;
+  checks: GoalValidationCheck[];
+  skipped: GoalValidationSkipped[];
+  knownIssues: GoalValidationKnownIssue[];
+}
+
 export interface ConversationGoal {
   id: string;
   objective: string;
   status: GoalStatus;
   /** 进展，或暂停原因。没有时为空。 */
   note: string | null;
+  /** 检测到潜在工作区修改时递增，用来识别验证是否已过期。 */
+  workRevision: number;
+  validation: GoalValidation | null;
   updatedAt: number;
 }
 

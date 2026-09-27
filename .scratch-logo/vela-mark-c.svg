@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="gC-main" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4F8CFF"/>
+      <stop offset="1" stop-color="#1D4ED8"/>
+    </linearGradient>
+    <linearGradient id="gC-jib" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7DD3FC"/>
+      <stop offset="1" stop-color="#38BDF8"/>
+    </linearGradient>
+    <linearGradient id="gC-star" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7DD3FC"/>
+      <stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+  </defs>
+  <!-- mainsail -->
+  <path fill="url(#gC-main)" d="M292 96 C208 132 152 250 138 380 L292 380 Z"/>
+  <!-- jib -->
+  <path fill="url(#gC-jib)" d="M312 152 C372 200 402 284 410 380 L312 380 Z"/>
+  <!-- hull: fill + round-join stroke fakes rounded corners -->
+  <path fill="#1D4ED8" stroke="#1D4ED8" stroke-width="16" stroke-linejoin="round"
+        d="M126 408 L386 408 L358 448 L154 448 Z"/>
+  <!-- star -->
+  <path fill="url(#gC-star)" d="M302 24 Q307 44 328 50 Q307 56 302 76 Q297 56 276 50 Q297 44 302 24 Z"/>
+</svg>

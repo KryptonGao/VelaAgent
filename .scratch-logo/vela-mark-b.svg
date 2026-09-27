@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="gB-star" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7DD3FC"/>
+      <stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+    <linearGradient id="gB-node" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4F8CFF"/>
+      <stop offset="1" stop-color="#1D4ED8"/>
+    </linearGradient>
+  </defs>
+  <!-- faint background specks -->
+  <g fill="#93C5FD" opacity="0.55">
+    <circle cx="150" cy="78" r="4"/>
+    <circle cx="428" cy="230" r="3.5"/>
+    <circle cx="84" cy="290" r="3.5"/>
+  </g>
+  <!-- constellation lines: V -->
+  <path fill="none" stroke="#4F8CFF" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"
+        d="M118 128 L190 306 L256 428 L322 306 L394 128"/>
+  <!-- nodes -->
+  <circle cx="118" cy="128" r="14" fill="url(#gB-node)"/>
+  <circle cx="190" cy="306" r="10" fill="url(#gB-node)"/>
+  <circle cx="256" cy="428" r="15" fill="url(#gB-node)"/>
+  <circle cx="322" cy="306" r="10" fill="url(#gB-node)"/>
+  <!-- agent star -->
+  <path fill="url(#gB-star)" d="M394 82 Q402 120 440 128 Q402 136 394 174 Q386 136 348 128 Q386 120 394 82 Z"/>
+</svg>
