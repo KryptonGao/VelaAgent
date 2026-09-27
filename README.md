@@ -2,13 +2,13 @@
 
 **在你选定的代码仓库中工作的桌面 AI 编程助手。**
 
-让 Agent 理解项目、整理计划、修改和运行代码；你可以在同一窗口查看执行记录、Git 改动与权限请求。
+让 Agent 理解项目、制定计划、修改并运行代码；执行过程、文件变化和权限请求都能在同一窗口查看。
 
 <p align="center">
-  <img src="./assets/readme/vela-desktop.png" width="100%" alt="Vela 桌面界面：左侧会话列表，中间 Agent 对话区，右侧工作区 Git、Pull Request 与上下文面板。" />
+  <a href="./assets/readme/vela-desktop.png"><img src="./assets/readme/vela-desktop.png" width="100%" alt="Vela 工作界面：Agent 对话与工具调用位于中间会话区，HTML 文件在右侧编辑器中打开。" /></a>
 </p>
 
-[快速开始](#快速开始) · [工作方式](#工作方式) · [权限与本地数据](#权限与本地数据) · [开发指南](#开发指南)
+[产品实景](#产品实景) · [快速开始](#快速开始) · [权限与本地数据](#权限与本地数据) · [开发指南](#开发指南)
 
 ## 工作方式
 
@@ -16,6 +16,32 @@
 - **在真实工作区中操作：** 打开本机项目目录，或使用独立的 Git worktree。工作区决定 Agent 的文件范围、Shell 目录和 Git 上下文。
 - **随时检查改动：** 查看工具调用和结果、Git 差异与暂存状态，并查看或创建当前分支的 Pull Request。
 - **保留工作上下文：** 会话会在应用重启后恢复；模型、思考强度、上下文用量和 Skill 活动都能在界面中查看。
+
+## 产品实景
+
+### 任务执行与审阅
+
+从任务说明到交付结果，查看 Agent 的答复、文件改动摘要、工具调用和上下文用量。
+
+<p align="center">
+  <a href="./assets/readme/vela-task-review.png"><img src="./assets/readme/vela-task-review.png" width="100%" alt="Vela 任务完成界面：展示用户需求、Agent 的交付说明、文件改动摘要，以及右侧工具调用和上下文用量。" /></a>
+</p>
+
+### 模型与账号
+
+在设置中管理模型提供方，并按提供方支持的方式登录或填写 API 密钥。
+
+<p align="center">
+  <a href="./assets/readme/vela-model-providers.png"><img src="./assets/readme/vela-model-providers.png" width="100%" alt="Vela 模型与账号设置：可搜索提供方，并查看登录状态、OAuth 登录或填写 API 密钥等选项。" /></a>
+</p>
+
+### 外观与语言
+
+在浅色和深色外观中选择配色主题，并在简体中文与 English 界面之间切换。
+
+<p align="center">
+  <a href="./assets/readme/vela-themes.png"><img src="./assets/readme/vela-themes.png" width="100%" alt="Vela 外观设置：展示三种浅色主题、三种深色主题、系统外观选项和中英文语言切换。" /></a>
+</p>
 
 ## 快速开始
 
