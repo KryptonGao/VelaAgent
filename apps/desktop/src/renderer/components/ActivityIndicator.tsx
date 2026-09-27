@@ -19,10 +19,11 @@ export function ActivityIndicator({ label = tr("运行中", "Running") }: { labe
     let lastFrame: number | null = null;
     let frame = 0;
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const phase = () => reducedMotion.matches ? 0.5 : (elapsed % motion.duration) / motion.duration;
+    const animationDuration = motion.duration * 2;
+    const phase = () => reducedMotion.matches ? 0.5 : (elapsed % animationDuration) / animationDuration;
 
     const draw = (progress: number) => {
-      const width = canvas.getBoundingClientRect().width || 24;
+      const width = canvas.getBoundingClientRect().width || 16;
       const dpr = window.devicePixelRatio || 1;
       const pixelWidth = Math.max(1, Math.round(width * dpr));
       const pixelHeight = Math.max(1, Math.round(width * scene.height / scene.width * dpr));
@@ -71,7 +72,7 @@ export function ActivityIndicator({ label = tr("运行中", "Running") }: { labe
         const start = item.samples[index] ?? [0, 0, 0];
         const end = item.samples[index + 1] ?? start;
         const value = start.map((sample, sampleIndex) => sample + ((end[sampleIndex] ?? sample) - sample) * mix);
-        drawCell(item, scene.cellSize, (value[2] ?? 0) * 0.18, false);
+        drawCell(item, scene.cellSize, (value[2] ?? 0) * 0.12, false);
         if (item.active) drawCell(item, scene.cellSize * (value[1] ?? 0), value[0] ?? 0, true);
       }
       context.restore();

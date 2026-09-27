@@ -1376,11 +1376,11 @@ textarea {
 .tool-status-mark.error { color: var(--danger); }
 .tool-activity-loader {
   display: block;
-  width: 24px;
-  height: 24px;
-  flex: 0 0 24px;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
   margin-left: auto;
-  color: var(--accent-blue);
+  color: color-mix(in srgb, var(--accent-blue) 70%, white);
 }
 .tool-spinner {
   width: 12px;
