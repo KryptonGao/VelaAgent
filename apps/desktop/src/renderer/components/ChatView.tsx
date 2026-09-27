@@ -1,5 +1,5 @@
 import type { AppState, InteractionMode } from "@vela/shared";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { modKeyLabel } from "../platform";
 import { FolderIcon } from "./icons";
 import { trackEnteredMessages, type EnterTrack } from "./message-motion";
@@ -13,6 +13,7 @@ import { SkillToken } from "./composer/SkillMenu";
 import { parseSkillPrompt } from "./composer/skill-picker";
 import { useFilePreview } from "./preview/FilePreviewContext";
 import { nextStreamFollow, releasesStreamFollow, shouldResumeFollowForMessages } from "./chat-scroll";
+import { changesByFinalMessage, type TurnChanges } from "./turn-changes";
 
 interface FollowState {
   pinned: boolean;
@@ -44,6 +45,42 @@ function latestUserMessageId(messages: UiMessage[]): string | null {
   return null;
 }
 
+interface MessageTurn {
+  id: string;
+  user: UiMessage | null;
+  assistants: UiMessage[];
+}
+
+function groupMessagesIntoTurns(messages: UiMessage[]): MessageTurn[] {
+  const turns: MessageTurn[] = [];
+  let current: MessageTurn | null = null;
+  for (const message of messages) {
+    if (message.role === "user") {
+      current = { id: message.id, user: message, assistants: [] };
+      turns.push(current);
+    } else {
+      if (!current) {
+        current = { id: message.id, user: null, assistants: [] };
+        turns.push(current);
+      }
+      current.assistants.push(message);
+    }
+  }
+  return turns;
+}
+
+function formatElapsedTime(startedAt: number | undefined, completedAt: number | undefined): string | null {
+  if (startedAt === undefined || completedAt === undefined) return null;
+  const totalSeconds = Math.max(0, Math.floor((completedAt - startedAt) / 1000));
+  if (totalSeconds < 1) return "不到 1 秒";
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}小时${minutes}分${seconds}秒`;
+  if (minutes > 0) return `${minutes}分${seconds}秒`;
+  return `${seconds}秒`;
+}
+
 interface ChatViewProps {
   messages: UiMessage[];
   state: AppState | null;
@@ -60,6 +97,7 @@ interface ChatViewProps {
   models: ReturnType<typeof useModels>;
   getQuestion: QuestionLookup;
   onReplyQuestion: (id: string, answer: string | null) => void;
+  onOpenChanges: () => void;
 }
 
 export function ChatView({
@@ -78,9 +116,13 @@ export function ChatView({
   models,
   getQuestion,
   onReplyQuestion,
+  onOpenChanges,
 }: ChatViewProps) {
   const session = state?.session;
   const streaming = session?.status === "streaming";
+  const activeAssistantId = streaming
+    ? [...messages].reverse().find((message) => message.role === "assistant")?.id
+    : undefined;
   const title = session?.title || "新对话";
   const scrollerRef = useRef<HTMLDivElement>(null);
   const dockRef = useRef<HTMLDivElement>(null);
@@ -188,6 +230,11 @@ export function ChatView({
   const entering = enterTrack.current.enter;
   const mod = modKeyLabel(platform);
   const rightLabel = rightCollapsed ? "展开右侧面板" : "收起右侧面板";
+  const turnChanges = useMemo(
+    () => changesByFinalMessage(messages, streaming, project.workspace?.current ?? null),
+    [messages, streaming, project.workspace?.current],
+  );
+  const turns = useMemo(() => groupMessagesIntoTurns(messages), [messages]);
 
   return (
     <main className="main-chat-view">
@@ -236,15 +283,59 @@ export function ChatView({
             onChooseWorkspace={() => void project.openWorkspaceDialog()}
           />
         ) : (
-          messages.map((message) => (
-            <Message
-              key={message.id}
-              message={message}
-              entering={entering.has(message.id)}
-              getQuestion={getQuestion}
-              onReplyQuestion={onReplyQuestion}
-            />
-          ))
+          turns.map((turn, index) => {
+            const finalReply = [...turn.assistants].reverse().find((message) => message.text.trim().length > 0) ?? null;
+            const lastAssistant = turn.assistants[turn.assistants.length - 1] ?? null;
+            const isCurrentTurn = index === turns.length - 1;
+            const canCollapse = Boolean(finalReply) && (!isCurrentTurn || (
+              session?.status === "ready" &&
+              (lastAssistant?.turnStartedAt === undefined || lastAssistant.turnCompletedAt !== undefined)
+            ));
+            const changes = lastAssistant ? turnChanges.get(lastAssistant.id) ?? null : null;
+
+            return (
+              <Fragment key={turn.id}>
+                {turn.user ? (
+                  <Message
+                    message={turn.user}
+                    thinkingActive={false}
+                    entering={entering.has(turn.user.id)}
+                    changes={null}
+                    onOpenChanges={onOpenChanges}
+                    canManageChanges={Boolean(project.git?.repo)}
+                    getQuestion={getQuestion}
+                    onReplyQuestion={onReplyQuestion}
+                  />
+                ) : null}
+                {canCollapse && finalReply && lastAssistant ? (
+                  <CompletedAssistantTurn
+                    key={lastAssistant.id}
+                    messages={turn.assistants}
+                    finalReply={finalReply}
+                    elapsed={formatElapsedTime(lastAssistant.turnStartedAt, lastAssistant.turnCompletedAt)}
+                    entering={turn.assistants.some((message) => entering.has(message.id))}
+                    changes={changes}
+                    onOpenChanges={onOpenChanges}
+                    canManageChanges={Boolean(project.git?.repo)}
+                    getQuestion={getQuestion}
+                    onReplyQuestion={onReplyQuestion}
+                  />
+                ) : turn.assistants.map((message) => (
+                  <Message
+                    key={message.id}
+                    message={message}
+                    thinkingActive={message.id === activeAssistantId && !message.text && message.tools.length === 0}
+                    entering={entering.has(message.id)}
+                    changes={turnChanges.get(message.id) ?? null}
+                    onOpenChanges={onOpenChanges}
+                    canManageChanges={Boolean(project.git?.repo)}
+                    getQuestion={getQuestion}
+                    onReplyQuestion={onReplyQuestion}
+                  />
+                ))}
+              </Fragment>
+            );
+          })
         )}
         <div className="chat-scroll-spacer" aria-hidden="true" />
       </div>
@@ -262,6 +353,7 @@ export function ChatView({
         models={models}
         mode={session?.mode ?? "agent"}
         sendError={sendError}
+        usage={state?.context ?? null}
         project={project}
         onSend={onSend}
         onAbort={onAbort}
@@ -327,12 +419,20 @@ function UserText({ text }: { text: string }) {
 
 function Message({
   message,
+  thinkingActive,
   entering,
+  changes,
+  onOpenChanges,
+  canManageChanges,
   getQuestion,
   onReplyQuestion,
 }: {
   message: UiMessage;
+  thinkingActive: boolean;
   entering: boolean;
+  changes: TurnChanges | null;
+  onOpenChanges: () => void;
+  canManageChanges: boolean;
   getQuestion: QuestionLookup;
   onReplyQuestion: (id: string, answer: string | null) => void;
 }) {
@@ -349,60 +449,261 @@ function Message({
 
   return (
     <article className={`assistant-block${enterClass}`}>
-      {message.thinking ? <Thinking text={message.thinking} /> : null}
-      {message.tools.length > 0 ? (
-        <ToolList tools={message.tools} getQuestion={getQuestion} onReplyQuestion={onReplyQuestion} />
-      ) : null}
-      {message.text ? (
-        <div className="agent-reply-prose">
-          <Markdown text={message.text} />
-        </div>
-      ) : null}
-      <ChangedFiles tools={message.tools} />
+      <AssistantMessageContent
+        message={message}
+        thinkingActive={thinkingActive}
+        showThinking
+        showTools
+        showText
+        changes={changes}
+        onOpenChanges={onOpenChanges}
+        canManageChanges={canManageChanges}
+        getQuestion={getQuestion}
+        onReplyQuestion={onReplyQuestion}
+      />
     </article>
   );
 }
 
-/** 助手回复下方展示本条消息改动的文件,点击在侧栏预览。 */
-function ChangedFiles({ tools }: { tools: UiMessage["tools"] }) {
-  const preview = useFilePreview();
-  const paths = useMemo(() => {
-    const seen = new Set<string>();
-    for (const tool of tools) {
-      if (tool.name !== "edit" && tool.name !== "write") continue;
-      const path = tool.activity?.path?.trim();
-      if (path) seen.add(path.replaceAll("\\", "/"));
-    }
-    return [...seen];
-  }, [tools]);
-  if (paths.length === 0 || !preview) return null;
+function AssistantMessageContent({
+  message,
+  thinkingActive,
+  showThinking,
+  showTools,
+  showText,
+  changes,
+  onOpenChanges,
+  canManageChanges,
+  getQuestion,
+  onReplyQuestion,
+}: {
+  message: UiMessage;
+  thinkingActive: boolean;
+  showThinking: boolean;
+  showTools: boolean;
+  showText: boolean;
+  changes: TurnChanges | null;
+  onOpenChanges: () => void;
+  canManageChanges: boolean;
+  getQuestion: QuestionLookup;
+  onReplyQuestion: (id: string, answer: string | null) => void;
+}) {
+  return (
+    <>
+      {showThinking && message.thinking ? (
+        <Thinking text={message.thinking} active={thinkingActive} />
+      ) : null}
+      {showTools && message.tools.length > 0 ? (
+        <ToolList tools={message.tools} getQuestion={getQuestion} onReplyQuestion={onReplyQuestion} />
+      ) : null}
+      {showText && message.text ? (
+        <div className="agent-reply-prose">
+          <Markdown text={message.text} />
+        </div>
+      ) : null}
+      {changes ? <TurnChangesCard changes={changes} onOpenChanges={onOpenChanges} canManageChanges={canManageChanges} /> : null}
+    </>
+  );
+}
+
+function CompletedAssistantTurn({
+  messages,
+  finalReply,
+  elapsed,
+  entering,
+  changes,
+  onOpenChanges,
+  canManageChanges,
+  getQuestion,
+  onReplyQuestion,
+}: {
+  messages: UiMessage[];
+  finalReply: UiMessage;
+  elapsed: string | null;
+  entering: boolean;
+  changes: TurnChanges | null;
+  onOpenChanges: () => void;
+  canManageChanges: boolean;
+  getQuestion: QuestionLookup;
+  onReplyQuestion: (id: string, answer: string | null) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const processId = useId();
+  const hasProcess = messages.some((message) => (
+    message.id !== finalReply.id && Boolean(message.text || message.thinking || message.tools.length > 0)
+  )) || Boolean(finalReply.thinking || finalReply.tools.length > 0);
+  const enterClass = entering ? " message-enter" : "";
+  const triggerContent = (
+    <>
+      <span>{elapsed ? `用时 ${elapsed}` : hasProcess ? "查看过程" : "耗时未记录"}</span>
+      {hasProcess ? (
+        <svg className="time-spent-trigger-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
+      ) : null}
+    </>
+  );
 
   return (
-    <div className="reply-files">
-      <span className="reply-files-label">改动文件</span>
-      <div className="reply-files-chips">
-        {paths.slice(0, 6).map((path) => (
+    <article className={`assistant-block assistant-turn${enterClass}`}>
+      <div className={`time-spent-collapsible${expanded ? " expanded" : ""}`}>
+        {hasProcess ? (
+          <button
+            className="time-spent-trigger assistant-turn-trigger"
+            type="button"
+            aria-expanded={expanded}
+            aria-controls={processId}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            {triggerContent}
+          </button>
+        ) : (
+          <span className="time-spent-trigger assistant-turn-trigger">{triggerContent}</span>
+        )}
+        <div id={processId} className="time-spent-body" aria-hidden={!expanded}>
+          <div className="time-spent-body-inner">
+            {messages.map((message) => (
+              <article className="assistant-block assistant-turn-process-item" key={message.id}>
+                <AssistantMessageContent
+                  message={message}
+                  thinkingActive={false}
+                  showThinking
+                  showTools
+                  showText={message.id !== finalReply.id}
+                  changes={null}
+                  onOpenChanges={onOpenChanges}
+                  canManageChanges={canManageChanges}
+                  getQuestion={getQuestion}
+                  onReplyQuestion={onReplyQuestion}
+                />
+              </article>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="agent-reply-prose">
+        <Markdown text={finalReply.text} />
+      </div>
+      {changes ? <TurnChangesCard changes={changes} onOpenChanges={onOpenChanges} canManageChanges={canManageChanges} /> : null}
+    </article>
+  );
+}
+
+/** 本轮完成后展示文件统计；审核读取保存的工具差异，不受后续工作区改动影响。 */
+function TurnChangesCard({ changes, onOpenChanges, canManageChanges }: {
+  changes: TurnChanges;
+  onOpenChanges: () => void;
+  canManageChanges: boolean;
+}) {
+  const preview = useFilePreview();
+  const [showAll, setShowAll] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
+  const files = showAll ? changes.files : changes.files.slice(0, 3);
+  const remaining = changes.files.length - 3;
+
+  return (
+    <section className="turn-changes" aria-label="本轮文件变更统计">
+      <header className="turn-changes-header">
+        <span className="turn-changes-icon" aria-hidden="true"><FileChangeIcon /></span>
+        <div className="turn-changes-summary">
+          <strong>已编辑 {changes.files.length} 个文件</strong>
+          <span className="turn-changes-total">
+            <span className="turn-changes-added">+{changes.added}</span>
+            <span className="turn-changes-removed">−{changes.removed}</span>
+          </span>
+        </div>
+        <div className="turn-changes-actions">
           <button
             type="button"
-            className="reply-file-chip"
-            key={path}
-            title={path}
-            onClick={() => preview.openFile(path)}
+            className="turn-changes-undo"
+            title="在工作区变更中选择文件并确认撤销当前改动"
+            disabled={!canManageChanges}
+            onClick={onOpenChanges}
           >
-            {path.split("/").pop() ?? path}
+            撤销 <UndoIcon />
           </button>
+          <button
+            type="button"
+            className="turn-changes-review"
+            aria-expanded={reviewing}
+            onClick={() => {
+              setReviewing((value) => !value);
+              setShowAll(true);
+            }}
+          >
+            {reviewing ? "收起审核" : "审核"}
+          </button>
+        </div>
+      </header>
+      <div className="turn-changes-body">
+        {files.map((file) => (
+          <div className="turn-changes-file" key={file.path}>
+            {preview ? (
+              <button className="turn-changes-path" type="button" title={`预览 ${file.path}`} onClick={() => preview.openFile(file.path)}>
+                {file.path}
+              </button>
+            ) : (
+              <span className="turn-changes-path" title={file.path}>{file.path}</span>
+            )}
+            <span className="turn-changes-file-stat" aria-label={`增加 ${file.added} 行，删除 ${file.removed} 行`}>
+              <span className="turn-changes-added">+{file.added}</span>
+              <span className="turn-changes-removed">−{file.removed}</span>
+            </span>
+            {reviewing ? (
+              <div className="turn-changes-diffs">
+                {file.diffs.length > 0
+                  ? file.diffs.map((diff, index) => <pre key={index}>{diff}</pre>)
+                  : <span>这项编辑没有保存可显示的差异</span>}
+              </div>
+            ) : null}
+          </div>
         ))}
-        {paths.length > 6 ? <span className="reply-files-more">+{paths.length - 6}</span> : null}
+        {remaining > 0 ? (
+          <button className="turn-changes-more" type="button" aria-expanded={showAll} onClick={() => setShowAll((value) => !value)}>
+            {showAll ? "收起文件" : `再显示 ${remaining} 个文件`}
+            <ChevronIcon up={showAll} />
+          </button>
+        ) : null}
       </div>
-    </div>
+    </section>
+  );
+}
+
+function FileChangeIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="2.5" width="18" height="19" rx="3" />
+      <path d="M8 8h8M8 16h8M12 5v6" />
+    </svg>
+  );
+}
+
+function ChevronIcon({ up }: { up: boolean }) {
+  return (
+    <svg className={up ? "is-up" : ""} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
+}
+
+function UndoIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M9 14 4 9l5-5" />
+      <path d="M4 9h10a6 6 0 0 1 0 12h-2" />
+    </svg>
   );
 }
 
 /** 思考内容不超过 3 行时直接平铺展示,更长才折叠为可展开区块。 */
-function Thinking({ text }: { text: string }) {
+function Thinking({ text, active }: { text: string; active: boolean }) {
   const [open, setOpen] = useState(false);
   const [short, setShort] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (!active) setOpen(false);
+  }, [active]);
 
   useLayoutEffect(() => {
     const el = bodyRef.current;

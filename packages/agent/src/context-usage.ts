@@ -97,6 +97,60 @@ export function measureSessionContext(session: AgentSession): Pick<ContextUsage,
   return { tokens, contextWindow, percent, segments: resolved };
 }
 
+/**
+ * 界面上能看到的轮数与步数:跳过系统代发的计划执行提示,压缩后按当前上下文统计。
+ * 隐藏提示也占一条 user 消息,直接数消息会凭空多出一轮。
+ */
+export function countConversationActivity(
+  messages: AgentMessage[],
+  isHiddenPrompt: (text: string) => boolean,
+): { turnCount: number; stepCount: number } {
+  let turnCount = 0;
+  let stepCount = 0;
+  for (const message of messages) {
+    if (message.role === "user") {
+      if (!isHiddenPrompt(userMessageText(message))) turnCount += 1;
+    } else if (message.role === "assistant") {
+      stepCount += 1;
+    }
+  }
+  return { turnCount, stepCount };
+}
+
+/** user 消息的正文;content 可能是单个字符串,也可能是文本/图片分片。 */
+export function userMessageText(message: AgentMessage): string {
+  if (message.role !== "user") return "";
+  const parts = typeof message.content === "string"
+    ? [{ type: "text" as const, text: message.content }]
+    : message.content;
+  return parts
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join("\n");
+}
+
+/**
+ * 汇总整个会话的计费 token、提示词缓存命中率与步数,供输入框下方的统计条展示。
+ * 命中率按提示词侧用量计算：缓存读取 /（未命中输入 + 缓存读取 + 缓存写入）。
+ */
+export function measureSessionUsage(
+  session: AgentSession,
+): Pick<ContextUsage, "sessionTokens" | "cacheHitRate"> {
+  let stats;
+  try {
+    stats = session.getSessionStats();
+  } catch {
+    return { sessionTokens: null, cacheHitRate: null };
+  }
+  const tokens = stats.tokens;
+  const promptTokens = tokens.input + tokens.cacheRead + tokens.cacheWrite;
+  const cacheTokens = tokens.cacheRead + tokens.cacheWrite;
+  return {
+    sessionTokens: tokens.total > 0 ? tokens.total : null,
+    cacheHitRate: promptTokens > 0 && cacheTokens > 0 ? tokens.cacheRead / promptTokens : null,
+  };
+}
+
 function currentPromptText(session: AgentSession, messages: AgentMessage[]): string {
   const current = getCurrentSystemMessage(messages);
   const rendered = current ? getSystemMessageText(current).trim() : "";

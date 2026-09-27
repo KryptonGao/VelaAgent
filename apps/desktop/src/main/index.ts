@@ -9,6 +9,7 @@ import {
   createSandboxedToolDefinitions,
 } from "@vela/workspace";
 import { app, BrowserWindow, nativeImage, nativeTheme, shell } from "electron";
+import type { BrowserWindowConstructorOptions } from "electron";
 import { writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,6 +27,16 @@ const preloadPath = join(rootDir, "../preload/index.js");
 let host: SessionHost | null = null;
 let project: ProjectHost | null = null;
 
+/*
+ * macOS 上由系统 vibrancy 提供毛玻璃,窗口底色必须是透明的,
+ * 否则侧栏的 backdrop-filter 背后只有自己页面的纯色,透不出桌面。
+ * 其他平台没有 vibrancy,保留主题底色避免启动和缩放时闪白。
+ */
+const windowChrome: BrowserWindowConstructorOptions =
+  process.platform === "darwin"
+    ? { vibrancy: "sidebar", visualEffectState: "active", backgroundColor: "#00000000" }
+    : { backgroundColor: nativeTheme.shouldUseDarkColors ? "#16181d" : "#ffffff" };
+
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1280,
@@ -38,8 +49,7 @@ function createWindow(): BrowserWindow {
     icon: appIconPath,
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 16, y: 18 },
-    // 与渲染层默认主题的底色一致,深色系统下启动和缩放时不闪白。
-    backgroundColor: nativeTheme.shouldUseDarkColors ? "#16181d" : "#ffffff",
+    ...windowChrome,
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,

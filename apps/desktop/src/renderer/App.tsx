@@ -18,6 +18,7 @@ export function App() {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [changesOpen, setChangesOpen] = useState(false);
   const platform = window.vela?.platform ?? "darwin";
 
   useEffect(() => {
@@ -109,6 +110,10 @@ export function App() {
               models={models}
               getQuestion={session.getQuestion}
               onReplyQuestion={(id, answer) => void session.replyQuestion(id, answer)}
+              onOpenChanges={() => {
+                setRightCollapsed(false);
+                setChangesOpen(true);
+              }}
             />
             <ContextPanel
               collapsed={rightCollapsed}
@@ -117,6 +122,8 @@ export function App() {
               onToggle={() => setRightCollapsed(true)}
               onExecutePlan={() => void session.executePlan()}
               onResumeGoal={() => void session.resumeGoal()}
+              changesOpen={changesOpen}
+              onChangesOpenChange={setChangesOpen}
             />
           </FilePreviewProvider>
         </Presence>

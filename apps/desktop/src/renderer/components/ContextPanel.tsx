@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   contextCategories,
   type AppState,
@@ -32,6 +32,8 @@ interface ContextPanelProps {
   onToggle: () => void;
   onExecutePlan: () => void;
   onResumeGoal: () => void;
+  changesOpen: boolean;
+  onChangesOpenChange: (open: boolean) => void;
 }
 
 export function ContextPanel({
@@ -41,8 +43,9 @@ export function ContextPanel({
   onToggle,
   onExecutePlan,
   onResumeGoal,
+  changesOpen,
+  onChangesOpenChange,
 }: ContextPanelProps) {
-  const [changesOpen, setChangesOpen] = useState(false);
   const [diffRequestPath, setDiffRequestPath] = useState<string | null>(null);
   const preview = useFilePreview();
   const session = state?.session;
@@ -74,7 +77,7 @@ export function ContextPanel({
           project={project}
           onShowDiff={(path) => {
             setDiffRequestPath(path);
-            setChangesOpen(true);
+            onChangesOpenChange(true);
           }}
         />
       ) : (
@@ -89,7 +92,7 @@ export function ContextPanel({
 
         <RepoCard
           project={project}
-          onOpenChanges={() => setChangesOpen(true)}
+          onOpenChanges={() => onChangesOpenChange(true)}
           activeChanges={changesOpen}
         />
 
@@ -137,7 +140,10 @@ export function ContextPanel({
         <ChangesView
           project={project}
           initialPath={diffRequestPath}
-          onClose={() => setChangesOpen(false)}
+          onClose={() => {
+            onChangesOpenChange(false);
+            setDiffRequestPath(null);
+          }}
           onPreviewFile={(path) => preview?.openFile(path)}
         />
       </SheetPresence>
@@ -184,33 +190,61 @@ function PlanCard({
   const done = plan.steps.filter((step) => step.done).length;
   const total = plan.steps.length;
   const percent = total === 0 ? 0 : Math.round((done / total) * 100);
+  const planId = plan.steps[0]?.id ?? `empty-${plan.updatedAt}`;
+  const complete = total > 0 && done === total;
+  const [collapseState, setCollapseState] = useState({ planId, collapsed: false });
+  const collapsed = collapseState.planId === planId && collapseState.collapsed;
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!complete) return;
+    if (contentRef.current?.contains(document.activeElement)) toggleRef.current?.focus();
+    setCollapseState({ planId, collapsed: true });
+  }, [complete, planId]);
 
   return (
-    <section className="mode-card">
-      <div className="side-panel-title-row">
+    <section className={`mode-card${collapsed ? " is-collapsed" : ""}`}>
+      <button
+        ref={toggleRef}
+        className="side-panel-title-row mode-card-toggle"
+        type="button"
+        aria-expanded={!collapsed}
+        aria-controls="plan-card-content"
+        aria-label={`${collapsed ? "展开" : "折叠"}计划，${done}/${total} 步`}
+        onClick={() => setCollapseState((current) => ({
+          planId,
+          collapsed: !(current.planId === planId && current.collapsed),
+        }))}
+      >
         <span className="side-panel-heading">计划</span>
-        <span className="side-panel-counter">
-          {done}/{total}
+        <span className="mode-card-toggle-meta">
+          <span className="side-panel-counter">
+            {done}/{total}
+          </span>
+          <span className="mode-card-chevron" aria-hidden="true"><ChevronDownIcon /></span>
         </span>
-      </div>
+      </button>
       <div className="mode-card-title">{plan.title}</div>
-      {plan.overview ? <p className="mode-card-copy">{plan.overview}</p> : null}
       <div className="mode-progress" aria-hidden="true">
         <span style={{ width: `${percent}%` }} />
       </div>
-      <div className="mode-steps">
-        {plan.steps.map((step) => (
-          <div className={`mode-step${step.done ? " done" : ""}`} key={step.id}>
-            <span className="mode-step-mark" aria-hidden="true">
-              {step.done ? "✓" : ""}
-            </span>
-            <span>{step.text}</span>
-          </div>
-        ))}
+      <div ref={contentRef} id="plan-card-content" className="mode-card-content" hidden={collapsed}>
+        {plan.overview ? <p className="mode-card-copy">{plan.overview}</p> : null}
+        <div className="mode-steps">
+          {plan.steps.map((step) => (
+            <div className={`mode-step${step.done ? " done" : ""}`} key={step.id}>
+              <span className="mode-step-mark" aria-hidden="true">
+                {step.done ? "✓" : ""}
+              </span>
+              <span>{step.text}</span>
+            </div>
+          ))}
+        </div>
+        <button className="mode-card-action" type="button" disabled={busy} onClick={onExecute}>
+          执行计划
+        </button>
       </div>
-      <button className="mode-card-action" type="button" disabled={busy} onClick={onExecute}>
-        执行计划
-      </button>
     </section>
   );
 }

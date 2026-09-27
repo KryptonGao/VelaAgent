@@ -396,6 +396,10 @@ export type ContextSegments = Record<ContextCategory, number>;
 export interface ContextUsage {
   messageCount: number;
   toolCallCount: number;
+  /** 用户消息数，即对话轮数。 */
+  turnCount: number;
+  /** agent 循环里已经生成的 assistant 消息数，即步数。 */
+  stepCount: number;
   /** 当前占用的 token 估计。模型回报过用量时，分段会按这个总量对齐。 */
   tokens: number;
   /** 当前模型的上下文窗口。还没选模型时为空。 */
@@ -403,6 +407,12 @@ export interface ContextUsage {
   /** 占窗口的百分比，0–100 以上都可能。窗口未知时为空。 */
   percent: number | null;
   segments: ContextSegments;
+  /** 本次会话累计计费的 token（输入 + 输出 + 缓存读写）。还没产生用量时为空。 */
+  sessionTokens: number | null;
+  /** 提示词缓存命中率 0–1；提供方既不上报缓存读取也不上报写入时为空。 */
+  cacheHitRate: number | null;
+  /** 本次运行累计的输出速度（tokens/秒，不含首字等待）；还没测到用量或耗时时为空。 */
+  outputSpeed: number | null;
 }
 
 export interface AppState {

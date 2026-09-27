@@ -22,6 +22,8 @@
             ? ["midnight", "graphite", "ember"].indexOf(dark) >= 0 ? dark : "midnight"
             : ["daylight", "paper", "celadon"].indexOf(light) >= 0 ? light : "daylight";
         if (localStorage.getItem("vela.locale") === "en") root.lang = "en";
+        // macOS 的 vibrancy 要求整页底色透明,首帧前就标上平台,避免闪一下不透明底。
+        root.className = "platform-" + ((window.vela && window.vela.platform) || "darwin");
       } catch (e) {}
     </script>
   </head>

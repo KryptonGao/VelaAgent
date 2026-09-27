@@ -1,4 +1,11 @@
-import type { FileAttachmentPayload, ImageAttachment, InteractionMode, SkillSummary, ThinkingLevel } from "@vela/shared";
+import type {
+  ContextUsage,
+  FileAttachmentPayload,
+  ImageAttachment,
+  InteractionMode,
+  SkillSummary,
+  ThinkingLevel,
+} from "@vela/shared";
 import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import type { useModels } from "../hooks/useModels";
 import type { ProjectApi } from "../hooks/useProject";
@@ -7,6 +14,7 @@ import { ModelControls } from "./ModelControls";
 import { ApprovalSlot } from "./composer/ApprovalBanner";
 import { AttachMenu } from "./composer/AttachMenu";
 import { BranchChip } from "./composer/BranchChip";
+import { ComposerStatsRow } from "./composer/ComposerStatsRow";
 import { EnvironmentChip } from "./composer/EnvironmentChip";
 import { ModeChip } from "./composer/ModeChip";
 import { SandboxPill } from "./composer/SandboxPill";
@@ -26,6 +34,8 @@ export interface ComposerProps {
   models: ReturnType<typeof useModels>;
   mode: InteractionMode;
   sendError: string | null;
+  /** 会话统计条数据，来自主进程的 Context 用量快照。 */
+  usage: ContextUsage | null;
   project: ProjectApi;
   onSend: (text: string, images?: ImageAttachment[]) => Promise<void>;
   onAbort: () => Promise<void>;
@@ -44,6 +54,7 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
   models,
   mode,
   sendError,
+  usage,
   project,
   onSend,
   onAbort,
@@ -420,6 +431,8 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
             )}
           </div>
         </div>
+
+        <ComposerStatsRow usage={usage} />
       </form>
     </div>
   );

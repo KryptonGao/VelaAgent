@@ -1,6 +1,6 @@
 {
   "name": "@vela/agent",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": true,
   "type": "module",
   "exports": {
@@ -16,6 +16,6 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import ./test/register-ts.mjs --experimental-strip-types --test test/skill-migration.test.ts test/question-manager.test.ts test/subagent.test.ts test/plan.test.ts test/goal-validation.test.ts"
+    "test": "node --import ./test/register-ts.mjs --experimental-strip-types --test test/skill-migration.test.ts test/question-manager.test.ts test/subagent.test.ts test/plan.test.ts test/goal-validation.test.ts test/context-usage.test.ts"
   }
 }

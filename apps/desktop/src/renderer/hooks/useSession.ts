@@ -17,6 +17,8 @@ export interface UiMessage {
   text: string;
   thinking: string;
   tools: ToolTrace[];
+  turnStartedAt?: number;
+  turnCompletedAt?: number;
 }
 
 /** 每个对话独立保存界面上的消息,切换对话时互不影响。 */
@@ -34,6 +36,9 @@ export function useSession() {
   const activeIdRef = useRef<string | null>(null);
   const bucketsRef = useRef<MessageBuckets>({});
   const questionsRef = useRef<Record<string, AskUserQuestionRequest>>({});
+  const statusesRef = useRef<Record<string, AppState["session"]["status"]>>({});
+  const turnStartedAtRef = useRef<Record<string, number>>({});
+  const completionBlockedRef = useRef<Record<string, boolean>>({});
   activeIdRef.current = activeConversationId;
   bucketsRef.current = buckets;
   questionsRef.current = questions;
@@ -47,7 +52,9 @@ export function useSession() {
       setBuckets((current) => {
         if (current[id]?.length) return current;
         if (transcript.length === 0) return current;
-        return { ...current, [id]: transcript.map(toUiMessage) };
+        const restored = transcript.map(toUiMessage);
+        const startedAt = turnStartedAtRef.current[id];
+        return { ...current, [id]: startedAt ? stampLastAssistant(restored, { startedAt }) : restored };
       });
     } catch {
       // 恢复失败时保持空列表,不影响新消息收发。
@@ -59,27 +66,54 @@ export function useSession() {
     if (!api) return;
 
     let active = true;
+    let receivedStateEvent = false;
+    const acceptState = (next: AppState) => {
+      const id = next.activeConversationId;
+      if (id) {
+        const status = next.session.status;
+        const previous = statusesRef.current[id];
+        if (status === "streaming" && previous !== "streaming") {
+          const startedAt = Date.now();
+          turnStartedAtRef.current[id] = startedAt;
+          completionBlockedRef.current[id] = false;
+          setBuckets((current) => updateLastAssistant(current, id, { startedAt }));
+        } else if (previous === "streaming" && status !== "streaming") {
+          if (status === "ready" && !completionBlockedRef.current[id]) {
+            const completedAt = Date.now();
+            const startedAt = turnStartedAtRef.current[id] ?? completedAt;
+            setBuckets((current) => updateLastAssistant(current, id, { startedAt, completedAt }));
+          }
+          delete turnStartedAtRef.current[id];
+          delete completionBlockedRef.current[id];
+        }
+        statusesRef.current[id] = status;
+      }
+      setState(next);
+    };
+
     void api.getState().then((next) => {
       if (!active) return;
-      setState(next);
+      if (!receivedStateEvent) acceptState(next);
       // 应用重启后界面消息桶是空的,从持久化会话恢复当前对话的历史。
       if (next.activeConversationId) void loadTranscript(next.activeConversationId);
     });
 
     const unsubscribe = api.onEvent((event) => {
       if (event.type === "state") {
-        setState(event.state);
+        receivedStateEvent = true;
+        acceptState(event.state);
         // 会话可能比界面晚就绪。桶还是空的就再读一次历史，避免启动竞态丢掉工具内容。
         const id = event.state.activeConversationId;
         if (id) void loadTranscript(id);
         return;
       }
       if (event.type === "error") {
+        completionBlockedRef.current[event.conversationId] = true;
         setErrors((current) => ({ ...current, [event.conversationId]: event.message }));
         setBuckets((current) => appendAssistantError(current, event.conversationId, event.message));
         return;
       }
-      setBuckets((current) => applyStreamEvent(current, event));
+      setBuckets((current) => applyStreamEvent(current, event, turnStartedAtRef.current[event.conversationId]));
     });
 
     const unsubscribeQuestions = api.onQuestionEvent((event) => {
@@ -108,6 +142,7 @@ export function useSession() {
     const api = window.vela;
     const id = activeIdRef.current;
     if (!api || !id) return;
+    completionBlockedRef.current[id] = false;
     const attachment = images && images.length > 0 ? `\n\n[图片 ×${images.length}]` : "";
     setErrors((current) => ({ ...current, [id]: "" }));
     setBuckets((current) => ({
@@ -123,6 +158,7 @@ export function useSession() {
       setState(next);
     } catch (error) {
       const message = error instanceof Error ? error.message : "发送失败";
+      completionBlockedRef.current[id] = true;
       setErrors((current) => ({ ...current, [id]: message }));
       setBuckets((current) => appendAssistantError(current, id, message));
     }
@@ -132,6 +168,7 @@ export function useSession() {
     const api = window.vela;
     const id = activeIdRef.current;
     if (!api || !id) return;
+    completionBlockedRef.current[id] = true;
     const next = await api.abort(id);
     setState(next);
   }, []);
@@ -295,17 +332,47 @@ function toUiMessage(message: TranscriptMessage): UiMessage {
   };
 }
 
-function applyStreamEvent(buckets: MessageBuckets, event: StreamUpdate): MessageBuckets {  const id = event.conversationId;
-  const next = applyToMessages(buckets[id] ?? [], event);
+function updateLastAssistant(
+  buckets: MessageBuckets,
+  id: string,
+  timing: { startedAt?: number; completedAt?: number },
+): MessageBuckets {
+  const messages = buckets[id] ?? [];
+  const next = stampLastAssistant(messages, timing);
+  return next === messages ? buckets : { ...buckets, [id]: next };
+}
+
+function stampLastAssistant(
+  messages: UiMessage[],
+  timing: { startedAt?: number; completedAt?: number },
+): UiMessage[] {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== "assistant") continue;
+    const next = {
+      ...message,
+      ...(timing.startedAt !== undefined
+        ? { turnStartedAt: timing.startedAt, turnCompletedAt: undefined }
+        : {}),
+      ...(timing.completedAt !== undefined ? { turnCompletedAt: timing.completedAt } : {}),
+    };
+    return [...messages.slice(0, index), next, ...messages.slice(index + 1)];
+  }
+  return messages;
+}
+
+function applyStreamEvent(buckets: MessageBuckets, event: StreamUpdate, startedAt?: number): MessageBuckets {
+  const id = event.conversationId;
+  const next = applyToMessages(buckets[id] ?? [], event, startedAt);
   return { ...buckets, [id]: next };
 }
 
-function applyToMessages(messages: UiMessage[], event: StreamUpdate): UiMessage[] {
+function applyToMessages(messages: UiMessage[], event: StreamUpdate, startedAt?: number): UiMessage[] {
   if (event.type === "user_message") {
     return [
       ...messages,
       { id: crypto.randomUUID(), role: "user", text: event.text, thinking: "", tools: [] },
-      { id: crypto.randomUUID(), role: "assistant", text: "", thinking: "", tools: [] },
+      { id: crypto.randomUUID(), role: "assistant", text: "", thinking: "", tools: [], turnStartedAt: startedAt },
     ];
   }
   // agent 循环每一步都是独立的 assistant 消息,收到边界就另起一块,
@@ -314,14 +381,15 @@ function applyToMessages(messages: UiMessage[], event: StreamUpdate): UiMessage[
     const last = messages[messages.length - 1];
     // 发送时预建或上一轮遗留的空 assistant 块直接复用,避免出现两个空气泡。
     if (last?.role === "assistant" && !last.text && !last.thinking && last.tools.length === 0) {
-      return messages;
+      if (startedAt === undefined || last.turnStartedAt === startedAt) return messages;
+      return [...messages.slice(0, -1), { ...last, turnStartedAt: startedAt }];
     }
     return [
       ...messages,
-      { id: crypto.randomUUID(), role: "assistant", text: "", thinking: "", tools: [] },
+      { id: crypto.randomUUID(), role: "assistant", text: "", thinking: "", tools: [], turnStartedAt: startedAt },
     ];
   }
-  const next = ensureAssistant(messages);
+  const next = ensureAssistant(messages, startedAt);
   const last = next[next.length - 1];
   if (!last || last.role !== "assistant") return next;
 
@@ -359,12 +427,12 @@ function applyToMessages(messages: UiMessage[], event: StreamUpdate): UiMessage[
   return next;
 }
 
-function ensureAssistant(messages: UiMessage[]): UiMessage[] {
+function ensureAssistant(messages: UiMessage[], startedAt?: number): UiMessage[] {
   const last = messages[messages.length - 1];
   if (last?.role === "assistant") return [...messages.slice(0, -1), { ...last, tools: [...last.tools] }];
   return [
     ...messages,
-    { id: crypto.randomUUID(), role: "assistant", text: "", thinking: "", tools: [] },
+    { id: crypto.randomUUID(), role: "assistant", text: "", thinking: "", tools: [], turnStartedAt: startedAt },
   ];
 }
 
