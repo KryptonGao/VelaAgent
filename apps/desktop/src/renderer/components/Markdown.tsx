@@ -4,6 +4,7 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { memo, useMemo, type ReactNode } from "react";
 import { useFilePreview, type FilePreviewContextValue } from "./preview/FilePreviewContext";
+import { tr, useAppLocale } from "../locale";
 
 const remarkPlugins = [remarkGfm, remarkBreaks];
 
@@ -40,7 +41,7 @@ function MarkdownCodeFactory(preview: FilePreviewContextValue) {
         className="code-file-ref"
         role="button"
         tabIndex={0}
-        title={`打开 ${filePath}`}
+        title={`${tr("打开", "Open")} ${filePath}`}
         onClick={() => preview.openFile(filePath)}
         onKeyDown={(event) => {
           if (event.key === "Enter") preview.openFile(filePath);
@@ -105,6 +106,7 @@ function safeUrl(url: string): string {
 }
 
 export const Markdown = memo(function Markdown({ text }: { text: string }) {
+  useAppLocale();
   const preview = useFilePreview();
   const components = useMemo(
     () => (preview ? withFileReference(preview) : baseComponents),

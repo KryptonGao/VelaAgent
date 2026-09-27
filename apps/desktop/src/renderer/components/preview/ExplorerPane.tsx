@@ -2,6 +2,7 @@ import type { WorkspaceSearchResult } from "@vela/shared";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFilePreview } from "./FilePreviewContext";
 import { ancestorsOf, buildFileTree, filterFilePaths, type FileTreeNode } from "./tree";
+import { localizeError, tr } from "../../locale";
 
 type SearchMode = "file" | "code";
 
@@ -60,7 +61,7 @@ export function ExplorerPane() {
         })
         .catch((error) => {
           setResult({ query: trimmed, matches: [], truncated: false });
-          searchError.current = error instanceof Error ? error.message : "搜索失败";
+        searchError.current = error instanceof Error ? error.message : "搜索失败";
         })
         .finally(() => setSearching(false));
     }, 350);
@@ -79,19 +80,19 @@ export function ExplorerPane() {
         <input
           className="explorer-search-input"
           type="text"
-          placeholder={mode === "file" ? "筛选文件…" : "搜索代码…"}
-          aria-label={mode === "file" ? "筛选文件" : "搜索代码"}
+          placeholder={mode === "file" ? tr("筛选文件…", "Filter files…") : tr("搜索代码…", "Search code…")}
+          aria-label={mode === "file" ? tr("筛选文件", "Filter files") : tr("搜索代码", "Search code")}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-        <div className="explorer-mode-chips" role="group" aria-label="搜索范围">
+        <div className="explorer-mode-chips" role="group" aria-label={tr("搜索范围", "Search scope")}>
           <button
             type="button"
             aria-pressed={mode === "file"}
             className={`explorer-mode-chip${mode === "file" ? " active" : ""}`}
             onClick={() => setMode("file")}
           >
-            文件
+            {tr("文件", "Files")}
           </button>
           <button
             type="button"
@@ -99,13 +100,13 @@ export function ExplorerPane() {
             className={`explorer-mode-chip${mode === "code" ? " active" : ""}`}
             onClick={() => setMode("code")}
           >
-            代码
+            {tr("代码", "Code")}
           </button>
         </div>
       </div>
 
       <div className="explorer-body">
-        {!files && !trimmed ? <div className="explorer-empty">正在加载文件列表…</div> : null}
+        {!files && !trimmed ? <div className="explorer-empty">{tr("正在加载文件列表…", "Loading file list…")}</div> : null}
 
         {mode === "file" && files && !trimmed ? (
           <FileTree
@@ -138,20 +139,20 @@ export function ExplorerPane() {
               </button>
             ))}
             {preview.fileList?.truncated ? (
-              <div className="explorer-note">文件较多,列表已截断。</div>
+              <div className="explorer-note">{tr("文件较多，列表已截断。", "There are many files. The list has been truncated.")}</div>
             ) : null}
           </div>
         ) : null}
 
         {mode === "file" && files && trimmed && fileMatches.length === 0 ? (
-          <div className="explorer-empty">没有匹配的文件</div>
+          <div className="explorer-empty">{tr("没有匹配的文件", "No matching files")}</div>
         ) : null}
 
         {mode === "code" ? (
           <div className="explorer-results">
-            {searching ? <div className="explorer-empty">正在搜索…</div> : null}
+            {searching ? <div className="explorer-empty">{tr("正在搜索…", "Searching…")}</div> : null}
             {!searching && result && result.matches.length === 0 ? (
-              <div className="explorer-empty">{searchError.current ?? "没有匹配的代码"}</div>
+              <div className="explorer-empty">{searchError.current ? localizeError(searchError.current) : tr("没有匹配的代码", "No matching code")}</div>
             ) : null}
             {result?.matches.map((match, index) => (
               <button
@@ -168,7 +169,7 @@ export function ExplorerPane() {
                 <span className="explorer-result-snippet">{match.text || " "}</span>
               </button>
             ))}
-            {result?.truncated ? <div className="explorer-note">匹配较多,结果已截断。</div> : null}
+            {result?.truncated ? <div className="explorer-note">{tr("匹配较多，结果已截断。", "There are many matches. Results have been truncated.")}</div> : null}
           </div>
         ) : null}
       </div>

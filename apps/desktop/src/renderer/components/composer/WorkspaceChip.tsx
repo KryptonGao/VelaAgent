@@ -2,6 +2,7 @@ import type { ProjectApi } from "../../hooks/useProject";
 import { useDismissable } from "../../hooks/useDismissable";
 import { CloseIcon, FolderIcon, PlusIcon } from "../icons";
 import { useState } from "react";
+import { tr } from "../../locale";
 
 function workspaceName(path: string): string {
   return path.split("/").filter(Boolean).pop() ?? path;
@@ -18,17 +19,17 @@ export function WorkspaceChip({ project }: { project: ProjectApi }) {
       <button
         type="button"
         className="composer-chip"
-        title={current ?? "选择工作区"}
+        title={current ?? tr("选择工作区", "Choose workspace")}
         aria-haspopup="true"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
         <FolderIcon />
-        <span>{current ? workspaceName(current) : "选择工作区"}</span>
+        <span>{current ? workspaceName(current) : tr("选择工作区", "Choose workspace")}</span>
       </button>
       {open ? (
         <div className="dock-popover composer-popover up workspace-picker">
-          <div className="composer-popover-title">工作区</div>
+          <div className="composer-popover-title">{tr("工作区", "Workspace")}</div>
           {current ? (
             <div className="workspace-current">
               <FolderIcon size={15} />
@@ -49,11 +50,11 @@ export function WorkspaceChip({ project }: { project: ProjectApi }) {
             }}
           >
             <PlusIcon />
-            <span>打开新的文件夹…</span>
+            <span>{tr("打开新的文件夹…", "Open a new folder…")}</span>
           </button>
           {recents.length > 0 ? (
             <>
-              <div className="composer-popover-section">最近</div>
+              <div className="composer-popover-section">{tr("最近", "Recent")}</div>
               <div className="workspace-recent-list">
                 {recents.map((recent) => (
                   <div
@@ -75,8 +76,8 @@ export function WorkspaceChip({ project }: { project: ProjectApi }) {
                     <button
                       type="button"
                       className="workspace-recent-remove"
-                      title="从最近列表移除"
-                      aria-label={`从最近列表移除 ${workspaceName(recent.path)}`}
+                      title={tr("从最近列表移除", "Remove from recent list")}
+                      aria-label={`${tr("从最近列表移除", "Remove from recent list")} ${workspaceName(recent.path)}`}
                       onClick={() => void project.removeRecentWorkspace(recent.path)}
                     >
                       <CloseIcon size={11} />
@@ -96,7 +97,7 @@ export function WorkspaceChip({ project }: { project: ProjectApi }) {
               }}
             >
               <CloseIcon />
-              <span>清除当前工作区</span>
+              <span>{tr("清除当前工作区", "Clear current workspace")}</span>
             </button>
           ) : null}
         </div>

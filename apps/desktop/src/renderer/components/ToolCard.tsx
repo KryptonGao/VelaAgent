@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, 
 import { useFilePreview } from "./preview/FilePreviewContext";
 import { QuestionCard } from "./QuestionCard";
 import { CheckIcon, EyeIcon, FilePlusIcon, PencilIcon, StackIcon, TerminalIcon } from "./icons";
+import { localizeError, tr } from "../locale";
 
 type ToolKind = "bash" | "read" | "edit" | "write" | "other";
 
@@ -150,7 +151,7 @@ function TaskCard({ tool }: { tool: ToolTrace }) {
   const title = taskTitle(activity.body);
   const report = taskReport(activity.body);
   const steps = activity.steps ?? [];
-  const label = activity.agent === "general" ? "执行" : "查阅";
+  const label = activity.agent === "general" ? tr("执行", "Run") : tr("查阅", "Explore");
 
   useLayoutEffect(() => {
     if (!settled || full) return;
@@ -203,13 +204,13 @@ function TaskCard({ tool }: { tool: ToolTrace }) {
                 ))}
               </ul>
             ) : tool.status === "running" ? (
-              <p className="tool-wait">正在启动</p>
+              <p className="tool-wait">{tr("正在启动", "Starting…")}</p>
             ) : null}
             {report ? <pre className="tool-note task-report">{report}</pre> : null}
           </div>
           {(settled && overflows) || full ? (
             <button className="tool-expand" type="button" onClick={() => setFull((value) => !value)}>
-              {full ? "收起" : "展开全部"}
+              {full ? tr("收起", "Collapse") : tr("展开全部", "Expand all")}
             </button>
           ) : null}
         </div>
@@ -220,7 +221,7 @@ function TaskCard({ tool }: { tool: ToolTrace }) {
 
 function taskTitle(body: string | undefined): string {
   const line = body?.split("\n").find((item) => item.trim())?.replace(/\s+/g, " ").trim();
-  return line || "子代理";
+  return line || tr("子代理", "Subagent");
 }
 
 function taskReport(body: string | undefined): string {
@@ -286,7 +287,7 @@ function GenericToolCard({ tool }: ToolCardProps) {
               {stat.removed > 0 ? <span className="tool-stat-del">−{stat.removed}</span> : null}
             </span>
           ) : lines !== null ? (
-            <span className="tool-lines">{lines} 行</span>
+            <span className="tool-lines">{tr(`${lines} 行`, `${lines} lines`)}</span>
           ) : null}
           <StatusMark status={tool.status} />
           <svg className="tool-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
@@ -297,8 +298,8 @@ function GenericToolCard({ tool }: ToolCardProps) {
           <button
             className="tool-card-open"
             type="button"
-            title="在侧栏预览"
-            aria-label={`预览 ${subject.name}`}
+            title={tr("在侧栏预览", "Preview in sidebar")}
+            aria-label={`${tr("预览", "Preview")} ${subject.name}`}
             onClick={() => preview?.openFile(previewPath ?? "")}
           >
             <EyeIcon size={12} />
@@ -312,7 +313,7 @@ function GenericToolCard({ tool }: ToolCardProps) {
           </div>
           {(settled && overflows) || full ? (
             <button className="tool-expand" type="button" onClick={() => setFull((value) => !value)}>
-              {full ? "收起" : "展开全部"}
+              {full ? tr("收起", "Collapse") : tr("展开全部", "Expand all")}
             </button>
           ) : null}
         </div>
@@ -338,7 +339,7 @@ function ToolRunGroup({ tools }: { tools: ToolTrace[] }) {
   const stat = totalDiffStat(tools);
   const subject = subjectOf(toolKind(current.name), activity, current.name);
   const detail = activity.command?.trim() || activity.path?.trim() || "";
-  const breakdown = [...kindCounts].map(([kind, count]) => `${kindLabels[kind]} ×${count}`).join(" · ");
+  const breakdown = [...kindCounts].map(([kind, count]) => `${toolKindLabel(kind)} ×${count}`).join(" · ");
 
   return (
     <article
@@ -356,10 +357,10 @@ function ToolRunGroup({ tools }: { tools: ToolTrace[] }) {
         <span className="tool-card-icon" aria-hidden="true">
           {uniform ? <KindIcon kind={uniform} /> : <StackIcon />}
         </span>
-        <span className="tool-kind-label">{uniform ? kindLabels[uniform] : "工具"}</span>
+        <span className="tool-kind-label">{uniform ? toolKindLabel(uniform) : tr("工具", "Tools")}</span>
         <span className="tool-run-count">×{tools.length}</span>
         <span className="tool-run-subject">{subject.name}</span>
-        {failed > 0 ? <span className="tool-run-failed">{failed} 失败</span> : null}
+        {failed > 0 ? <span className="tool-run-failed">{tr(`${failed} 失败`, `${failed} failed`)}</span> : null}
         {stat ? (
           <span className="tool-stat">
             {stat.added > 0 ? <span className="tool-stat-add">+{stat.added}</span> : null}
@@ -411,7 +412,7 @@ function ToolBody({
     );
   }
   if (status === "error") {
-    return <pre className="tool-error">{activity.body || "执行失败"}</pre>;
+    return <pre className="tool-error">{activity.body ? localizeError(activity.body) : tr("执行失败", "Execution failed")}</pre>;
   }
   if (kind === "read") return <ReadView body={activity.body} running={status === "running"} />;
   if (kind === "edit" || kind === "write") {
@@ -423,15 +424,15 @@ function ToolBody({
         ) : activity.body ? (
           <p className="tool-note">{activity.body}</p>
         ) : status === "running" ? (
-          <p className="tool-wait">{kind === "edit" ? "正在修改" : "正在写入"}</p>
+          <p className="tool-wait">{kind === "edit" ? tr("正在修改", "Editing…") : tr("正在写入", "Writing…")}</p>
         ) : (
-          <p className="tool-wait">没有差异</p>
+          <p className="tool-wait">{tr("没有差异", "No diff")}</p>
         )}
       </>
     );
   }
   if (activity.body) return <pre className="tool-note">{activity.body}</pre>;
-  if (status === "running") return <p className="tool-wait">正在执行</p>;
+  if (status === "running") return <p className="tool-wait">{tr("正在执行", "Running…")}</p>;
   return null;
 }
 
@@ -457,17 +458,17 @@ function BashView({
       {output ? (
         <pre className="tool-terminal-out">{output}</pre>
       ) : (
-        <div className="tool-terminal-wait">{running ? "运行中" : "无输出"}</div>
+        <div className="tool-terminal-wait">{running ? tr("运行中", "Running") : tr("无输出", "No output")}</div>
       )}
     </div>
   );
 }
 
 function ReadView({ body, running }: { body?: string; running: boolean }) {
-  if (!body) return <p className="tool-wait">{running ? "正在读取" : "文件是空的"}</p>;
+  if (!body) return <p className="tool-wait">{running ? tr("正在读取", "Reading…") : tr("文件是空的", "File is empty")}</p>;
   if (body.startsWith("Read image file")) return <pre className="tool-note">{body}</pre>;
   const presented = presentRead(body);
-  if (presented.lines.length === 0) return <p className="tool-wait">文件是空的</p>;
+  if (presented.lines.length === 0) return <p className="tool-wait">{tr("文件是空的", "File is empty")}</p>;
   return (
     <div className="tool-sheet">
       {presented.lines.map((line, index) => (
@@ -483,7 +484,7 @@ function ReadView({ body, running }: { body?: string; running: boolean }) {
 
 function DiffView({ diff }: { diff: string }) {
   const rows = parseDiff(diff);
-  if (rows.length === 0) return <p className="tool-wait">没有差异</p>;
+  if (rows.length === 0) return <p className="tool-wait">{tr("没有差异", "No diff")}</p>;
   return (
     <div className="tool-sheet">
       {rows.map((row, index) =>
@@ -506,10 +507,10 @@ function DiffView({ diff }: { diff: string }) {
 }
 
 function StatusMark({ status }: { status: ToolTrace["status"] }) {
-  if (status === "running") return <span className="tool-spinner" role="status" aria-label="运行中" />;
+  if (status === "running") return <span className="tool-spinner" role="status" aria-label={tr("运行中", "Running")} />;
   if (status === "error") {
     return (
-      <span className="tool-status-mark error" role="img" aria-label="失败">
+      <span className="tool-status-mark error" role="img" aria-label={tr("失败", "Failed")}>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
           <line x1="18" y1="6" x2="6" y2="18" />
           <line x1="6" y1="6" x2="18" y2="18" />
@@ -518,7 +519,7 @@ function StatusMark({ status }: { status: ToolTrace["status"] }) {
     );
   }
   return (
-    <span className="tool-status-mark done" role="img" aria-label="完成">
+    <span className="tool-status-mark done" role="img" aria-label={tr("完成", "Complete")}>
       <CheckIcon size={12} />
     </span>
   );
@@ -533,10 +534,15 @@ function KindIcon({ kind }: { kind: ToolKind }): ReactNode {
 }
 
 function toolLabel(name: string, kind: ToolKind): string {
-  if (name === "submit_plan") return "计划";
-  if (name === "record_goal_validation") return "验证";
-  if (name === "update_goal") return "目标";
-  if (name === "complete_step") return "步骤";
+  if (name === "submit_plan") return tr("计划", "Plan");
+  if (name === "record_goal_validation") return tr("验证", "Validation");
+  if (name === "update_goal") return tr("目标", "Goal");
+  if (name === "complete_step") return tr("步骤", "Step");
+  return toolKindLabel(kind);
+}
+
+function toolKindLabel(kind: ToolKind): string {
+  if (kind === "other") return tr("工具", "Tool");
   return kindLabels[kind];
 }
 
@@ -548,7 +554,7 @@ function toolKind(name: string): ToolKind {
 function subjectOf(kind: ToolKind, activity: ToolActivity, name: string): { name: string; dir: string } {
   if (kind === "bash") {
     const command = activity.command?.replace(/\s+/g, " ").trim();
-    return { name: command || "命令", dir: "" };
+    return { name: command || tr("命令", "Command"), dir: "" };
   }
   const path = activity.path?.trim();
   if (!path) {

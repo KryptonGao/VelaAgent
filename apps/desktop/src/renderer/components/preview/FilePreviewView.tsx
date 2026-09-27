@@ -3,6 +3,7 @@ import type { ProjectApi } from "../../hooks/useProject";
 import { CheckIcon, CloseIcon, ExternalIcon, FileIcon, GridIcon } from "../icons";
 import { CodePane } from "./CodePane";
 import { ExplorerPane } from "./ExplorerPane";
+import { tr } from "../../locale";
 import { useFilePreview, isAbsolutePathLike } from "./FilePreviewContext";
 import { MarkdownPane } from "./MarkdownPane";
 import { isMarkdownPath } from "./markdown-path";
@@ -39,7 +40,7 @@ export function FilePreviewView({
 
   if (!preview || !tab) return null;
 
-  const rootName = git?.repo?.name ?? basename(preview.fileList?.root) ?? "工作区";
+  const rootName = git?.repo?.name ?? basename(preview.fileList?.root) ?? tr("工作区", "Workspace");
   // 工作区外的标签 id 是绝对路径,面包屑不再挂工作区根名。
   const absoluteTab = isAbsolutePathLike(tab.id);
   const canCopy = content?.kind === "text" && Boolean(content.content);
@@ -73,8 +74,8 @@ export function FilePreviewView({
               <button
                 type="button"
                 className="preview-tab-close"
-                title="关闭标签"
-                aria-label={`关闭 ${item.name}`}
+                title={tr("关闭标签", "Close tab")}
+                aria-label={`${tr("关闭", "Close")} ${item.name}`}
                 onClick={(event) => {
                   event.stopPropagation();
                   preview.closeTab(item.id);
@@ -89,8 +90,8 @@ export function FilePreviewView({
           <button
             type="button"
             className={`icon-btn-ghost${explorerOpen ? " on" : ""}`}
-            title={explorerOpen ? "收起文件树" : "展开文件树"}
-            aria-label="文件树"
+            title={explorerOpen ? tr("收起文件树", "Hide file tree") : tr("展开文件树", "Show file tree")}
+            aria-label={tr("文件树", "File tree")}
             aria-pressed={explorerOpen}
             onClick={() => setExplorerOpen((value) => !value)}
           >
@@ -99,8 +100,8 @@ export function FilePreviewView({
           <button
             type="button"
             className="icon-btn-ghost"
-            title="关闭预览,返回上下文面板"
-            aria-label="关闭预览"
+            title={tr("关闭预览，返回上下文面板", "Close preview and return to context panel")}
+            aria-label={tr("关闭预览", "Close preview")}
             onClick={preview.closePreview}
           >
             <CloseIcon size={12} />
@@ -118,14 +119,14 @@ export function FilePreviewView({
         </div>
         <div className="preview-actions-group">
           {markdownBody ? (
-            <div className="preview-view-toggle" role="group" aria-label="Markdown 显示方式">
+            <div className="preview-view-toggle" role="group" aria-label={tr("Markdown 显示方式", "Markdown view mode")}>
               <button
                 type="button"
                 aria-pressed={showRendered}
                 className={showRendered ? "active" : ""}
                 onClick={() => setMarkdownMode("preview")}
               >
-                预览
+                {tr("预览", "Preview")}
               </button>
               <button
                 type="button"
@@ -133,7 +134,7 @@ export function FilePreviewView({
                 className={showRendered ? "" : "active"}
                 onClick={() => setMarkdownMode("source")}
               >
-                源码
+                {tr("源码", "Source")}
               </button>
             </div>
           ) : null}
@@ -141,17 +142,17 @@ export function FilePreviewView({
             <button
               type="button"
               className="preview-action-pill"
-              title="查看该文件的 Git 差异"
+              title={tr("查看该文件的 Git 差异", "View this file's Git diff")}
               onClick={() => onShowDiff(tab.id)}
             >
-              差异
+              {tr("差异", "Diff")}
             </button>
           ) : null}
           <button
             type="button"
             className="icon-btn-ghost"
-            title="重新读取"
-            aria-label="重新读取"
+            title={tr("重新读取", "Reload")}
+            aria-label={tr("重新读取", "Reload")}
             onClick={preview.reloadActive}
           >
             <span className="preview-reload" aria-hidden="true">
@@ -161,8 +162,8 @@ export function FilePreviewView({
           <button
             type="button"
             className="icon-btn-ghost"
-            title={copied ? "已复制" : "复制文件内容"}
-            aria-label={copied ? "已复制" : "复制文件内容"}
+            title={copied ? tr("已复制", "Copied") : tr("复制文件内容", "Copy file contents")}
+            aria-label={copied ? tr("已复制", "Copied") : tr("复制文件内容", "Copy file contents")}
             disabled={!canCopy}
             onClick={() => {
               if (!content?.content) return;
@@ -174,8 +175,8 @@ export function FilePreviewView({
           <button
             type="button"
             className="icon-btn-ghost"
-            title="用默认应用打开"
-            aria-label="用默认应用打开"
+            title={tr("用默认应用打开", "Open with default app")}
+            aria-label={tr("用默认应用打开", "Open with default app")}
             disabled={!content}
             onClick={() => {
               if (content) project.openFile(content.absolutePath);

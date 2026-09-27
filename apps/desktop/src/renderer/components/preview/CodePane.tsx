@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFilePreview } from "./FilePreviewContext";
+import { localizeError, tr } from "../../locale";
 import { highlightDocument, type ThemedToken } from "./highlighter";
 
 /** 超大文件只渲染前若干行,避免一次性创建过多 DOM。 */
@@ -112,19 +113,19 @@ export function CodePane({ onOpenExternal }: { onOpenExternal: (absolutePath: st
 
   function renderBody() {
     if (preview?.contentLoading) {
-      return <div className="code-state">正在读取文件…</div>;
+      return <div className="code-state">{tr("正在读取文件…", "Reading file…")}</div>;
     }
     if (preview?.contentError) {
-      return <div className="code-state error">{preview.contentError}</div>;
+      return <div className="code-state error">{localizeError(preview.contentError)}</div>;
     }
     if (!content) {
-      return <div className="code-state">选择一个文件开始预览</div>;
+      return <div className="code-state">{tr("选择一个文件开始预览", "Select a file to preview")}</div>;
     }
     if (content.kind === "missing") {
       return (
         <CodeNotice
-          title="文件不存在"
-          detail="文件已被删除或尚未创建。"
+          title={tr("文件不存在", "File not found")}
+          detail={tr("文件已被删除或尚未创建。", "The file was deleted or has not been created yet.")}
           absolutePath={content.absolutePath}
           onOpenExternal={onOpenExternal}
         />
@@ -133,8 +134,8 @@ export function CodePane({ onOpenExternal }: { onOpenExternal: (absolutePath: st
     if (content?.kind === "binary") {
       return (
         <CodeNotice
-          title="二进制文件"
-          detail="该文件类型不支持在侧栏预览。"
+          title={tr("二进制文件", "Binary file")}
+          detail={tr("该文件类型不支持在侧栏预览。", "This file type cannot be previewed in the sidebar.")}
           absolutePath={content.absolutePath}
           onOpenExternal={onOpenExternal}
         />
@@ -143,15 +144,15 @@ export function CodePane({ onOpenExternal }: { onOpenExternal: (absolutePath: st
     if (content?.kind === "too-large") {
       return (
         <CodeNotice
-          title="文件过大"
-          detail={`文件大小为 ${formatSize(content.size)},不支持在侧栏预览。`}
+          title={tr("文件过大", "File is too large")}
+          detail={tr(`文件大小为 ${formatSize(content.size)}，不支持在侧栏预览。`, `File size is ${formatSize(content.size)}. Sidebar preview is not supported.`)}
           absolutePath={content.absolutePath}
           onOpenExternal={onOpenExternal}
         />
       );
     }
     if (content?.kind === "text" && plainLines.length === 0) {
-      return <CodeNotice title="空文件" detail="该文件没有任何内容。" />;
+      return <CodeNotice title={tr("空文件", "Empty file")} detail={tr("该文件没有任何内容。", "This file has no contents.")} />;
     }
     return (
       <>
@@ -178,11 +179,10 @@ export function CodePane({ onOpenExternal }: { onOpenExternal: (absolutePath: st
         </div>
         {plainLines.length > maxRenderRows ? (
           <div className="code-note">
-            文件较长,仅显示前 {maxRenderRows.toLocaleString()} 行(共{" "}
-            {plainLines.length.toLocaleString()} 行)。
+            {tr(`文件较长，仅显示前 ${maxRenderRows.toLocaleString()} 行（共 ${plainLines.length.toLocaleString()} 行）。`, `File is long. Showing the first ${maxRenderRows.toLocaleString()} of ${plainLines.length.toLocaleString()} lines.`)}
           </div>
         ) : null}
-        {content?.truncated ? <div className="code-note">文件超过 1 MB,仅显示开头部分。</div> : null}
+        {content?.truncated ? <div className="code-note">{tr("文件超过 1 MB，仅显示开头部分。", "File exceeds 1 MB. Showing the beginning only.")}</div> : null}
       </>
     );
   }
@@ -205,7 +205,7 @@ function CodeNotice({
       <p className="code-notice-detail">{detail}</p>
       {absolutePath && onOpenExternal ? (
         <button className="code-notice-action" type="button" onClick={() => onOpenExternal(absolutePath)}>
-          在外部打开
+          {tr("在外部打开", "Open externally")}
         </button>
       ) : null}
     </div>

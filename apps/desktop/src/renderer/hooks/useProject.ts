@@ -10,12 +10,13 @@ import type {
   WorkspaceState,
 } from "@vela/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { tr } from "../locale";
 
 export type ProjectApi = ReturnType<typeof useProject>;
 
 function getApi(): VelaApi {
   const api = window.vela;
-  if (!api) throw new Error("Vela API 不可用");
+  if (!api) throw new Error(tr("Vela API 不可用", "Vela API is unavailable"));
   return api;
 }
 

@@ -1,4 +1,5 @@
 import type { SkillOrigin, SkillSummary } from "@vela/shared";
+import { tr } from "../../locale";
 
 /** 光标所在的 `/查询` 片段。查询只取到光标处，替换时会吃掉整个连续词。 */
 export interface SlashToken {
@@ -43,9 +44,9 @@ export function skillTitle(name: string): string {
 }
 
 export function skillOriginLabel(origin: SkillOrigin): string {
-  if (origin === "project") return "项目";
+  if (origin === "project") return tr("项目", "Project");
   if (origin === "agents") return "~/.agents";
-  return "个人";
+  return tr("个人", "Personal");
 }
 
 /** 名称前缀优先，其次是名称包含，最后才是描述包含。 */

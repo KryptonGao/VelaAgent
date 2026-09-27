@@ -25,6 +25,7 @@ import { LoginDialog } from "./ModelControls";
 import { SheetPresence } from "./Presence";
 import { SkillMigrationDialog } from "./SkillMigrationDialog";
 import { settingsCopy, type SettingsCopy } from "./settings-copy";
+import { localizeError, tr } from "../locale";
 
 type SettingsSection = "agent" | "archived" | "models" | "permissions" | "workspace" | "appearance";
 type ModelsApi = ReturnType<typeof useModels>;
@@ -304,7 +305,7 @@ function ArchivedSection({
   );
 
   function unarchive(conversation: ConversationSummary): void {
-    setNotice(`${conversation.title || "新对话"} · ${text.unarchived}`);
+    setNotice(`${conversation.title || tr("新对话", "New chat")} · ${text.unarchived}`);
     onUnarchive(conversation.id);
   }
 
@@ -324,7 +325,7 @@ function ArchivedSection({
           {matches.map((conversation) => (
             <div className="settings-recent" key={conversation.id}>
               <div className="settings-recent-main" title={conversation.cwd}>
-                <span className="settings-recent-name">{conversation.title || "新对话"}</span>
+                <span className="settings-recent-name">{conversation.title || tr("新对话", "New chat")}</span>
                 <span className="settings-recent-path">
                   {`${workspaceName(conversation.cwd)} · ${formatter.format(conversation.archivedAt ?? conversation.updatedAt)}`}
                 </span>
@@ -489,8 +490,8 @@ function ModelsSection({ copy, models }: { copy: SettingsCopy; models: ModelsApi
   return (
     <section className="settings-section">
       <SettingsBlock title={text.connected}>
-        {models.catalogError ? <p className="settings-error">{models.catalogError}</p> : null}
-        {models.actionError ? <p className="settings-error">{models.actionError}</p> : null}
+        {models.catalogError ? <p className="settings-error">{localizeError(models.catalogError)}</p> : null}
+        {models.actionError ? <p className="settings-error">{localizeError(models.actionError)}</p> : null}
         {catalog?.error ? <p className="settings-error">{catalog.error}</p> : null}
         {providers.length === 0 ? <p className="settings-note">{text.empty}</p> : null}
         <div className="settings-stack">
@@ -693,7 +694,7 @@ function PermissionsSection({ copy, project }: { copy: SettingsCopy; project: Pr
         ))}
       </div>
       <p className="settings-note">{text.note}</p>
-      {project.error ? <p className="settings-error">{project.error}</p> : null}
+      {project.error ? <p className="settings-error">{localizeError(project.error)}</p> : null}
     </section>
   );
 }
@@ -806,7 +807,7 @@ function WorkspaceSection({ copy, project }: { copy: SettingsCopy; project: Proj
           })}
         </div>
       </SettingsBlock>
-      {project.error ? <p className="settings-error">{project.error}</p> : null}
+      {project.error ? <p className="settings-error">{localizeError(project.error)}</p> : null}
     </section>
   );
 }

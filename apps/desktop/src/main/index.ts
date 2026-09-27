@@ -8,12 +8,13 @@ import {
   WorkspaceManager,
   createSandboxedToolDefinitions,
 } from "@vela/workspace";
-import { app, BrowserWindow, nativeImage, nativeTheme, shell } from "electron";
+import { app, BrowserWindow, ipcMain, nativeImage, nativeTheme, shell } from "electron";
 import type { BrowserWindowConstructorOptions } from "electron";
+import { IpcChannel } from "@vela/shared";
 import { writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { installApplicationMenu } from "./menu";
+import { setApplicationLocale } from "./menu";
 import { ProjectHost } from "./project-host";
 import { SessionHost } from "./session-host";
 import { prepareVelaHome, resolveVelaHome } from "./vela-home";
@@ -162,12 +163,10 @@ app.whenReady().then(() => {
   if (process.platform === "darwin" && app.dock && !app.isPackaged) {
     app.dock.setIcon(nativeImage.createFromPath(appIconPath));
   }
-  app.setAboutPanelOptions({
-    applicationName: "Vela",
-    applicationVersion: app.getVersion(),
-    credits: "在你选定的代码仓库中工作的桌面 AI 编程助手。",
+  ipcMain.on(IpcChannel.appSetLocale, (_event, locale: unknown) => {
+    if (locale === "en" || locale === "zh-CN") setApplicationLocale(locale);
   });
-  installApplicationMenu();
+  setApplicationLocale("zh-CN");
 
   void start();
 

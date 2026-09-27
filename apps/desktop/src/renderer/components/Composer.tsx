@@ -21,6 +21,7 @@ import { SandboxPill } from "./composer/SandboxPill";
 import { SkillMenu, SkillToken } from "./composer/SkillMenu";
 import { WorkspaceChip } from "./composer/WorkspaceChip";
 import { applySkillPick, composeSkillPrompt, filterSkills, slashTokenAt } from "./composer/skill-picker";
+import { localizeError, tr } from "../locale";
 
 export interface ComposerProps {
   disabled: boolean;
@@ -186,7 +187,7 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
       if (data) {
         payloads.push({
           path: "",
-          name: file.name || "粘贴的图片",
+          name: file.name || tr("粘贴的图片", "Pasted image"),
           kind: "image",
           image: { type: "image", data, mimeType: item.type },
         });
@@ -218,14 +219,14 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
     await onSend(text, images.length > 0 ? images : undefined);
   }
 
-  const showError = sendError ?? project.error;
+  const showError = sendError ? localizeError(sendError) : project.error ? localizeError(project.error) : null;
   const sendHint = disabled
-    ? "会话还没有准备好"
+    ? tr("会话还没有准备好", "Chat is not ready yet")
     : !modelReady
-      ? "先选择一个可用的模型"
+      ? tr("先选择一个可用的模型", "Choose an available model first")
       : !prompt
-        ? "输入内容后发送"
-        : "发送 (Enter)";
+        ? tr("输入内容后发送", "Enter a message to send")
+        : tr("发送 (Enter)", "Send (Enter)");
 
   return (
     <div className="chat-dock-wrapper" ref={ref}>
@@ -294,7 +295,7 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
                 <button
                   type="button"
                   className="attachment-remove"
-                  title="移除附件"
+                  title={tr("移除附件", "Remove attachment")}
                   onClick={() => setAttachments((current) => current.filter((_, i) => i !== index))}
                 >
                   <CloseIcon size={10} />
@@ -320,7 +321,7 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
             ref={inputRef}
             className={`input-textarea${skill ? " with-skill" : ""}`}
             placeholder={skill ? "" : placeholderFor(mode)}
-            aria-label="输入消息"
+            aria-label={tr("输入消息", "Message")}
             rows={1}
             value={value}
             disabled={disabled && !streaming}
@@ -412,8 +413,8 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
               <button
                 className="send-action-blue-btn stop"
                 type="button"
-                title="停止生成"
-                aria-label="停止生成"
+                title={tr("停止生成", "Stop generating")}
+                aria-label={tr("停止生成", "Stop generating")}
                 onClick={() => void onAbort()}
               >
                 <span className="stop-square" />
@@ -423,7 +424,7 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
                 className="send-action-blue-btn"
                 type="submit"
                 title={sendHint}
-                aria-label="发送"
+                aria-label={tr("发送", "Send")}
                 disabled={disabled || !modelReady || !prompt}
               >
                 <SendIcon />
@@ -439,9 +440,9 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
 });
 
 function placeholderFor(mode: InteractionMode): string {
-  if (mode === "plan") return "描述你想规划的改动";
-  if (mode === "goal") return "描述要达成的目标";
-  return "随心输入";
+  if (mode === "plan") return tr("描述你想规划的改动", "Describe the change you want to plan");
+  if (mode === "goal") return tr("描述要达成的目标", "Describe the goal you want to achieve");
+  return tr("随心输入", "Ask anything or describe a task");
 }
 
 function readAsBase64(file: File): Promise<string | null> {

@@ -1,7 +1,26 @@
 import { app, BrowserWindow, Menu, shell, type MenuItemConstructorOptions } from "electron";
-import { IpcChannel, type MenuAction } from "@vela/shared";
+import { IpcChannel, type AppLocale, type MenuAction } from "@vela/shared";
 
 const repoUrl = "https://github.com/KryptonGao/VelaAgent";
+let activeLocale: AppLocale = "zh-CN";
+
+function text(chinese: string, english: string): string {
+  return activeLocale === "en" ? english : chinese;
+}
+
+export function getApplicationLocale(): AppLocale {
+  return activeLocale;
+}
+
+export function setApplicationLocale(locale: AppLocale): void {
+  activeLocale = locale;
+  installApplicationMenu();
+  app.setAboutPanelOptions({
+    applicationName: "Vela",
+    applicationVersion: app.getVersion(),
+    credits: text("在你选定的代码仓库中工作的桌面 AI 编程助手。", "A desktop AI coding assistant that works in the code repository you choose."),
+  });
+}
 
 function sendMenuAction(action: MenuAction): void {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
@@ -22,63 +41,63 @@ export function installApplicationMenu(): void {
           {
             label: name,
             submenu: [
-              { role: "about", label: `关于 ${name}` },
+              { role: "about", label: text(`关于 ${name}`, `About ${name}`) },
               { type: "separator" },
-              { role: "services", label: "服务" },
+              { role: "services", label: text("服务", "Services") },
               { type: "separator" },
-              { role: "hide", label: `隐藏 ${name}` },
-              { role: "hideOthers", label: "隐藏其他" },
-              { role: "unhide", label: "全部显示" },
+              { role: "hide", label: text(`隐藏 ${name}`, `Hide ${name}`) },
+              { role: "hideOthers", label: text("隐藏其他", "Hide Others") },
+              { role: "unhide", label: text("全部显示", "Show All") },
               { type: "separator" },
-              { role: "quit", label: `退出 ${name}` },
+              { role: "quit", label: text(`退出 ${name}`, `Quit ${name}`) },
             ],
           } satisfies MenuItemConstructorOptions,
         ]
       : []),
     {
-      label: "文件",
+      label: text("文件", "File"),
       submenu: [
-        { label: "新建会话", accelerator: "CmdOrCtrl+N", click: () => sendMenuAction("new-chat") },
-        { label: "设置…", accelerator: "CmdOrCtrl+,", click: () => sendMenuAction("toggle-settings") },
+        { label: text("新建会话", "New Chat"), accelerator: "CmdOrCtrl+N", click: () => sendMenuAction("new-chat") },
+        { label: text("设置…", "Settings…"), accelerator: "CmdOrCtrl+,", click: () => sendMenuAction("toggle-settings") },
         { type: "separator" },
-        { role: "close", label: "关闭窗口" },
+        { role: "close", label: text("关闭窗口", "Close Window") },
       ],
     },
     {
-      label: "编辑",
+      label: text("编辑", "Edit"),
       submenu: [
-        { role: "undo", label: "撤销" },
-        { role: "redo", label: "重做" },
+        { role: "undo", label: text("撤销", "Undo") },
+        { role: "redo", label: text("重做", "Redo") },
         { type: "separator" },
-        { role: "cut", label: "剪切" },
-        { role: "copy", label: "拷贝" },
-        { role: "paste", label: "粘贴" },
-        { role: "selectAll", label: "全选" },
+        { role: "cut", label: text("剪切", "Cut") },
+        { role: "copy", label: text("拷贝", "Copy") },
+        { role: "paste", label: text("粘贴", "Paste") },
+        { role: "selectAll", label: text("全选", "Select All") },
       ],
     },
     {
-      label: "显示",
+      label: text("显示", "View"),
       submenu: [
-        { role: "reload", label: "重新加载" },
-        { role: "forceReload", label: "强制重新加载" },
-        { role: "toggleDevTools", label: "开发者工具" },
+        { role: "reload", label: text("重新加载", "Reload") },
+        { role: "forceReload", label: text("强制重新加载", "Force Reload") },
+        { role: "toggleDevTools", label: text("开发者工具", "Developer Tools") },
         { type: "separator" },
-        { role: "resetZoom", label: "实际大小" },
-        { role: "zoomIn", label: "放大" },
-        { role: "zoomOut", label: "缩小" },
+        { role: "resetZoom", label: text("实际大小", "Actual Size") },
+        { role: "zoomIn", label: text("放大", "Zoom In") },
+        { role: "zoomOut", label: text("缩小", "Zoom Out") },
         { type: "separator" },
-        { role: "togglefullscreen", label: "进入全屏" },
+        { role: "togglefullscreen", label: text("进入全屏", "Toggle Full Screen") },
       ],
     },
-    { role: "windowMenu", label: "窗口" },
+    { role: "windowMenu", label: text("窗口", "Window") },
     {
-      label: "帮助",
+      label: text("帮助", "Help"),
       submenu: [
         ...(isMac
           ? []
-          : [{ role: "about", label: `关于 ${name}` } satisfies MenuItemConstructorOptions]),
+          : [{ role: "about", label: text(`关于 ${name}`, `About ${name}`) } satisfies MenuItemConstructorOptions]),
         {
-          label: "项目主页",
+          label: text("项目主页", "Project Website"),
           click: () => void shell.openExternal(repoUrl),
         },
       ],

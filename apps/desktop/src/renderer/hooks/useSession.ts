@@ -10,6 +10,7 @@ import type {
   TranscriptMessage,
 } from "@vela/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { localizeError, tr } from "../locale";
 
 export interface UiMessage {
   id: string;
@@ -143,7 +144,9 @@ export function useSession() {
     const id = activeIdRef.current;
     if (!api || !id) return;
     completionBlockedRef.current[id] = false;
-    const attachment = images && images.length > 0 ? `\n\n[图片 ×${images.length}]` : "";
+    const attachment = images && images.length > 0
+      ? `\n\n${tr(`[图片 ×${images.length}]`, `[Image ×${images.length}]`)}`
+      : "";
     setErrors((current) => ({ ...current, [id]: "" }));
     setBuckets((current) => ({
       ...current,
@@ -157,7 +160,7 @@ export function useSession() {
       const next = await api.prompt(text, images, id);
       setState(next);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "发送失败";
+      const message = error instanceof Error ? localizeError(error.message) : tr("发送失败", "Failed to send message");
       completionBlockedRef.current[id] = true;
       setErrors((current) => ({ ...current, [id]: message }));
       setBuckets((current) => appendAssistantError(current, id, message));

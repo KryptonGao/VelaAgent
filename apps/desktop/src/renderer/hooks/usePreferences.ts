@@ -8,9 +8,10 @@ import {
   type DarkTheme,
   type LightTheme,
 } from "../themes";
+import type { AppLocale } from "@vela/shared";
 
 export type Appearance = "system" | "light" | "dark";
-export type AppLocale = "zh-CN" | "en";
+export type { AppLocale };
 
 const appearanceKey = "vela.appearance";
 const lightThemeKey = "vela.theme.light";

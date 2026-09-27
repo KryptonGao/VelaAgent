@@ -9,12 +9,14 @@ import { useModels } from "./hooks/useModels";
 import { usePreferences } from "./hooks/usePreferences";
 import { useProject } from "./hooks/useProject";
 import { useSession } from "./hooks/useSession";
+import { AppLocaleProvider, setActiveLocale, tr } from "./locale";
 
 export function App() {
   const session = useSession();
   const models = useModels(session.setAppState);
   const project = useProject();
   const preferences = usePreferences();
+  setActiveLocale(preferences.locale);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -62,83 +64,89 @@ export function App() {
     });
   }, [session.newChat]);
 
+  useEffect(() => {
+    window.vela?.setLocale(preferences.locale);
+  }, [preferences.locale]);
+
   if (!session.available) {
     return (
       <div className="boot-fallback">
-        <p>Vela 需要在桌面窗口中运行。</p>
+        <p>{tr("Vela 需要在桌面窗口中运行。", "Vela must run in the desktop app.")}</p>
       </div>
     );
   }
 
   return (
-    <div className={`vela-window platform-${platform}${leftCollapsed ? " left-collapsed" : ""}`}>
-      <Sidebar
-        collapsed={leftCollapsed}
-        platform={platform}
-        conversations={session.conversations}
-        activeConversationId={session.activeConversationId}
-        settingsOpen={settingsOpen}
-        settingsLabel={preferences.locale === "en" ? "Settings" : "设置"}
-        onToggle={() => setLeftCollapsed((value) => !value)}
-        onOpenSettings={() => setSettingsOpen((open) => !open)}
-        onNewChat={() => {
-          setSettingsOpen(false);
-          void session.newChat();
-        }}
-        onSwitchConversation={(id) => {
-          setSettingsOpen(false);
-          void session.switchTo(id);
-        }}
-        onArchiveConversation={(id) => void session.archive(id)}
-      />
-      <div className="main-stage">
-        <Presence present={!settingsOpen} className="main-stage-pane">
-          <FilePreviewProvider onExpand={() => setRightCollapsed(false)}>
-            <ChatView
-              messages={session.messages}
-              state={session.state}
-              sendError={session.sendError}
+    <AppLocaleProvider locale={preferences.locale}>
+      <div className={`vela-window platform-${platform}${leftCollapsed ? " left-collapsed" : ""}`}>
+        <Sidebar
+          collapsed={leftCollapsed}
+          platform={platform}
+          conversations={session.conversations}
+          activeConversationId={session.activeConversationId}
+          settingsOpen={settingsOpen}
+          settingsLabel={tr("设置", "Settings")}
+          onToggle={() => setLeftCollapsed((value) => !value)}
+          onOpenSettings={() => setSettingsOpen((open) => !open)}
+          onNewChat={() => {
+            setSettingsOpen(false);
+            void session.newChat();
+          }}
+          onSwitchConversation={(id) => {
+            setSettingsOpen(false);
+            void session.switchTo(id);
+          }}
+          onArchiveConversation={(id) => void session.archive(id)}
+        />
+        <div className="main-stage">
+          <Presence present={!settingsOpen} className="main-stage-pane">
+            <FilePreviewProvider onExpand={() => setRightCollapsed(false)}>
+              <ChatView
+                messages={session.messages}
+                state={session.state}
+                sendError={session.sendError}
+                platform={platform}
+                leftCollapsed={leftCollapsed}
+                onToggleLeft={() => setLeftCollapsed((value) => !value)}
+                rightCollapsed={rightCollapsed}
+                onToggleRight={() => setRightCollapsed((value) => !value)}
+                project={project}
+                onSend={session.send}
+                onAbort={session.abort}
+                onMode={session.setMode}
+                models={models}
+                getQuestion={session.getQuestion}
+                onReplyQuestion={(id, answer) => void session.replyQuestion(id, answer)}
+                onOpenChanges={() => {
+                  setRightCollapsed(false);
+                  setChangesOpen(true);
+                }}
+              />
+              <ContextPanel
+                collapsed={rightCollapsed}
+                state={session.state}
+                project={project}
+                onToggle={() => setRightCollapsed(true)}
+                onExecutePlan={() => void session.executePlan()}
+                onResumeGoal={() => void session.resumeGoal()}
+                changesOpen={changesOpen}
+                onChangesOpenChange={setChangesOpen}
+              />
+            </FilePreviewProvider>
+          </Presence>
+          <Presence present={settingsOpen} className="main-stage-pane">
+            <SettingsView
+              preferences={preferences}
               platform={platform}
-              leftCollapsed={leftCollapsed}
-              onToggleLeft={() => setLeftCollapsed((value) => !value)}
-              rightCollapsed={rightCollapsed}
-              onToggleRight={() => setRightCollapsed((value) => !value)}
-              project={project}
-              onSend={session.send}
-              onAbort={session.abort}
-              onMode={session.setMode}
               models={models}
-              getQuestion={session.getQuestion}
-              onReplyQuestion={(id, answer) => void session.replyQuestion(id, answer)}
-              onOpenChanges={() => {
-                setRightCollapsed(false);
-                setChangesOpen(true);
-              }}
-            />
-            <ContextPanel
-              collapsed={rightCollapsed}
-              state={session.state}
               project={project}
-              onToggle={() => setRightCollapsed(true)}
-              onExecutePlan={() => void session.executePlan()}
-              onResumeGoal={() => void session.resumeGoal()}
-              changesOpen={changesOpen}
-              onChangesOpenChange={setChangesOpen}
+              conversations={session.conversations}
+              onUnarchiveConversation={(id) => void session.unarchive(id)}
+              onClose={() => setSettingsOpen(false)}
             />
-          </FilePreviewProvider>
-        </Presence>
-        <Presence present={settingsOpen} className="main-stage-pane">
-          <SettingsView
-            preferences={preferences}
-            platform={platform}
-            models={models}
-            project={project}
-            conversations={session.conversations}
-            onUnarchiveConversation={(id) => void session.unarchive(id)}
-            onClose={() => setSettingsOpen(false)}
-          />
-        </Presence>
+          </Presence>
+        </div>
       </div>
-    </div>
+    </AppLocaleProvider>
   );
 }

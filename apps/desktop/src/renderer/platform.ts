@@ -4,7 +4,8 @@ export function modKeyLabel(platform: string): string {
 }
 
 export function fileManagerName(platform: string): string {
-  if (platform === "darwin") return "访达";
-  if (platform === "win32") return "资源管理器";
-  return "文件管理器";
+  if (platform === "darwin") return tr("访达", "Finder");
+  if (platform === "win32") return tr("资源管理器", "File Explorer");
+  return tr("文件管理器", "File Manager");
 }
+import { tr } from "./locale";

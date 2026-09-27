@@ -52,6 +52,7 @@ export const IpcChannel = {
   appPickAttachments: "app:pick-attachments",
   appHydrateAttachments: "app:hydrate-attachments",
   appMenuAction: "app:menu-action",
+  appSetLocale: "app:set-locale",
   workspaceFileRead: "workspace:file-read",
   workspaceFileList: "workspace:file-list",
   workspaceSearch: "workspace:code-search",
@@ -63,6 +64,9 @@ export const IpcChannel = {
   migrateSkills: "skills:migrate",
   registerModel: "models:register",
 } as const;
+
+export const appLocales = ["zh-CN", "en"] as const;
+export type AppLocale = (typeof appLocales)[number];
 
 export const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
@@ -697,6 +701,7 @@ export interface FileAttachmentPayload {
 
 export interface VelaApi {
   platform: string;
+  setLocale(locale: AppLocale): void;
   getState(): Promise<AppState>;
   prompt(text: string, images?: ImageAttachment[], conversationId?: string): Promise<AppState>;
   abort(conversationId?: string): Promise<AppState>;

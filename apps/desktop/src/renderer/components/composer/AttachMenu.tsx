@@ -2,6 +2,7 @@ import type { FileAttachmentPayload } from "@vela/shared";
 import { useDismissable } from "../../hooks/useDismissable";
 import { FileIcon, ImageIcon, PlusIcon } from "../icons";
 import { useState } from "react";
+import { tr } from "../../locale";
 
 export function AttachMenu({
   onAttachments,
@@ -26,8 +27,8 @@ export function AttachMenu({
       <button
         type="button"
         className="attach-btn"
-        title="添加附件"
-        aria-label="添加附件"
+        title={tr("添加附件", "Add attachment")}
+        aria-label={tr("添加附件", "Add attachment")}
         aria-haspopup="true"
         aria-expanded={open}
         disabled={disabled}
@@ -39,13 +40,13 @@ export function AttachMenu({
         <div className="dock-popover composer-popover up attach-menu">
           <button type="button" className="attach-menu-row" onClick={() => void pick("file")}>
             <FileIcon />
-            <span>选择文件…</span>
+            <span>{tr("选择文件…", "Choose file…")}</span>
           </button>
           <button type="button" className="attach-menu-row" onClick={() => void pick("image")}>
             <ImageIcon />
-            <span>选择图片…</span>
+            <span>{tr("选择图片…", "Choose image…")}</span>
           </button>
-          <div className="composer-popover-footnote">也可以把文件或图片直接拖进输入框</div>
+          <div className="composer-popover-footnote">{tr("也可以把文件或图片直接拖进输入框", "You can also drag files or images into the message box")}</div>
         </div>
       ) : null}
     </div>

@@ -14,6 +14,21 @@ import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type R
 import { useEscapeKey } from "../hooks/useDismissable";
 import type { LoginState } from "../hooks/useModels";
 import { SheetPresence } from "./Presence";
+import { localizeError, tr } from "../locale";
+
+const thinkingLabelsEn: Record<ThinkingLevel, string> = {
+  off: "Off",
+  minimal: "Minimal",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Max",
+};
+
+function thinkingLabel(level: ThinkingLevel): string {
+  return tr(thinkingLevelLabel[level], thinkingLabelsEn[level]);
+}
 
 interface ModelControlsProps {
   modelLabel: string | null;
@@ -83,7 +98,7 @@ export function ModelControls(props: ModelControlsProps) {
         <button
           className="model-choice-pill"
           type="button"
-          title={thinkingChoices.length < 2 ? "当前模型不支持调整思考强度" : "思考强度"}
+          title={thinkingChoices.length < 2 ? tr("当前模型不支持调整思考强度", "The current model does not support adjustable reasoning") : tr("思考强度", "Reasoning effort")}
           aria-controls={thinkingPopoverId}
           aria-expanded={menu === "thinking"}
           disabled={props.disabled || thinkingChoices.length < 2}
@@ -96,14 +111,14 @@ export function ModelControls(props: ModelControlsProps) {
             setMenu("thinking");
           }}
         >
-          <span>{thinkingLevelLabel[shownThinking]}</span>
+          <span>{thinkingLabel(shownThinking)}</span>
           <Chevron />
         </button>
         {menu === "thinking" ? (
-          <div id={thinkingPopoverId} className="dock-popover thinking-popover" role="group" aria-label="思考强度">
+          <div id={thinkingPopoverId} className="dock-popover thinking-popover" role="group" aria-label={tr("思考强度", "Reasoning effort")}>
             <div className="thinking-popover-heading">
-              <span className="thinking-level-value" aria-live="polite">{thinkingLevelLabel[sliderThinking]}</span>
-              <span className="thinking-model-label">{props.modelLabel ?? "选择模型"}</span>
+              <span className="thinking-level-value" aria-live="polite">{thinkingLabel(sliderThinking)}</span>
+              <span className="thinking-model-label">{props.modelLabel ?? tr("选择模型", "Choose a model")}</span>
             </div>
             <div
               className="thinking-slider"
@@ -140,8 +155,8 @@ export function ModelControls(props: ModelControlsProps) {
               </div>
               <input
                 className="thinking-slider-input"
-                aria-label="思考强度"
-                aria-valuetext={thinkingLevelLabel[sliderThinking]}
+                aria-label={tr("思考强度", "Reasoning effort")}
+                aria-valuetext={thinkingLabel(sliderThinking)}
                 type="range"
                 min={0}
                 max={sliderRangeMax}
@@ -172,13 +187,13 @@ export function ModelControls(props: ModelControlsProps) {
         <button
           className="model-choice-pill model-pill"
           type="button"
-          title={props.modelLabel ? `模型:${props.modelLabel}` : "选择模型"}
+          title={props.modelLabel ? `${tr("模型", "Model")}: ${props.modelLabel}` : tr("选择模型", "Choose a model")}
           aria-haspopup="true"
           aria-expanded={menu === "model"}
           disabled={props.disabled}
           onClick={() => setMenu((current) => (current === "model" ? null : "model"))}
         >
-          <span className="model-pill-label">{props.modelLabel ?? "选择模型"}</span>
+          <span className="model-pill-label">{props.modelLabel ?? tr("选择模型", "Choose a model")}</span>
           <Chevron />
         </button>
         {menu === "model" ? (
@@ -263,8 +278,8 @@ function ModelMenu({
     <div className="dock-popover model-popover">
       <input
         className="menu-search"
-        placeholder="搜索模型"
-        aria-label="搜索模型"
+        placeholder={tr("搜索模型", "Search models")}
+        aria-label={tr("搜索模型", "Search models")}
         autoFocus
         value={query}
         onChange={(event) => setQuery(event.target.value)}
@@ -273,14 +288,14 @@ function ModelMenu({
         }}
       />
       <div className="menu-scroll">
-        {catalogError ? <p className="menu-note">{catalogError}</p> : null}
-        {actionError ? <p className="menu-note menu-note-error">{actionError}</p> : null}
-        {catalog?.error ? <p className="menu-note menu-note-error">{catalog.error}</p> : null}
-        {!catalog && !catalogError ? <p className="menu-note">正在读取模型</p> : null}
+        {catalogError ? <p className="menu-note">{localizeError(catalogError)}</p> : null}
+        {actionError ? <p className="menu-note menu-note-error">{localizeError(actionError)}</p> : null}
+        {catalog?.error ? <p className="menu-note menu-note-error">{localizeError(catalog.error)}</p> : null}
+        {!catalog && !catalogError ? <p className="menu-note">{tr("正在读取模型", "Loading models…")}</p> : null}
         {catalog && provider && modelId && !catalog.models.some((model) => model.available && model.provider === provider && model.id === modelId) ? (
-          <p className="menu-note">当前模型还不能使用，请先在账号里登录。</p>
+          <p className="menu-note">{tr("当前模型还不能使用，请先在账号里登录。", "This model is unavailable. Sign in to the provider first.")}</p>
         ) : null}
-        {catalog && groups.length === 0 ? <p className="menu-note">还没有可用模型。先登录提供方，或添加一个兼容接口。</p> : null}
+        {catalog && groups.length === 0 ? <p className="menu-note">{tr("还没有可用模型。先登录提供方，或添加一个兼容接口。", "No models are available. Sign in to a provider or add a compatible API.")}</p> : null}
         {groups.map((group) => (
           <section key={group.provider}>
             <div className="menu-section">{group.name}</div>
@@ -295,7 +310,7 @@ function ModelMenu({
                 >
                   <span className="menu-row-title">
                     {model.name}
-                    {model.custom ? <em>自定义</em> : null}
+                    {model.custom ? <em>{tr("自定义", "Custom")}</em> : null}
                   </span>
                   <span className="menu-row-meta">{model.id}</span>
                 </button>
@@ -305,8 +320,8 @@ function ModelMenu({
         ))}
       </div>
       <div className="menu-footer">
-        <button className="menu-footer-btn" type="button" onClick={onAccounts}>账号</button>
-        <button className="menu-footer-btn" type="button" onClick={onAdd}>添加模型</button>
+        <button className="menu-footer-btn" type="button" onClick={onAccounts}>{tr("账号", "Accounts")}</button>
+        <button className="menu-footer-btn" type="button" onClick={onAdd}>{tr("添加模型", "Add model")}</button>
       </div>
     </div>
   );
@@ -346,20 +361,20 @@ function AccountSheet({
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header className="sheet-header">
-          <h2 id="account-sheet-title">账号</h2>
-          <button className="sheet-close" type="button" onClick={onClose}>关闭</button>
+          <h2 id="account-sheet-title">{tr("账号", "Accounts")}</h2>
+          <button className="sheet-close" type="button" onClick={onClose}>{tr("关闭", "Close")}</button>
         </header>
         <input
           className="menu-search sheet-search"
-          placeholder="搜索提供方"
-          aria-label="搜索提供方"
+          placeholder={tr("搜索提供方", "Search providers")}
+          aria-label={tr("搜索提供方", "Search providers")}
           autoFocus
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-        {actionError ? <p className="menu-note menu-note-error">{actionError}</p> : null}
+        {actionError ? <p className="menu-note menu-note-error">{localizeError(actionError)}</p> : null}
         <div className="sheet-scroll">
-          <p className="menu-note">登录和密钥保存在 Vela 自己的目录里。</p>
+          <p className="menu-note">{tr("登录和密钥保存在 Vela 自己的目录里。", "Sign-ins and API keys are stored in Vela's data directory.")}</p>
           {providers.map((provider) => (
             <ProviderRow
               key={provider.id}
@@ -410,11 +425,11 @@ function ProviderRow({
         <div className="provider-actions">
           {provider.methods.map((method) => (
             <button key={method.type} className="menu-footer-btn" type="button" onClick={() => void onLogin(provider.id, method.type)}>
-              {method.type === "oauth" ? "登录" : "填写密钥"}
+              {method.type === "oauth" ? tr("登录", "Sign in") : tr("填写密钥", "Enter API key")}
             </button>
           ))}
           {provider.stored ? (
-            <button className="menu-footer-btn" type="button" onClick={() => void onLogout(provider.id)}>退出</button>
+            <button className="menu-footer-btn" type="button" onClick={() => void onLogout(provider.id)}>{tr("退出", "Sign out")}</button>
           ) : null}
         </div>
       </div>
@@ -424,7 +439,7 @@ function ProviderRow({
           <div className="custom-model-row" key={key}>
             <span>{model.name}</span>
             <button className="menu-footer-btn" type="button" onClick={() => void onRemove(model)}>
-              {pendingDelete === key ? "确认删除" : "删除"}
+              {pendingDelete === key ? tr("确认删除", "Confirm delete") : tr("删除", "Delete")}
             </button>
           </div>
         );
@@ -489,60 +504,60 @@ function AddModelSheet({
         }}
       >
         <header className="sheet-header">
-          <h2 id="add-model-sheet-title">添加模型</h2>
-          <button className="sheet-close" type="button" onClick={onClose}>关闭</button>
+          <h2 id="add-model-sheet-title">{tr("添加模型", "Add model")}</h2>
+          <button className="sheet-close" type="button" onClick={onClose}>{tr("关闭", "Close")}</button>
         </header>
         <div className="sheet-scroll form-grid">
-          <p className="menu-note">用于 OpenAI、Anthropic 或 Google 兼容接口。内置提供方请用账号登录，Codex 走 ChatGPT 登录。</p>
-          <Field label="提供方 ID">
+          <p className="menu-note">{tr("用于 OpenAI、Anthropic 或 Google 兼容接口。内置提供方请用账号登录，Codex 走 ChatGPT 登录。", "For OpenAI, Anthropic, or Google compatible APIs. Sign in to built-in providers; use ChatGPT sign-in for Codex.")}</p>
+          <Field label={tr("提供方 ID", "Provider ID")}>
             <input value={form.providerId} placeholder="ollama" onBlur={fillKnownProvider} onChange={(event) => setForm({ ...form, providerId: event.target.value })} />
           </Field>
-          <Field label="显示名称">
-            <input value={form.providerName} placeholder="可选" onChange={(event) => setForm({ ...form, providerName: event.target.value })} />
+          <Field label={tr("显示名称", "Display name")}>
+            <input value={form.providerName} placeholder={tr("可选", "Optional")} onChange={(event) => setForm({ ...form, providerName: event.target.value })} />
           </Field>
-          <Field label="接口类型">
+          <Field label={tr("接口类型", "API type")}>
             <select value={form.api} onChange={(event) => setForm({ ...form, api: event.target.value as CustomModelApi })}>
               {customModelApis.map((api) => (
                 <option key={api} value={api}>{apiLabel[api]}</option>
               ))}
             </select>
           </Field>
-          <Field label="接口地址">
+          <Field label={tr("接口地址", "API URL")}>
             <input value={form.baseUrl} placeholder="http://127.0.0.1:11434/v1" onChange={(event) => setForm({ ...form, baseUrl: event.target.value })} />
           </Field>
-          <Field label="密钥">
-            <input type="password" value={form.apiKey} placeholder="已有接口可以留空" onChange={(event) => setForm({ ...form, apiKey: event.target.value })} />
+          <Field label={tr("密钥", "API key")}>
+            <input type="password" value={form.apiKey} placeholder={tr("已有接口可以留空", "Leave blank if already configured")} onChange={(event) => setForm({ ...form, apiKey: event.target.value })} />
           </Field>
-          <Field label="模型 ID">
+          <Field label={tr("模型 ID", "Model ID")}>
             <input value={form.modelId} placeholder="qwen2.5-coder:7b" onChange={(event) => setForm({ ...form, modelId: event.target.value })} />
           </Field>
-          <Field label="模型名称">
-            <input value={form.modelName} placeholder="可选" onChange={(event) => setForm({ ...form, modelName: event.target.value })} />
+          <Field label={tr("模型名称", "Model name")}>
+            <input value={form.modelName} placeholder={tr("可选", "Optional")} onChange={(event) => setForm({ ...form, modelName: event.target.value })} />
           </Field>
           <label className="check-row">
             <input type="checkbox" checked={form.reasoning} onChange={(event) => setForm({ ...form, reasoning: event.target.checked })} />
-            <span>支持思考强度</span>
+            <span>{tr("支持思考强度", "Supports reasoning effort")}</span>
           </label>
-          <Field label="上下文长度">
+          <Field label={tr("上下文长度", "Context window")}>
             <input
               inputMode="numeric"
               value={form.contextWindow ?? ""}
-              placeholder="可选"
+              placeholder={tr("可选", "Optional")}
               onChange={(event) => setForm({ ...form, contextWindow: event.target.value ? Number(event.target.value) : null })}
             />
           </Field>
-          <Field label="输出上限">
+          <Field label={tr("输出上限", "Maximum output tokens")}>
             <input
               inputMode="numeric"
               value={form.maxTokens ?? ""}
-              placeholder="可选"
+              placeholder={tr("可选", "Optional")}
               onChange={(event) => setForm({ ...form, maxTokens: event.target.value ? Number(event.target.value) : null })}
             />
           </Field>
-          {error ? <p className="menu-note menu-note-error">{error}</p> : null}
+          {error ? <p className="menu-note menu-note-error">{localizeError(error)}</p> : null}
         </div>
         <div className="sheet-footer">
-          <button className="primary-btn" type="submit" disabled={saving}>{saving ? "正在添加" : "添加"}</button>
+          <button className="primary-btn" type="submit" disabled={saving}>{saving ? tr("正在添加", "Adding…") : tr("添加", "Add")}</button>
         </div>
       </form>
     </div>
@@ -575,11 +590,11 @@ export function LoginDialog({
     <div className="sheet-backdrop">
       <section ref={dialogRef} className="sheet-card login-card" role="dialog" aria-modal="true" aria-labelledby="login-sheet-title">
         <header className="sheet-header">
-          <h2 id="login-sheet-title">登录</h2>
+          <h2 id="login-sheet-title">{tr("登录", "Sign in")}</h2>
           {login.error ? (
-            <button className="sheet-close" type="button" onClick={onDismiss}>关闭</button>
+            <button className="sheet-close" type="button" onClick={onDismiss}>{tr("关闭", "Close")}</button>
           ) : (
-            <button className="sheet-close" type="button" onClick={() => void onCancel()}>取消</button>
+            <button className="sheet-close" type="button" onClick={() => void onCancel()}>{tr("取消", "Cancel")}</button>
           )}
         </header>
         <div className="sheet-scroll login-body">
@@ -587,7 +602,7 @@ export function LoginDialog({
             <Notice key={`${notice.type}-${index}`} notice={notice} />
           ))}
           {login.progress ? <p className="menu-note">{translate(login.progress)}</p> : null}
-          {login.error ? <p className="menu-note menu-note-error">{login.error}</p> : null}
+          {login.error ? <p className="menu-note menu-note-error">{localizeError(login.error)}</p> : null}
           {prompt?.prompt.type === "select" ? (
             <div className="login-options">
               <p>{translate(prompt.prompt.message)}</p>
@@ -615,10 +630,10 @@ export function LoginDialog({
                 placeholder={prompt.prompt.placeholder ? translate(prompt.prompt.placeholder) : ""}
                 onChange={(event) => setValue(event.target.value)}
               />
-              <button className="primary-btn" type="submit" disabled={!value.trim()}>继续</button>
+              <button className="primary-btn" type="submit" disabled={!value.trim()}>{tr("继续", "Continue")}</button>
             </form>
           ) : null}
-          {!prompt && !login.error ? <p className="menu-note">正在等待登录完成。</p> : null}
+          {!prompt && !login.error ? <p className="menu-note">{tr("正在等待登录完成。", "Waiting for sign-in to complete…")}</p> : null}
         </div>
       </section>
     </div>
@@ -629,17 +644,17 @@ function Notice({ notice }: { notice: AuthNotice }) {
   if (notice.type === "device_code") {
     return (
       <div className="login-device">
-        <p>在验证页面输入这组设备码</p>
+        <p>{tr("在验证页面输入这组设备码", "Enter this device code on the verification page")}</p>
         <code>{notice.userCode}</code>
-        <a href={notice.verificationUri} target="_blank" rel="noreferrer">打开验证页面</a>
+        <a href={notice.verificationUri} target="_blank" rel="noreferrer">{tr("打开验证页面", "Open verification page")}</a>
       </div>
     );
   }
   if (notice.type === "auth_url") {
     return (
       <div className="login-link">
-        <p>{translate(notice.instructions ?? "在浏览器中完成登录。")}</p>
-        <a href={notice.url} target="_blank" rel="noreferrer">打开登录页面</a>
+        <p>{translate(notice.instructions ?? tr("在浏览器中完成登录。", "Complete sign-in in your browser."))}</p>
+        <a href={notice.url} target="_blank" rel="noreferrer">{tr("打开登录页面", "Open sign-in page")}</a>
       </div>
     );
   }
@@ -648,7 +663,7 @@ function Notice({ notice }: { notice: AuthNotice }) {
       <div className="login-link">
         <p>{translate(notice.message)}</p>
         {notice.links?.map((link) => (
-          <a key={link.url} href={link.url} target="_blank" rel="noreferrer">{link.label ?? "打开链接"}</a>
+          <a key={link.url} href={link.url} target="_blank" rel="noreferrer">{link.label ?? tr("打开链接", "Open link")}</a>
         ))}
       </div>
     );
@@ -688,11 +703,11 @@ function groupModels(models: ModelSummary[], query: string): { provider: string;
 }
 
 function providerStatus(provider: ProviderSummary): string {
-  if (provider.stored) return "已登录";
-  if (provider.authSource === "environment") return "环境变量";
-  if (provider.authSource === "models_json_key" || provider.authSource === "models_json_command") return "已保存密钥";
-  if (provider.authenticated) return "可用";
-  return "未登录";
+  if (provider.stored) return tr("已登录", "Signed in");
+  if (provider.authSource === "environment") return tr("环境变量", "Environment variable");
+  if (provider.authSource === "models_json_key" || provider.authSource === "models_json_command") return tr("已保存密钥", "Saved API key");
+  if (provider.authenticated) return tr("可用", "Available");
+  return tr("未登录", "Not signed in");
 }
 
 function isCustomApi(value: string | undefined): value is CustomModelApi {
@@ -706,18 +721,18 @@ const apiLabel: Record<CustomModelApi, string> = {
   "google-generative-ai": "Google Generative AI",
 };
 
-const knownText: Record<string, string> = {
-  "Select OpenAI Codex login method:": "选择 Codex 登录方式",
-  "Browser login (default)": "浏览器登录",
-  "Device code login (headless)": "设备码登录",
-  "Complete login in your browser, or paste the authorization code / redirect URL here:": "在浏览器完成登录，或把授权码 / 回调地址粘贴到这里",
-  "A browser window should open. Complete login to finish.": "将打开浏览器。完成登录后会自动继续，也可以把回调地址粘贴到下面。",
+const knownText: Record<string, [string, string]> = {
+  "Select OpenAI Codex login method:": ["选择 Codex 登录方式", "Select a Codex sign-in method"],
+  "Browser login (default)": ["浏览器登录", "Sign in with browser (default)"],
+  "Device code login (headless)": ["设备码登录", "Sign in with device code (headless)"],
+  "Complete login in your browser, or paste the authorization code / redirect URL here:": ["在浏览器完成登录，或把授权码 / 回调地址粘贴到这里", "Complete sign-in in your browser, or paste the authorization code / redirect URL here:"],
+  "A browser window should open. Complete login to finish.": ["将打开浏览器。完成登录后会自动继续，也可以把回调地址粘贴到下面。", "A browser window should open. Complete sign-in to continue, or paste the redirect URL below."],
 };
 
 function translate(message: string): string {
   const known = knownText[message];
-  if (known) return known;
+  if (known) return tr(known[0], known[1]);
   const enter = /^Enter (.+)$/.exec(message);
-  if (enter?.[1]) return `输入 ${enter[1]}`;
+  if (enter?.[1]) return tr(`输入 ${enter[1]}`, `Enter ${enter[1]}`);
   return message;
 }

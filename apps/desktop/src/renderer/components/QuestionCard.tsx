@@ -1,6 +1,7 @@
 import type { AskUserQuestionRequest, ToolTrace } from "@vela/shared";
 import { useState } from "react";
 import { QuestionIcon } from "./icons";
+import { tr } from "../locale";
 
 /**
  * ask_user_question 工具的消息内卡片。
@@ -21,7 +22,7 @@ export function QuestionCard({
   const lines = (tool.activity?.body ?? "").split("\n").filter((line) => line.trim().length > 0);
   const question = request?.question ?? lines[0] ?? "…";
   const optionLines = request ? [] : lines.filter((line) => line.startsWith("·"));
-  const answerLine = request ? null : lines.find((line) => line.startsWith("用户回答："));
+  const answerLine = request ? null : lines.find((line) => line.startsWith("用户回答：") || line.startsWith("Your answer: "));
   const interactive = tool.status === "running" && request !== null && !busy;
 
   function reply(answer: string | null): void {
@@ -42,29 +43,29 @@ export function QuestionCard({
         <span className="tool-card-icon" aria-hidden="true">
           <QuestionIcon size={13} />
         </span>
-        <span className="tool-kind-label">提问</span>
+        <span className="tool-kind-label">{tr("提问", "Question")}</span>
         <span className="question-card-state">
           {tool.status === "running" ? (
             busy ? (
-              "已选择,等待确认"
+              tr("已选择，等待确认", "Selected, waiting for confirmation")
             ) : request ? (
-              "等待你的回答"
+              tr("等待你的回答", "Waiting for your answer")
             ) : (
-              "等待回答"
+              tr("等待回答", "Waiting for an answer")
             )
           ) : tool.status === "error" ? (
-            "未回答"
+            tr("未回答", "Unanswered")
           ) : null}
         </span>
         {tool.status === "running" ? (
-          <span className="tool-spinner" role="status" aria-label="等待回答" />
+          <span className="tool-spinner" role="status" aria-label={tr("等待回答", "Waiting for an answer")} />
         ) : null}
       </div>
       <div className="question-card-q">{question}</div>
       {interactive && request ? (
         <>
           {request.options.length > 0 ? (
-            <div className="question-card-options" role="group" aria-label="回答选项">
+            <div className="question-card-options" role="group" aria-label={tr("回答选项", "Answer options")}>
               {request.options.map((option) => (
                 <button
                   type="button"
@@ -86,8 +87,8 @@ export function QuestionCard({
               <input
                 className="question-custom-input"
                 value={custom}
-                placeholder="自定义回答…"
-                aria-label="自定义回答"
+                placeholder={tr("自定义回答…", "Write a custom answer…")}
+                aria-label={tr("自定义回答", "Custom answer")}
                 onChange={(event) => setCustom(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.nativeEvent.isComposing || event.key === "Process") return;
@@ -103,13 +104,13 @@ export function QuestionCard({
                 disabled={!custom.trim()}
                 onClick={submitCustom}
               >
-                发送
+                {tr("发送", "Send")}
               </button>
             </div>
           ) : null}
           <div className="question-card-skip">
             <button type="button" className="question-skip" onClick={() => reply(null)}>
-              跳过这个问题
+              {tr("跳过这个问题", "Skip this question")}
             </button>
           </div>
         </>
@@ -121,9 +122,9 @@ export function QuestionCard({
             </div>
           ))}
           {answerLine ? (
-            <div className="question-card-a">{answerLine.replace(/^用户回答：/, "")}</div>
+            <div className="question-card-a">{answerLine.replace(/^(用户回答：|Your answer: )/, "")}</div>
           ) : tool.status !== "running" ? (
-            <p className="tool-wait">{tool.status === "error" ? "问题没有回答" : "没有回答"}</p>
+            <p className="tool-wait">{tool.status === "error" ? tr("问题没有回答", "Question was not answered") : tr("没有回答", "No answer")}</p>
           ) : null}
         </>
       )}

@@ -1,12 +1,13 @@
 import type { SandboxApprovalRequest } from "@vela/shared";
 import { useState } from "react";
 import { ShieldIcon } from "../icons";
+import { tr } from "../../locale";
 
-const kindLabels: Record<SandboxApprovalRequest["kind"], string> = {
-  bash: "运行命令",
-  edit: "修改文件",
-  write: "写入文件",
-  mkdir: "创建目录",
+const kindLabels: Record<SandboxApprovalRequest["kind"], [string, string]> = {
+  bash: ["运行命令", "Run command"],
+  edit: ["修改文件", "Edit file"],
+  write: ["写入文件", "Write file"],
+  mkdir: ["创建目录", "Create directory"],
 };
 
 /**
@@ -41,16 +42,17 @@ export function ApprovalBanner({
 }) {
   const summary =
     approval.kind === "bash"
-      ? approval.command ?? "(未提供命令)"
-      : approval.path ?? "(未提供路径)";
+      ? approval.command ?? tr("(未提供命令)", "(No command provided)")
+      : approval.path ?? tr("(未提供路径)", "(No path provided)");
+  const [kindZh, kindEn] = kindLabels[approval.kind];
 
   return (
-    <div className="approval-banner" role="alertdialog" aria-label="执行权限请求">
+    <div className="approval-banner" role="alertdialog" aria-label={tr("执行权限请求", "Permission request")}>
       <div className="approval-banner-head">
         <span className="approval-banner-icon">
           <ShieldIcon size={13} />
         </span>
-        <span className="approval-banner-title">{kindLabels[approval.kind]}需要批准</span>
+        <span className="approval-banner-title">{tr(`${kindZh}需要批准`, `${kindEn} requires approval`)}</span>
       </div>
       <pre className="approval-banner-summary">{summary}</pre>
       <div className="approval-banner-actions">
@@ -59,14 +61,14 @@ export function ApprovalBanner({
           className="approval-btn deny"
           onClick={() => onReply(approval.id, false)}
         >
-          拒绝
+          {tr("拒绝", "Deny")}
         </button>
         <button
           type="button"
           className="approval-btn allow"
           onClick={() => onReply(approval.id, true)}
         >
-          允许一次
+          {tr("允许一次", "Allow once")}
         </button>
       </div>
     </div>

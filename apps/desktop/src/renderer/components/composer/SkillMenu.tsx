@@ -2,6 +2,7 @@ import type { SkillSummary } from "@vela/shared";
 import { useEffect, useRef } from "react";
 import { CloseIcon, SkillIcon } from "../icons";
 import { skillOriginLabel, skillTitle } from "./skill-picker";
+import { localizeError, tr } from "../../locale";
 
 export function SkillToken({
   name,
@@ -17,7 +18,7 @@ export function SkillToken({
       <SkillIcon size={15} />
       <span className="composer-skill-name">{skillTitle(name)}</span>
       {onRemove ? (
-        <button type="button" className="composer-skill-remove" aria-label="移除 Skill" onClick={onRemove}>
+        <button type="button" className="composer-skill-remove" aria-label={tr("移除 Skill", "Remove skill")} onClick={onRemove}>
           <CloseIcon size={12} />
         </button>
       ) : null}
@@ -54,16 +55,16 @@ export function SkillMenu({
   }, [activeIndex, skills]);
 
   const empty = skills === null && !error
-    ? "正在读取 Skill…"
+    ? tr("正在读取 Skill…", "Loading skills…")
     : error && !query
-      ? error
+      ? localizeError(error)
       : query
-        ? "没有匹配的 Skill"
-        : "还没有 Skill";
+        ? tr("没有匹配的 Skill", "No matching skills")
+        : tr("还没有 Skill", "No skills yet");
 
   return (
-    <div className="skill-menu" id="skill-menu" role="listbox" aria-label="技能" onMouseDown={(event) => event.preventDefault()}>
-      <div className="skill-menu-title">技能</div>
+    <div className="skill-menu" id="skill-menu" role="listbox" aria-label={tr("技能", "Skills")} onMouseDown={(event) => event.preventDefault()}>
+      <div className="skill-menu-title">{tr("技能", "Skills")}</div>
       {skills && skills.length > 0 ? (
         <div className="skill-menu-list" ref={listRef}>
           {skills.map((skill, index) => {

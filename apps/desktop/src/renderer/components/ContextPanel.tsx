@@ -16,14 +16,20 @@ import { SheetPresence } from "./Presence";
 import { FilePreviewView } from "./preview/FilePreviewView";
 import { useFilePreview } from "./preview/FilePreviewContext";
 import { RepoCard } from "./RepoCard";
+import { isEnglish, tr } from "../locale";
 
-const categoryLabels: Record<ContextCategory, string> = {
-  system: "系统提示词",
-  tools: "工具定义",
-  rules: "规则",
-  skills: "Skills",
-  conversation: "对话",
+const categoryLabels: Record<ContextCategory, [string, string]> = {
+  system: ["系统提示词", "System prompt"],
+  tools: ["工具定义", "Tool definitions"],
+  rules: ["规则", "Rules"],
+  skills: ["Skills", "Skills"],
+  conversation: ["对话", "Conversation"],
 };
+
+function categoryLabel(category: ContextCategory): string {
+  const [chinese, english] = categoryLabels[category];
+  return tr(chinese, english);
+}
 
 interface ContextPanelProps {
   collapsed: boolean;
@@ -61,8 +67,8 @@ export function ContextPanel({
         <button
           className="sidebar-collapse-btn"
           type="button"
-          title="收起右侧面板"
-          aria-label="收起右侧面板"
+          title={tr("收起右侧面板", "Collapse right panel")}
+          aria-label={tr("收起右侧面板", "Collapse right panel")}
           onClick={onToggle}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -98,12 +104,12 @@ export function ContextPanel({
 
         <section>
           <div className="side-panel-title-row">
-            <span className="side-panel-heading">上下文</span>
-            <span className="side-panel-counter">{context?.messageCount ?? 0} 条消息</span>
+            <span className="side-panel-heading">{tr("上下文", "Context")}</span>
+            <span className="side-panel-counter">{tr(`${context?.messageCount ?? 0} 条消息`, `${context?.messageCount ?? 0} messages`)}</span>
           </div>
           <div className="context-metrics-card">
             <div className="context-metrics-header">
-              <span className="context-metrics-label">工具调用</span>
+              <span className="context-metrics-label">{tr("工具调用", "Tool calls")}</span>
               <span className="context-metrics-value">{context?.toolCallCount ?? 0}</span>
             </div>
             <div className="context-path" title={session?.cwd}>
@@ -114,7 +120,7 @@ export function ContextPanel({
 
         <section>
           <div className="side-panel-title-row">
-            <span className="side-panel-heading">已启用工具</span>
+            <span className="side-panel-heading">{tr("已启用工具", "Enabled tools")}</span>
             <span className="side-panel-counter">{session?.tools?.length ?? 0}</span>
           </div>
           {session?.tools && session.tools.length > 0 ? (
@@ -126,7 +132,7 @@ export function ContextPanel({
               ))}
             </ul>
           ) : (
-            <p className="tool-chip-empty">会话开始后显示</p>
+            <p className="tool-chip-empty">{tr("会话开始后显示", "Shown after the chat starts")}</p>
           )}
         </section>
           </div>
@@ -151,32 +157,36 @@ export function ContextPanel({
   );
 }
 
-const goalStatusLabel: Record<GoalStatus, string> = {
-  active: "进行中",
-  paused: "已暂停",
-  complete: "已完成",
+const goalStatusLabels: Record<GoalStatus, [string, string]> = {
+  active: ["进行中", "In progress"],
+  paused: ["已暂停", "Paused"],
+  complete: ["已完成", "Complete"],
 };
 
-const validationCategoryLabel: Record<GoalValidationCategory, string> = {
-  diff: "Diff 检查",
-  test: "定向测试",
-  build: "构建",
-  typecheck: "类型检查",
-  regression: "回归检查",
-  other: "其他检查",
+const validationCategoryLabels: Record<GoalValidationCategory, [string, string]> = {
+  diff: ["Diff 检查", "Diff check"],
+  test: ["定向测试", "Targeted tests"],
+  build: ["构建", "Build"],
+  typecheck: ["类型检查", "Typecheck"],
+  regression: ["回归检查", "Regression check"],
+  other: ["其他检查", "Other check"],
 };
 
-const validationStatusLabel = {
-  passed: "已通过",
-  known_issues: "带已知问题",
-  skipped: "已说明跳过",
+const validationStatusLabels = {
+  passed: ["已通过", "Passed"],
+  known_issues: ["带已知问题", "Known issues"],
+  skipped: ["已说明跳过", "Skipped with reason"],
 } as const;
 
-const validationRiskLabel = {
-  low: "低风险",
-  medium: "中风险",
-  high: "高风险",
+const validationRiskLabels = {
+  low: ["低风险", "Low risk"],
+  medium: ["中风险", "Medium risk"],
+  high: ["高风险", "High risk"],
 } as const;
+
+function translatedPair(pair: readonly [string, string]): string {
+  return tr(pair[0], pair[1]);
+}
 
 function PlanCard({
   plan,
@@ -211,13 +221,13 @@ function PlanCard({
         type="button"
         aria-expanded={!collapsed}
         aria-controls="plan-card-content"
-        aria-label={`${collapsed ? "展开" : "折叠"}计划，${done}/${total} 步`}
+        aria-label={`${collapsed ? tr("展开", "Expand") : tr("折叠", "Collapse")} ${tr("计划", "plan")}, ${done}/${total} ${tr("步", "steps")}`}
         onClick={() => setCollapseState((current) => ({
           planId,
           collapsed: !(current.planId === planId && current.collapsed),
         }))}
       >
-        <span className="side-panel-heading">计划</span>
+        <span className="side-panel-heading">{tr("计划", "Plan")}</span>
         <span className="mode-card-toggle-meta">
           <span className="side-panel-counter">
             {done}/{total}
@@ -242,7 +252,7 @@ function PlanCard({
           ))}
         </div>
         <button className="mode-card-action" type="button" disabled={busy} onClick={onExecute}>
-          执行计划
+          {tr("执行计划", "Run plan")}
         </button>
       </div>
     </section>
@@ -261,23 +271,23 @@ function GoalCard({
   return (
     <section className="mode-card">
       <div className="side-panel-title-row">
-        <span className="side-panel-heading">目标</span>
-        <span className={`mode-status mode-${goal.status}`}>{goalStatusLabel[goal.status]}</span>
+        <span className="side-panel-heading">{tr("目标", "Goal")}</span>
+        <span className={`mode-status mode-${goal.status}`}>{translatedPair(goalStatusLabels[goal.status])}</span>
       </div>
       <p className="mode-card-copy">{goal.objective}</p>
       {goal.note ? <p className="mode-card-note">{goal.note}</p> : null}
       <div className="goal-validation">
         <div className="goal-validation-heading">
-          <span>交付验证</span>
+          <span>{tr("交付验证", "Delivery checks")}</span>
           <span className={`goal-validation-status${goal.validation ? ` is-${goal.validation.status}` : " is-pending"}`}>
             {goal.validation
-              ? `${validationRiskLabel[goal.validation.risk]} · ${validationStatusLabel[goal.validation.status]}`
-              : "待验证"}
+              ? `${translatedPair(validationRiskLabels[goal.validation.risk])} · ${translatedPair(validationStatusLabels[goal.validation.status])}`
+              : tr("待验证", "Pending")}
           </span>
         </div>
-        {!goal.validation ? <p className="goal-validation-note">完成目标前需要记录检查结果和跳过原因。</p> : null}
+        {!goal.validation ? <p className="goal-validation-note">{tr("完成目标前需要记录检查结果和跳过原因。", "Record check results and reasons for any skipped checks before completing the goal.")}</p> : null}
         {goal.validation && goal.validation.workRevision !== goal.workRevision ? (
-          <p className="goal-validation-note is-stale">验证后工作区又有变化，请重新检查。</p>
+          <p className="goal-validation-note is-stale">{tr("验证后工作区又有变化，请重新检查。", "The workspace changed after validation. Run the checks again.")}</p>
         ) : null}
         {goal.validation?.checks.map((check) => {
           const issue = goal.validation?.knownIssues.find((item) => item.toolCallId === check.toolCallId);
@@ -285,20 +295,20 @@ function GoalCard({
           return (
             <div className={`goal-validation-item is-${check.result}${oldCheck ? " is-stale" : ""}`} key={check.toolCallId}>
               <div className="goal-validation-row">
-                <span>{validationCategoryLabel[check.category]}</span>
-                <span>{oldCheck ? "旧结果" : check.result === "passed" ? "通过" : issue ? "已知失败" : "失败"}</span>
+                <span>{translatedPair(validationCategoryLabels[check.category])}</span>
+                <span>{oldCheck ? tr("旧结果", "Outdated") : check.result === "passed" ? tr("通过", "Passed") : issue ? tr("已知失败", "Known failure") : tr("失败", "Failed")}</span>
               </div>
               <code>{check.command}</code>
               {check.output ? <p>{check.output}</p> : null}
-              {issue ? <p className="goal-validation-note">依据：{issue.reason}</p> : null}
+              {issue ? <p className="goal-validation-note">{tr("依据：", "Reason: ")}{issue.reason}</p> : null}
             </div>
           );
         })}
         {goal.validation?.skipped.map((item, index) => (
           <div className="goal-validation-item is-skipped" key={`${item.category}-${index}`}>
             <div className="goal-validation-row">
-              <span>{validationCategoryLabel[item.category]}</span>
-              <span>未运行</span>
+              <span>{translatedPair(validationCategoryLabels[item.category])}</span>
+              <span>{tr("未运行", "Not run")}</span>
             </div>
             <p>{item.reason}</p>
           </div>
@@ -306,7 +316,7 @@ function GoalCard({
       </div>
       {goal.status === "paused" ? (
         <button className="mode-card-action" type="button" disabled={busy} onClick={onResume}>
-          继续
+          {tr("继续", "Resume")}
         </button>
       ) : null}
     </section>
@@ -322,15 +332,15 @@ function ContextUsageCard({ context }: { context: ContextUsage | undefined }) {
   const basis = contextWindow && contextWindow > 0 ? Math.max(contextWindow, used) : used;
 
   return (
-    <section className={`context-usage${open ? "" : " collapsed"}`} aria-label="上下文用量">
+    <section className={`context-usage${open ? "" : " collapsed"}`} aria-label={tr("上下文用量", "Context usage")}>
       <button
         className="context-usage-title"
         type="button"
         aria-expanded={open}
-        title={open ? "收起明细" : "展开明细"}
+        title={open ? tr("收起明细", "Collapse details") : tr("展开明细", "Expand details")}
         onClick={() => setOpen((value) => !value)}
       >
-        <span>上下文用量</span>
+        <span>{tr("上下文用量", "Context usage")}</span>
         <span className="context-usage-chevron" aria-hidden="true">
           <ChevronDownIcon />
         </span>
@@ -350,7 +360,7 @@ function ContextUsageCard({ context }: { context: ContextUsage | undefined }) {
               className={`context-usage-seg ${id}`}
               key={id}
               style={{ width: `${(value / basis) * 100}%` }}
-              title={`${categoryLabels[id]} ${formatPrecise(value)}`}
+              title={`${categoryLabel(id)} ${formatPrecise(value)}`}
             />
           );
         })}
@@ -361,9 +371,9 @@ function ContextUsageCard({ context }: { context: ContextUsage | undefined }) {
             <li className="context-usage-row" key={id}>
               <span className="context-usage-label">
                 <span className={`context-usage-swatch ${id}`} />
-                {categoryLabels[id]}
+                {categoryLabel(id)}
               </span>
-              <span className="context-usage-value" title={`${(segments?.[id] ?? 0).toLocaleString("zh-CN")} tokens`}>
+              <span className="context-usage-value" title={`${(segments?.[id] ?? 0).toLocaleString(isEnglish() ? "en-US" : "zh-CN")} tokens`}>
                 {formatPrecise(segments?.[id] ?? 0)}
               </span>
             </li>
@@ -375,10 +385,10 @@ function ContextUsageCard({ context }: { context: ContextUsage | undefined }) {
 }
 
 function formatPercent(percent: number | null, tokens: number): string {
-  if (percent == null) return tokens > 0 ? "—" : "已用 0%";
+  if (percent == null) return tokens > 0 ? "—" : tr("已用 0%", "0% used");
   const rounded = Math.round(percent);
-  if (rounded <= 0 && tokens > 0) return "已用 <1%";
-  return `已用 ${rounded}%`;
+  if (rounded <= 0 && tokens > 0) return tr("已用 <1%", "<1% used");
+  return tr(`已用 ${rounded}%`, `${rounded}% used`);
 }
 
 function formatTotal(tokens: number, contextWindow: number | null): string {

@@ -1,5 +1,6 @@
 import type { ContextUsage } from "@vela/shared";
 import { composerStats } from "./composer-stats";
+import { tr } from "../../locale";
 
 /**
  * 输入框下方的会话统计条：轮数/步数/速度、累计 token 与缓存命中率、上下文占用环。
@@ -11,7 +12,7 @@ export function ComposerStatsRow({ usage }: { usage: ContextUsage | undefined | 
   if (!hasGroup) return null;
 
   return (
-    <div className="composer-stats-row" role="group" aria-label="会话统计">
+    <div className="composer-stats-row" role="group" aria-label={tr("会话统计", "Chat stats")}>
       {stats.activity ? (
         <span className="composer-stat" title={stats.activity}>
           <span className="composer-stat-icon" aria-hidden="true"><ActivityIcon /></span>
@@ -27,7 +28,7 @@ export function ComposerStatsRow({ usage }: { usage: ContextUsage | undefined | 
       {stats.percentLabel ? (
         <span
           className={`composer-stat composer-stat-context${(stats.percent ?? 0) >= 80 ? " high" : ""}`}
-          title={`上下文占用 ${stats.percentLabel}`}
+          title={`${tr("上下文占用", "Context used")} ${stats.percentLabel}`}
         >
           <ContextRing percent={stats.percent ?? 0} />
           <span className="composer-stat-text">{stats.percentLabel}</span>

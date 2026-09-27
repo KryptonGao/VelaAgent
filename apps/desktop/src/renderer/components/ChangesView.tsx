@@ -3,14 +3,27 @@ import { useEffect, useState } from "react";
 import { useEscapeKey } from "../hooks/useDismissable";
 import type { ProjectApi } from "../hooks/useProject";
 import { CloseIcon, ExternalIcon, EyeIcon, FileIcon } from "./icons";
+import { tr } from "../locale";
 
-const statusLabels: Record<GitFileStatus, { letter: string; label: string }> = {
-  modified: { letter: "M", label: "修改" },
-  added: { letter: "A", label: "新增" },
-  deleted: { letter: "D", label: "删除" },
-  renamed: { letter: "R", label: "重命名" },
-  untracked: { letter: "U", label: "未跟踪" },
+const statusLetters: Record<GitFileStatus, string> = {
+  modified: "M",
+  added: "A",
+  deleted: "D",
+  renamed: "R",
+  untracked: "U",
 };
+
+function statusLabel(status: GitFileStatus): string {
+  const labels: Record<GitFileStatus, [string, string]> = {
+    modified: ["修改", "Modified"],
+    added: ["新增", "Added"],
+    deleted: ["删除", "Deleted"],
+    renamed: ["重命名", "Renamed"],
+    untracked: ["未跟踪", "Untracked"],
+  };
+  const [chinese, english] = labels[status];
+  return tr(chinese, english);
+}
 
 export function ChangesView({
   project,
@@ -92,8 +105,8 @@ export function ChangesView({
         <header className="changes-header">
           <div className="changes-header-title">
             <FileIcon size={14} />
-            <span id="changes-sheet-title">工作区变更</span>
-            <span className="changes-count">{files.length > 0 ? `${files.length} 个文件` : "无变更"}</span>
+            <span id="changes-sheet-title">{tr("工作区变更", "Workspace changes")}</span>
+            <span className="changes-count">{files.length > 0 ? tr(`${files.length} 个文件`, `${files.length} files`) : tr("无变更", "No changes")}</span>
           </div>
           <div className="changes-header-actions">
             <button
@@ -102,9 +115,9 @@ export function ChangesView({
               disabled={stagedFiles.length === files.length || files.length === 0}
               onClick={() => void project.stageFiles(files.filter((f) => !f.staged).map((f) => f.path))}
             >
-              全部暂存
+              {tr("全部暂存", "Stage all")}
             </button>
-            <button type="button" className="changes-action" title="关闭 (Esc)" aria-label="关闭" onClick={onClose}>
+            <button type="button" className="changes-action" title={tr("关闭 (Esc)", "Close (Esc)")} aria-label={tr("关闭", "Close")} onClick={onClose}>
               <CloseIcon size={12} />
             </button>
           </div>
@@ -142,21 +155,21 @@ export function ChangesView({
                 onCancelDiscard={() => setConfirmDiscard(null)}
               />
             ))}
-            {files.length === 0 ? <div className="changes-empty">工作区是干净的</div> : null}
+            {files.length === 0 ? <div className="changes-empty">{tr("工作区是干净的", "Workspace is clean")}</div> : null}
           </div>
           <div className="changes-diff">
             {selected ? (
               <>
                 <div className="changes-diff-head" title={selected.path}>
                   <span className={`diff-status-badge diff-status-${selected.status}`}>
-                    {statusLabels[selected.status].letter}
+                    {statusLetters[selected.status]}
                   </span>
                   <span className="changes-diff-path">{selected.path}</span>
                   {onPreviewFile ? (
                     <button
                       type="button"
                       className="changes-file-btn diff-preview-btn"
-                      title="在侧栏预览"
+                      title={tr("在侧栏预览", "Preview in sidebar")}
                       onClick={() => onPreviewFile(selected.path)}
                     >
                       <EyeIcon size={12} />
@@ -183,11 +196,11 @@ export function ChangesView({
                           {line || " "}
                         </div>
                       ))
-                    : "没有可显示的差异"}
+                    : tr("没有可显示的差异", "No diff to display")}
                 </pre>
               </>
             ) : (
-              <div className="changes-empty">选择一个文件查看差异</div>
+              <div className="changes-empty">{tr("选择一个文件查看差异", "Select a file to view its diff")}</div>
             )}
           </div>
         </div>
@@ -217,7 +230,7 @@ function FileRow({
   onPreview?: () => void;
   onCancelDiscard: () => void;
 }) {
-  const status = statusLabels[file.status];
+  const status = statusLabel(file.status);
   const segments = file.path.split("/");
   const name = segments.pop() ?? file.path;
   const directory = segments.join("/");
@@ -237,8 +250,8 @@ function FileRow({
         }
       }}
     >
-      <span className={`diff-status-badge diff-status-${file.status}`} title={status.label} aria-label={status.label}>
-        {status.letter}
+      <span className={`diff-status-badge diff-status-${file.status}`} title={status} aria-label={status}>
+        {statusLetters[file.status]}
       </span>
       <div className="changes-file-text">
         <span className="changes-file-name" title={file.path}>
@@ -246,36 +259,36 @@ function FileRow({
         </span>
         {directory ? <span className="changes-file-dir">{directory}</span> : null}
       </div>
-      {file.staged ? <span className="changes-staged-tag">已暂存</span> : null}
+      {file.staged ? <span className="changes-staged-tag">{tr("已暂存", "Staged")}</span> : null}
       <div className="changes-file-actions" onClick={(event) => event.stopPropagation()}>
         <button
           type="button"
           className="changes-file-btn"
-          title={file.staged ? "取消暂存" : "暂存"}
-          aria-label={file.staged ? `取消暂存 ${name}` : `暂存 ${name}`}
+          title={file.staged ? tr("取消暂存", "Unstage") : tr("暂存", "Stage")}
+          aria-label={file.staged ? `${tr("取消暂存", "Unstage")} ${name}` : `${tr("暂存", "Stage")} ${name}`}
           onClick={onToggleStage}
         >
           {file.staged ? "−" : "+"}
         </button>
-        <button type="button" className="changes-file-btn" title="用默认应用打开" aria-label={`打开 ${name}`} onClick={onOpen}>
+        <button type="button" className="changes-file-btn" title={tr("用默认应用打开", "Open with default app")} aria-label={`${tr("打开", "Open")} ${name}`} onClick={onOpen}>
           <ExternalIcon size={12} />
         </button>
         {onPreview ? (
-          <button type="button" className="changes-file-btn" title="在侧栏预览" aria-label={`预览 ${name}`} onClick={onPreview}>
+          <button type="button" className="changes-file-btn" title={tr("在侧栏预览", "Preview in sidebar")} aria-label={`${tr("预览", "Preview")} ${name}`} onClick={onPreview}>
             <EyeIcon size={12} />
           </button>
         ) : null}
         {confirmDiscard ? (
           <span className="changes-confirm">
             <button type="button" className="changes-file-btn danger" onClick={onDiscard}>
-              确认放弃
+              {tr("确认放弃", "Discard changes")}
             </button>
             <button type="button" className="changes-file-btn" onClick={onCancelDiscard}>
-              取消
+              {tr("取消", "Cancel")}
             </button>
           </span>
         ) : (
-          <button type="button" className="changes-file-btn" title="放弃改动" aria-label={`放弃 ${name} 的改动`} onClick={onDiscard}>
+          <button type="button" className="changes-file-btn" title={tr("放弃改动", "Discard changes")} aria-label={`${tr("放弃", "Discard")} ${name}`} onClick={onDiscard}>
             ↺
           </button>
         )}

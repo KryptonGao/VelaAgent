@@ -1,6 +1,7 @@
 import type { ConversationSummary } from "@vela/shared";
 import { useEffect, useMemo, useState } from "react";
 import { modKeyLabel } from "../platform";
+import { tr } from "../locale";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -73,8 +74,8 @@ export function Sidebar({
           <button
             className="icon-btn-ghost"
             type="button"
-            title={`收起侧边栏 (${mod}B)`}
-            aria-label="收起侧边栏"
+            title={`${tr("收起侧边栏", "Collapse sidebar")} (${mod}B)`}
+            aria-label={tr("收起侧边栏", "Collapse sidebar")}
             onClick={onToggle}
           >
             <SidebarIcon />
@@ -91,13 +92,13 @@ export function Sidebar({
         <button className="quick-action-item" type="button" onClick={onNewChat}>
           <span className="quick-action-item-left">
             <ComposeIcon />
-            <span>新对话</span>
+            <span>{tr("新对话", "New chat")}</span>
           </span>
         </button>
       </div>
 
       <div className="sidebar-scroll-area">
-        <div className="sidebar-section-title">会话</div>
+        <div className="sidebar-section-title">{tr("会话", "Chats")}</div>
         {groups.map((group) => {
           const isCollapsed = Boolean(collapsedWorkspaces[group.cwd]);
           return (
@@ -124,22 +125,22 @@ export function Sidebar({
                       <button
                         className={`subchat-item${conversation.id === activeConversationId ? " active" : ""}`}
                         type="button"
-                        title={conversation.title || "新对话"}
+                        title={conversation.title || tr("新对话", "New chat")}
                         aria-current={conversation.id === activeConversationId ? "page" : undefined}
                         onClick={() => onSwitchConversation(conversation.id)}
                       >
                         <span className="subchat-title">
-                          {conversation.title || "新对话"}
+                          {conversation.title || tr("新对话", "New chat")}
                         </span>
                         {conversation.status === "streaming" ? (
-                          <span className="subchat-streaming-dot" role="img" aria-label="正在回复" title="正在回复" />
+                          <span className="subchat-streaming-dot" role="img" aria-label={tr("正在回复", "Replying")} title={tr("正在回复", "Replying")} />
                         ) : null}
                       </button>
                       <button
                         className="subchat-archive"
                         type="button"
-                        title="归档对话"
-                        aria-label={`归档「${conversation.title || "新对话"}」`}
+                        title={tr("归档对话", "Archive chat")}
+                        aria-label={`${tr("归档", "Archive")} “${conversation.title || tr("新对话", "New chat")}”`}
                         onClick={() => onArchiveConversation(conversation.id)}
                       >
                         <ArchiveIcon />
@@ -152,7 +153,7 @@ export function Sidebar({
           );
         })}
         {groups.length === 0 ? (
-          <div className="sidebar-empty-hint">还没有会话</div>
+          <div className="sidebar-empty-hint">{tr("还没有会话", "No chats yet")}</div>
         ) : null}
       </div>
 

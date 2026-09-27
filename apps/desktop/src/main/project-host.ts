@@ -22,6 +22,7 @@ import {
   type WorkspaceRoots,
 } from "@vela/workspace";
 import { BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { getApplicationLocale } from "./menu";
 
 const agentMutationDebounceMs = 800;
 const maxAttachmentCount = 20;
@@ -68,9 +69,10 @@ export class ProjectHost {
   register(): void {
     ipcMain.handle(IpcChannel.workspaceOpenDialog, async (event) => {
       const win = BrowserWindow.fromWebContents(event.sender);
+      const english = getApplicationLocale() === "en";
       const dialogOptions = {
-        title: "选择工作区文件夹",
-        buttonLabel: "选择",
+        title: english ? "Choose a workspace folder" : "选择工作区文件夹",
+        buttonLabel: english ? "Choose" : "选择",
         properties: ["openDirectory", "createDirectory"] as ("openDirectory" | "createDirectory")[],
       };
       const result = win
@@ -155,10 +157,12 @@ export class ProjectHost {
       const kind: AttachmentPickKind = rawKind === "image" ? "image" : "file";
       const win = BrowserWindow.fromWebContents(event.sender);
       const options = {
-        title: kind === "image" ? "选择图片" : "选择文件",
+        title: getApplicationLocale() === "en"
+          ? kind === "image" ? "Choose an image" : "Choose a file"
+          : kind === "image" ? "选择图片" : "选择文件",
         properties: ["openFile", "multiSelections"] as ("openFile" | "multiSelections")[],
         ...(kind === "image"
-          ? { filters: [{ name: "图片", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }] }
+          ? { filters: [{ name: getApplicationLocale() === "en" ? "Images" : "图片", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }] }
           : {}),
       };
       const result = win

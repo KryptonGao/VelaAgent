@@ -1,4 +1,5 @@
 import type { ContextUsage } from "@vela/shared";
+import { tr } from "../../locale";
 
 /**
  * 输入框统计条的数据模型。三段都可以单独缺失：没有会话、没产生用量或提供方
@@ -25,7 +26,7 @@ export function composerStats(usage: ContextUsage | undefined | null): ComposerS
 
   const activityParts: string[] = [];
   if (turnCount > 0 || stepCount > 0) {
-    activityParts.push(`${turnCount} 轮 ${stepCount} 步`);
+    activityParts.push(tr(`${turnCount} 轮 ${stepCount} 步`, `${turnCount} turns · ${stepCount} steps`));
   }
   if (speed !== null && speed > 0) {
     activityParts.push(`${formatSpeed(speed)} tok/s`);
@@ -36,7 +37,7 @@ export function composerStats(usage: ContextUsage | undefined | null): ComposerS
     tokenParts.push(`${formatTokens(sessionTokens)} tok`);
   }
   if (hitRate !== null) {
-    tokenParts.push(`缓存命中 ${formatRate(hitRate)}`);
+    tokenParts.push(tr(`缓存命中 ${formatRate(hitRate)}`, `Cache hit ${formatRate(hitRate)}`));
   }
 
   return {

@@ -1,6 +1,7 @@
 import {
   IpcChannel,
   type AgentSettings,
+  type AppLocale,
   type AgentStreamEvent,
   type AppState,
   type AskUserQuestionEvent,
@@ -36,6 +37,7 @@ import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from "ele
 
 const api: VelaApi = {
   platform: process.platform,
+  setLocale: (locale: AppLocale) => ipcRenderer.send(IpcChannel.appSetLocale, locale),
   getState: () => ipcRenderer.invoke(IpcChannel.getState) as Promise<AppState>,
   prompt: (text, images, conversationId) =>
     ipcRenderer.invoke(IpcChannel.prompt, {

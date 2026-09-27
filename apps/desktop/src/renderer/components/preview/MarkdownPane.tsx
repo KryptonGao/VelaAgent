@@ -19,6 +19,7 @@ import {
   headingSlug,
 } from "./markdown-path";
 import { highlightSnippet, languageForFence, type ThemedToken } from "./highlighter";
+import { tr } from "../../locale";
 import { useFilePreview } from "./FilePreviewContext";
 
 const remarkPlugins = [remarkGfm, remarkBreaks];
@@ -101,7 +102,7 @@ export function MarkdownPane({
             {text}
           </ReactMarkdown>
         </div>
-        {truncated ? <p className="preview-markdown-note">文件超过 1 MB,仅显示开头部分。</p> : null}
+        {truncated ? <p className="preview-markdown-note">{tr("文件超过 1 MB，仅显示开头部分。", "File exceeds 1 MB. Showing the beginning only.")}</p> : null}
       </div>
     </PreviewMarkdownContext.Provider>
   );
@@ -207,10 +208,10 @@ function PreviewImage({ src, alt }: { src?: string; alt?: string }) {
 
   if (!src) return null;
   if (resolved.status === "loading") {
-    return <span className="md-image-pending" role="img" aria-busy="true" aria-label={alt || "正在加载图片"} />;
+    return <span className="md-image-pending" role="img" aria-busy="true" aria-label={alt || tr("正在加载图片", "Loading image")} />;
   }
   if (resolved.status === "ready") return <img src={resolved.src} alt={alt ?? ""} />;
-  return <span className="md-image-fallback">{alt || "图片无法显示"}</span>;
+  return <span className="md-image-fallback">{alt || tr("图片无法显示", "Image unavailable")}</span>;
 }
 
 function PreviewPre({ children }: { children?: ReactNode }) {
@@ -248,7 +249,7 @@ function InlineCode({ children }: { children?: ReactNode }) {
       className="code-file-ref"
       role="button"
       tabIndex={0}
-      title={`打开 ${filePath}`}
+      title={`${tr("打开", "Open")} ${filePath}`}
       onClick={() => preview.openFile(filePath)}
       onKeyDown={(event) => {
         if (event.key === "Enter") preview.openFile(filePath);

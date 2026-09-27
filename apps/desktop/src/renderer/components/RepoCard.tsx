@@ -12,6 +12,7 @@ import {
   PrIcon,
 } from "./icons";
 import type { PrSummary } from "@vela/shared";
+import { localizeError, tr } from "../locale";
 
 const prStateLabels: Record<PrSummary["state"], string> = {
   open: "Open",
@@ -24,7 +25,7 @@ const checksLabels: Record<PrSummary["checks"], string> = {
   passing: "Checks passing",
   failing: "Checks failing",
   pending: "Checks pending",
-  none: "无 Checks",
+  none: "No checks",
 };
 
 export function RepoCard({
@@ -46,7 +47,7 @@ export function RepoCard({
   const repo = git?.repo ?? null;
   const currentWorkspace = project.workspace?.current ?? null;
   const recents = project.workspace?.recents ?? [];
-  const name = repo?.name ?? currentWorkspace?.split("/").filter(Boolean).pop() ?? "工作区";
+  const name = repo?.name ?? currentWorkspace?.split("/").filter(Boolean).pop() ?? tr("工作区", "Workspace");
   const hasChanges = (git?.files.length ?? 0) > 0;
   const pr = project.pr?.pr ?? null;
 
@@ -72,8 +73,8 @@ export function RepoCard({
           <button
             type="button"
             className="repo-card-more"
-            title="更多操作"
-            aria-label="更多操作"
+            title={tr("更多操作", "More actions")}
+            aria-label={tr("更多操作", "More actions")}
             aria-haspopup="true"
             aria-expanded={menuOpen}
             disabled={!repo?.root && !currentWorkspace}
@@ -85,11 +86,11 @@ export function RepoCard({
             <div className="dock-popover composer-popover repo-menu">
               <button type="button" className="workspace-action-row" onClick={revealRoot}>
                 <FolderIcon />
-                <span>在{fileManagerName(window.vela?.platform ?? "darwin")}中打开</span>
+                <span>{tr("在", "Open in ")}{fileManagerName(window.vela?.platform ?? "darwin")}{tr("中打开", "")}</span>
               </button>
               <button type="button" className="workspace-action-row" onClick={copyPath}>
                 <FolderIcon />
-                <span>复制路径</span>
+                <span>{tr("复制路径", "Copy path")}</span>
               </button>
             </div>
           ) : null}
@@ -102,7 +103,7 @@ export function RepoCard({
             <button
               type="button"
               className="repo-branch-btn"
-              title="切换分支"
+              title={tr("切换分支", "Switch branch")}
               aria-haspopup="true"
               aria-expanded={branchOpen}
               onClick={() => setBranchOpen((v) => !v)}
@@ -113,7 +114,7 @@ export function RepoCard({
             <button
               type="button"
               className="repo-diff-stats"
-              title="查看工作区变更"
+              title={tr("查看工作区变更", "View workspace changes")}
               onClick={onOpenChanges}
             >
               {hasChanges ? (
@@ -122,7 +123,7 @@ export function RepoCard({
                   <span className="repo-diff-deleted">−{formatCount(git.deletedLines)}</span>
                 </>
               ) : (
-                <span className="repo-diff-clean">无变更</span>
+                <span className="repo-diff-clean">{tr("无变更", "No changes")}</span>
               )}
             </button>
             {branchOpen ? (
@@ -140,15 +141,15 @@ export function RepoCard({
           <div className="repo-pr-row">
             <span className="repo-pr-lead">
               <GithubIcon />
-              <span>现有 Pull Request</span>
+              <span>{tr("Pull Request", "Pull request")}</span>
             </span>
             {pr ? (
               <button type="button" className="repo-pr-link" onClick={() => void project.openPullRequest(pr.url)}>
-                打开
+                {tr("打开", "Open")}
               </button>
             ) : project.pr?.ghAvailable ? (
               <button type="button" className="repo-pr-link" onClick={() => void project.createPullRequest()}>
-                创建
+                {tr("创建", "Create")}
               </button>
             ) : null}
           </div>
@@ -168,7 +169,7 @@ export function RepoCard({
             </button>
           ) : (
             <div className="repo-pr-hint">
-              {project.pr?.reason ?? "当前分支暂无 Pull Request"}
+                {project.pr?.reason ? localizeError(project.pr.reason) : tr("当前分支暂无 Pull Request", "No pull request for this branch")}
             </div>
           )}
 
@@ -178,7 +179,7 @@ export function RepoCard({
             onClick={onOpenChanges}
           >
             <span>
-              {git.files.length > 0 ? `${git.files.length} 个变更` : "工作区无变更"}
+              {git.files.length > 0 ? tr(`${git.files.length} 个变更`, `${git.files.length} changes`) : tr("工作区无变更", "Workspace is clean")}
             </span>
             <span className="repo-changes-arrow">›</span>
           </button>
@@ -186,19 +187,19 @@ export function RepoCard({
       ) : (
         <div className="repo-card-empty">
           {currentWorkspace
-            ? "未检测到 Git 仓库"
-            : "尚未选择工作区"}
+            ? tr("未检测到 Git 仓库", "No Git repository detected")
+            : tr("尚未选择工作区", "No workspace selected")}
         </div>
       )}
 
       <div className="repo-sources">
         <div className="repo-sources-header">
-          <span>来源</span>
+          <span>{tr("来源", "Workspaces")}</span>
           <button
             type="button"
             className="repo-sources-add"
-            title="打开其他文件夹"
-            aria-label="打开其他文件夹"
+            title={tr("打开其他文件夹", "Open another folder")}
+            aria-label={tr("打开其他文件夹", "Open another folder")}
             onClick={() => void project.openWorkspaceDialog()}
           >
             +
@@ -212,7 +213,7 @@ export function RepoCard({
             onClick={() => setSourcesOpen((value) => !value)}
           >
             <GridIcon />
-            <span>{sourcesOpen ? "收起来源列表" : `查看全部(${recents.length})`}</span>
+            <span>{sourcesOpen ? tr("收起列表", "Hide list") : tr(`查看全部(${recents.length})`, `View all (${recents.length})`)}</span>
           </button>
         ) : null}
         {sourcesOpen

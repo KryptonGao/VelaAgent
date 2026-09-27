@@ -14,6 +14,7 @@ import { parseSkillPrompt } from "./composer/skill-picker";
 import { useFilePreview } from "./preview/FilePreviewContext";
 import { nextStreamFollow, releasesStreamFollow, shouldResumeFollowForMessages } from "./chat-scroll";
 import { changesByFinalMessage, type TurnChanges } from "./turn-changes";
+import { localizeError, tr } from "../locale";
 
 interface FollowState {
   pinned: boolean;
@@ -72,13 +73,13 @@ function groupMessagesIntoTurns(messages: UiMessage[]): MessageTurn[] {
 function formatElapsedTime(startedAt: number | undefined, completedAt: number | undefined): string | null {
   if (startedAt === undefined || completedAt === undefined) return null;
   const totalSeconds = Math.max(0, Math.floor((completedAt - startedAt) / 1000));
-  if (totalSeconds < 1) return "不到 1 秒";
+  if (totalSeconds < 1) return tr("不到 1 秒", "<1 sec");
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
-  if (hours > 0) return `${hours}小时${minutes}分${seconds}秒`;
-  if (minutes > 0) return `${minutes}分${seconds}秒`;
-  return `${seconds}秒`;
+  if (hours > 0) return tr(`${hours}小时${minutes}分${seconds}秒`, `${hours}h ${minutes}m ${seconds}s`);
+  if (minutes > 0) return tr(`${minutes}分${seconds}秒`, `${minutes}m ${seconds}s`);
+  return tr(`${seconds}秒`, `${seconds}s`);
 }
 
 interface ChatViewProps {
@@ -123,7 +124,7 @@ export function ChatView({
   const activeAssistantId = streaming
     ? [...messages].reverse().find((message) => message.role === "assistant")?.id
     : undefined;
-  const title = session?.title || "新对话";
+  const title = session?.title || tr("新对话", "New chat");
   const scrollerRef = useRef<HTMLDivElement>(null);
   const dockRef = useRef<HTMLDivElement>(null);
   const followRef = useRef<FollowState>({
@@ -229,7 +230,7 @@ export function ChatView({
   );
   const entering = enterTrack.current.enter;
   const mod = modKeyLabel(platform);
-  const rightLabel = rightCollapsed ? "展开右侧面板" : "收起右侧面板";
+  const rightLabel = rightCollapsed ? tr("展开右侧面板", "Expand right panel") : tr("收起右侧面板", "Collapse right panel");
   const turnChanges = useMemo(
     () => changesByFinalMessage(messages, streaming, project.workspace?.current ?? null),
     [messages, streaming, project.workspace?.current],
@@ -244,8 +245,8 @@ export function ChatView({
             <button
               className="view-icon-btn"
               type="button"
-              title={`展开侧边栏 (${mod}B)`}
-              aria-label="展开侧边栏"
+              title={`${tr("展开侧边栏", "Expand sidebar")} (${mod}B)`}
+              aria-label={tr("展开侧边栏", "Expand sidebar")}
               onClick={onToggleLeft}
             >
               <SidebarIcon />
@@ -270,8 +271,8 @@ export function ChatView({
       <div className="chat-scroll-area" ref={scrollerRef}>
         {session?.status === "error" && session.error ? (
           <div className="chat-error-card" role="alert">
-            <div className="chat-error-card-title">会话还不能开始</div>
-            <p>{session.error}</p>
+            <div className="chat-error-card-title">{tr("会话还不能开始", "Chat is not ready yet")}</div>
+            <p>{localizeError(session.error)}</p>
           </div>
         ) : null}
 
@@ -363,10 +364,10 @@ export function ChatView({
   );
 }
 
-const modeHints: Record<InteractionMode, string> = {
-  agent: "描述要完成的任务，Agent 会阅读代码、修改文件并运行命令。",
-  plan: "Plan 模式只查阅代码并写出计划，确认后才会开始修改。",
-  goal: "Goal 模式会围绕目标连续执行，随时可以停止。",
+const modeHints: Record<InteractionMode, [string, string]> = {
+  agent: ["描述要完成的任务，Agent 会阅读代码、修改文件并运行命令。", "Describe a task. The agent will inspect the code, edit files, and run commands."],
+  plan: ["Plan 模式只查阅代码并写出计划，确认后才会开始修改。", "Plan mode inspects the code and drafts a plan. Changes begin after you approve it."],
+  goal: ["Goal 模式会围绕目标连续执行，随时可以停止。", "Goal mode works toward an objective continuously. You can stop at any time."],
 };
 
 /** 空对话的引导文案按缺失的前置条件切换:先选工作区,再准备模型,最后才是开始任务。 */
@@ -385,10 +386,10 @@ function EmptyState({
     return (
       <div className="empty-state">
         <h1>Vela</h1>
-        <p>先选择一个工作区。工作区决定了 Agent 的文件范围、Shell 目录与 Git 上下文。</p>
+        <p>{tr("先选择一个工作区。工作区决定了 Agent 的文件范围、Shell 目录与 Git 上下文。", "Choose a workspace to set the agent's file access, shell directory, and Git context.")}</p>
         <button className="empty-state-action" type="button" onClick={onChooseWorkspace}>
           <FolderIcon />
-          <span>选择工作区…</span>
+          <span>{tr("选择工作区…", "Choose workspace…")}</span>
         </button>
       </div>
     );
@@ -399,8 +400,8 @@ function EmptyState({
       <h1>{name}</h1>
       <p>
         {modelMissing
-          ? "还没有可用的模型。点输入框右下角的模型按钮登录提供方，或添加一个兼容接口。"
-          : modeHints[mode]}
+          ? tr("还没有可用的模型。点输入框右下角的模型按钮登录提供方，或添加一个兼容接口。", "No models are available yet. Use the model button at the bottom right to sign in to a provider or add a compatible API.")
+          : tr(modeHints[mode][0], modeHints[mode][1])}
       </p>
     </div>
   );
@@ -535,7 +536,7 @@ function CompletedAssistantTurn({
   const enterClass = entering ? " message-enter" : "";
   const triggerContent = (
     <>
-      <span>{elapsed ? `用时 ${elapsed}` : hasProcess ? "查看过程" : "耗时未记录"}</span>
+      <span>{elapsed ? tr(`用时 ${elapsed}`, `Took ${elapsed}`) : hasProcess ? tr("查看过程", "View process") : tr("耗时未记录", "Duration unavailable")}</span>
       {hasProcess ? (
         <svg className="time-spent-trigger-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
           <polyline points="9 18 15 12 9 6" />
@@ -602,11 +603,11 @@ function TurnChangesCard({ changes, onOpenChanges, canManageChanges }: {
   const remaining = changes.files.length - 3;
 
   return (
-    <section className="turn-changes" aria-label="本轮文件变更统计">
+    <section className="turn-changes" aria-label={tr("本轮文件变更统计", "File changes in this turn")}>
       <header className="turn-changes-header">
         <span className="turn-changes-icon" aria-hidden="true"><FileChangeIcon /></span>
         <div className="turn-changes-summary">
-          <strong>已编辑 {changes.files.length} 个文件</strong>
+          <strong>{tr(`已编辑 ${changes.files.length} 个文件`, `Edited ${changes.files.length} files`)}</strong>
           <span className="turn-changes-total">
             <span className="turn-changes-added">+{changes.added}</span>
             <span className="turn-changes-removed">−{changes.removed}</span>
@@ -616,11 +617,11 @@ function TurnChangesCard({ changes, onOpenChanges, canManageChanges }: {
           <button
             type="button"
             className="turn-changes-undo"
-            title="在工作区变更中选择文件并确认撤销当前改动"
+            title={tr("在工作区变更中选择文件并确认撤销当前改动", "Choose files in Workspace Changes to confirm reverting these edits")}
             disabled={!canManageChanges}
             onClick={onOpenChanges}
           >
-            撤销 <UndoIcon />
+            {tr("撤销", "Revert")} <UndoIcon />
           </button>
           <button
             type="button"
@@ -631,7 +632,7 @@ function TurnChangesCard({ changes, onOpenChanges, canManageChanges }: {
               setShowAll(true);
             }}
           >
-            {reviewing ? "收起审核" : "审核"}
+            {reviewing ? tr("收起审核", "Hide review") : tr("审核", "Review")}
           </button>
         </div>
       </header>
@@ -639,13 +640,13 @@ function TurnChangesCard({ changes, onOpenChanges, canManageChanges }: {
         {files.map((file) => (
           <div className="turn-changes-file" key={file.path}>
             {preview ? (
-              <button className="turn-changes-path" type="button" title={`预览 ${file.path}`} onClick={() => preview.openFile(file.path)}>
+              <button className="turn-changes-path" type="button" title={`${tr("预览", "Preview")} ${file.path}`} onClick={() => preview.openFile(file.path)}>
                 {file.path}
               </button>
             ) : (
               <span className="turn-changes-path" title={file.path}>{file.path}</span>
             )}
-            <span className="turn-changes-file-stat" aria-label={`增加 ${file.added} 行，删除 ${file.removed} 行`}>
+            <span className="turn-changes-file-stat" aria-label={tr(`增加 ${file.added} 行，删除 ${file.removed} 行`, `${file.added} lines added, ${file.removed} removed`)}>
               <span className="turn-changes-added">+{file.added}</span>
               <span className="turn-changes-removed">−{file.removed}</span>
             </span>
@@ -653,14 +654,14 @@ function TurnChangesCard({ changes, onOpenChanges, canManageChanges }: {
               <div className="turn-changes-diffs">
                 {file.diffs.length > 0
                   ? file.diffs.map((diff, index) => <pre key={index}>{diff}</pre>)
-                  : <span>这项编辑没有保存可显示的差异</span>}
+                  : <span>{tr("这项编辑没有保存可显示的差异", "No saved diff is available for this edit")}</span>}
               </div>
             ) : null}
           </div>
         ))}
         {remaining > 0 ? (
           <button className="turn-changes-more" type="button" aria-expanded={showAll} onClick={() => setShowAll((value) => !value)}>
-            {showAll ? "收起文件" : `再显示 ${remaining} 个文件`}
+            {showAll ? tr("收起文件", "Show fewer files") : tr(`再显示 ${remaining} 个文件`, `Show ${remaining} more files`)}
             <ChevronIcon up={showAll} />
           </button>
         ) : null}
@@ -726,7 +727,7 @@ function Thinking({ text, active }: { text: string; active: boolean }) {
   const expanded = open || short;
   const label = (
     <>
-      <span>思考</span>
+      <span>{tr("思考", "Thinking")}</span>
       <svg className="time-spent-trigger-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
         <polyline points="9 18 15 12 9 6" />
       </svg>
