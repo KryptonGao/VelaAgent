@@ -1,8 +1,19 @@
 import type { AskUserQuestionRequest, ToolActivity, ToolTrace } from "@vela/shared";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type TransitionEvent } from "react";
+import { ActivityIndicator } from "./ActivityIndicator";
 import { useFilePreview } from "./preview/FilePreviewContext";
 import { QuestionCard } from "./QuestionCard";
+import { FileTypeIcon } from "./FileTypeIcon";
 import { CheckIcon, EyeIcon, FilePlusIcon, PencilIcon, StackIcon, TerminalIcon } from "./icons";
+import {
+  compactSummaryParts,
+  diffStat,
+  splitPath,
+  totalDiffStat,
+  toolCompactKind,
+  type CompactSummaryPart,
+} from "./tool-compact";
+import type { ToolDisplay } from "../hooks/usePreferences";
 import { localizeError, tr } from "../locale";
 
 type ToolKind = "bash" | "read" | "edit" | "write" | "other";
@@ -22,23 +33,43 @@ const RUN_MIN = 3;
 export type QuestionLookup = (toolCallId: string) => AskUserQuestionRequest | null;
 
 /**
- * 消息工具列表入口:连续 RUN_MIN 个及以上 bash/read/edit/write 折叠成一组,
+ * 消息工具列表入口。卡片模式:连续 RUN_MIN 个及以上 bash/read/edit/write 折叠成一组,
  * 其余工具(计划、目标、提问等)照常逐张展示,并打断连续区间。
+ * 紧凑模式:每个工具一行;同一段超过 1 个时折叠成摘要行,单个直接展示。
  */
 export function ToolList({
   tools,
   getQuestion,
   onReplyQuestion,
+  display = "card",
 }: {
   tools: ToolTrace[];
   getQuestion?: QuestionLookup;
   onReplyQuestion?: (id: string, answer: string | null) => void;
+  display?: ToolDisplay;
 }) {
   const segments = useMemo(() => splitToolRuns(tools), [tools]);
+  const compact = display === "compact";
   return (
-    <div className="tool-card-list">
+    <div className={compact ? "tool-card-list is-compact" : "tool-card-list"}>
       {segments.map((segment) =>
-        segment.length >= RUN_MIN ? (
+        toolKind(segment[0].name) === "other" ? (
+          segment.map((tool) => (
+            <ToolCard
+              key={tool.id}
+              tool={tool}
+              getQuestion={getQuestion}
+              onReplyQuestion={onReplyQuestion}
+              compact={compact}
+            />
+          ))
+        ) : compact ? (
+          segment.length > 1 ? (
+            <CompactToolGroup key={segment[0].id} tools={segment} />
+          ) : (
+            <CompactToolLine key={segment[0].id} tool={segment[0]} />
+          )
+        ) : segment.length >= RUN_MIN ? (
           <ToolRunGroup key={segment[0].id} tools={segment} />
         ) : (
           segment.map((tool) => (
@@ -71,6 +102,7 @@ interface ToolCardProps {
   tool: ToolTrace;
   getQuestion?: QuestionLookup;
   onReplyQuestion?: (id: string, answer: string | null) => void;
+  compact?: boolean;
 }
 
 /** 入口分发:提问和子代理各自有卡片,其余走通用折叠卡片。 */
@@ -81,10 +113,11 @@ export function ToolCard(props: ToolCardProps) {
         tool={props.tool}
         request={props.getQuestion?.(props.tool.id) ?? null}
         onReply={props.onReplyQuestion ?? (() => undefined)}
+        compact={props.compact}
       />
     );
   }
-  if (props.tool.name === "task") return <TaskCard tool={props.tool} />;
+  if (props.tool.name === "task") return <TaskCard tool={props.tool} compact={props.compact} />;
   return <GenericToolCard {...props} />;
 }
 
@@ -141,7 +174,7 @@ const stepLabels: Record<string, string> = {
   write: "Write",
 };
 
-function TaskCard({ tool }: { tool: ToolTrace }) {
+function TaskCard({ tool, compact = false }: { tool: ToolTrace; compact?: boolean }) {
   const [open, setOpen] = useState(tool.status === "running");
   const [full, setFull] = useState(false);
   const [overflows, setOverflows] = useState(false);
@@ -186,10 +219,11 @@ function TaskCard({ tool }: { tool: ToolTrace }) {
         <span className="tool-card-main">
           <span className="tool-card-name grow">{title}</span>
         </span>
-        <StatusMark status={tool.status} />
+        {!compact ? <StatusMark status={tool.status} /> : null}
         <svg className="tool-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
           <polyline points="9 18 15 12 9 6" />
         </svg>
+        {compact ? <StatusMark status={tool.status} compact /> : null}
       </button>
       <ToolCollapse open={open} onTransitionEnd={onTransitionEnd}>
         <div className="tool-card-body">
@@ -231,7 +265,7 @@ function taskReport(body: string | undefined): string {
   return body.slice(split + 1).trim();
 }
 
-function GenericToolCard({ tool }: ToolCardProps) {
+function GenericToolCard({ tool, compact = false }: ToolCardProps) {
   const [open, setOpen] = useState(false);
   const [full, setFull] = useState(false);
   const [overflows, setOverflows] = useState(false);
@@ -289,10 +323,11 @@ function GenericToolCard({ tool }: ToolCardProps) {
           ) : lines !== null ? (
             <span className="tool-lines">{tr(`${lines} 行`, `${lines} lines`)}</span>
           ) : null}
-          <StatusMark status={tool.status} />
+          {!compact ? <StatusMark status={tool.status} /> : null}
           <svg className="tool-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
             <polyline points="9 18 15 12 9 6" />
           </svg>
+          {compact ? <StatusMark status={tool.status} compact /> : null}
         </button>
         {canPreview ? (
           <button
@@ -392,6 +427,336 @@ function ToolRunGroup({ tools }: { tools: ToolTrace[] }) {
   );
 }
 
+/** 紧凑模式:同一段超过 1 个工具时折叠成一行摘要,点击展开逐行明细。 */
+function CompactToolGroup({ tools }: { tools: ToolTrace[] }) {
+  const [open, setOpen] = useState(false);
+  const running = tools.some((tool) => tool.status === "running");
+  const failed = tools.filter((tool) => tool.status === "error").length;
+  const parts = compactSummaryParts(tools);
+  const stat = totalDiffStat(tools);
+  const uniform = parts.length === 1 ? parts[0].kind : null;
+  const label = parts.map((part) => compactPartLabel(part)).join(" · ");
+  const fileTools = tools.filter((tool) => toolCompactKind(tool.name) === uniform && tool.activity?.path);
+  const uniqueFileTools = fileTools.filter((tool, index) => (
+    fileTools.findIndex((candidate) => candidate.activity?.path?.replaceAll("\\", "/") === tool.activity?.path?.replaceAll("\\", "/")) === index
+  ));
+  const samples = uniform === "bash"
+    ? []
+    : uniqueFileTools.map((tool) => splitPath(tool.activity?.path ?? "").name).slice(0, 2);
+  const extraSamples = Math.max(0, uniqueFileTools.length - samples.length);
+  const sampleLabel = uniform === "bash"
+    ? tools[0]?.activity?.command?.replace(/\s+/g, " ").trim()
+    : samples.length > 0
+      ? `${samples.join(", ")}${extraSamples > 0 ? ` +${extraSamples}` : ""}`
+      : "";
+  const accessibleLabel = sampleLabel ? `${label} · ${sampleLabel}` : label;
+  const fileDiffGroup = uniform === "edit" || uniform === "write";
+
+  return (
+    <div
+      className={`tool-compact-group tool-kind-${uniform ?? "other"}${open ? " open" : ""}${
+        running ? " is-running" : ""
+      }${open && fileDiffGroup ? " has-file-diff-previews" : ""}`}
+    >
+      <button
+        className="tool-compact-summary"
+        type="button"
+        aria-expanded={open}
+        title={accessibleLabel}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="tool-compact-icon" aria-hidden="true">
+          {uniform ? <KindIcon kind={uniform} /> : <StackIcon size={13} />}
+        </span>
+        <span className="tool-compact-label">{label}</span>
+        {sampleLabel && !(open && fileDiffGroup) ? <span className="tool-compact-sample">{sampleLabel}</span> : null}
+        {failed > 0 ? <span className="tool-compact-failed">{tr(`${failed} 失败`, `${failed} failed`)}</span> : null}
+        {stat && !(open && fileDiffGroup) ? (
+          <span className="tool-compact-stat">
+            {stat.added > 0 ? <span className="tool-stat-add">+{stat.added}</span> : null}
+            {stat.removed > 0 ? <span className="tool-stat-del">−{stat.removed}</span> : null}
+          </span>
+        ) : null}
+        <svg
+          className="tool-compact-chevron"
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          aria-hidden="true"
+        >
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
+        {running ? <ActivityIndicator /> : null}
+      </button>
+      <ToolCollapse open={open}>
+        <div className="tool-compact-lines">
+          {tools.map((tool) => (
+            <CompactToolLine key={tool.id} tool={tool} hideAction={Boolean(uniform)} hideIcon={Boolean(uniform)} />
+          ))}
+        </div>
+      </ToolCollapse>
+    </div>
+  );
+}
+
+function compactPartLabel({ kind, count }: CompactSummaryPart): string {
+  if (kind === "edit") return tr(`已编辑 ${count} 个文件`, `Edited ${count} ${count === 1 ? "file" : "files"}`);
+  if (kind === "write") return tr(`已创建 ${count} 个文件`, `Created ${count} ${count === 1 ? "file" : "files"}`);
+  if (kind === "read") return tr(`已读取 ${count} 个文件`, `Read ${count} ${count === 1 ? "file" : "files"}`);
+  return tr(`已运行 ${count} 条命令`, `Ran ${count} ${count === 1 ? "command" : "commands"}`);
+}
+
+/** 紧凑模式的一行:文件类点击文件名在右侧预览,bash 点击整行内联展开输出。 */
+function CompactToolLine({
+  tool,
+  hideAction = false,
+  hideIcon = false,
+}: {
+  tool: ToolTrace;
+  hideAction?: boolean;
+  hideIcon?: boolean;
+}) {
+  const preview = useFilePreview();
+  const [open, setOpen] = useState(false);
+  const kind = toolKind(tool.name);
+  const activity = tool.activity ?? {};
+  const subject = subjectOf(kind, activity, tool.name);
+  const stat = diffStat(activity.diff);
+  const running = tool.status === "running";
+  const failed = tool.status === "error";
+  const hasFileDetails = kind === "edit" || kind === "write";
+  const hasCompactDiff = hasFileDetails && Boolean(activity.diff) && !failed;
+  const isDiffPreview = hasCompactDiff && open;
+  const previewPath = kind === "bash" ? null : activity.path?.trim() || null;
+  const fileIconPath = kind === "bash" ? null : previewPath ?? subject.name;
+  const canPreview = Boolean(preview && previewPath);
+
+  if (kind === "bash") {
+    return (
+      <div className={`tool-compact-item tool-kind-bash${open ? " open" : ""}`}>
+        <button
+          className="tool-compact-line"
+          type="button"
+          aria-expanded={open}
+          aria-label={open ? tr("收起命令和输出", "Hide command and output") : tr("展开命令和输出", "Show command and output")}
+          title={subject.name}
+          onClick={() => setOpen((value) => !value)}
+        >
+          {!hideIcon ? (
+            <span className="tool-compact-icon" aria-hidden="true">
+              <KindIcon kind={kind} />
+            </span>
+          ) : null}
+          {!hideAction ? <span className="tool-compact-action">{tr("已运行", "Ran")}</span> : null}
+          <span className="tool-compact-cmd">{subject.name}</span>
+          <svg
+            className="tool-compact-chevron"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            aria-hidden="true"
+          >
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+          <CompactStatus running={running} failed={failed} />
+        </button>
+        <ToolCollapse open={open}>
+          <div className="tool-compact-out">
+            <BashView command={activity.command} output={activity.body} running={running} failed={failed} />
+          </div>
+        </ToolCollapse>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`tool-compact-item tool-kind-${kind}${hasFileDetails && open ? " open" : ""}`}>
+      <div className="tool-compact-line">
+        {!hideIcon ? (
+          <span className="tool-compact-icon" aria-hidden="true">
+            <KindIcon kind={kind} />
+          </span>
+        ) : null}
+        {!hideAction ? (
+          hasFileDetails ? (
+            <button
+              className="tool-compact-text-toggle tool-compact-action-toggle"
+              type="button"
+              aria-expanded={open}
+              onClick={() => setOpen((value) => !value)}
+            >
+              <span className="tool-compact-action">{compactAction(kind)}</span>
+            </button>
+          ) : (
+            <span className="tool-compact-action">{compactAction(kind)}</span>
+          )
+        ) : null}
+        {fileIconPath ? <FileTypeIcon path={fileIconPath} /> : null}
+        {canPreview ? (
+          <button
+            className="tool-compact-name"
+            type="button"
+            title={`${tr("预览", "Preview")} ${previewPath ?? ""}`}
+            onClick={() => preview?.openFile(previewPath ?? "")}
+          >
+            {subject.name}
+          </button>
+        ) : (
+          <span className="tool-compact-name is-static">{subject.name}</span>
+        )}
+        {hasFileDetails && subject.dir ? (
+          <button
+            className="tool-compact-text-toggle tool-compact-path-toggle"
+            type="button"
+            aria-expanded={open}
+            title={subject.dir}
+            onClick={() => setOpen((value) => !value)}
+          >
+            <span className="tool-compact-dir">{subject.dir}</span>
+          </button>
+        ) : !hasFileDetails ? (
+          <span className="tool-compact-dir">{subject.dir}</span>
+        ) : null}
+        {hasFileDetails ? (
+          <button
+            className="tool-compact-detail-toggle"
+            type="button"
+            aria-expanded={open}
+            aria-label={open ? tr("收起文件差异", "Hide file diff") : tr("展开文件差异", "Show file diff")}
+            title={open ? tr("收起差异", "Hide diff") : tr("查看差异", "View diff")}
+            onClick={() => setOpen((value) => !value)}
+          >
+            <svg
+              className="tool-compact-chevron"
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              aria-hidden="true"
+            >
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </button>
+        ) : null}
+        {stat && !isDiffPreview ? (
+          <span className="tool-compact-stat">
+            {stat.added > 0 ? <span className="tool-stat-add">+{stat.added}</span> : null}
+            {stat.removed > 0 ? <span className="tool-stat-del">−{stat.removed}</span> : null}
+          </span>
+        ) : null}
+        <CompactStatus running={running} failed={failed} />
+      </div>
+      {hasFileDetails ? (
+        <ToolCollapse open={open}>
+          <div className={`tool-compact-file-detail${isDiffPreview ? " has-diff-preview" : ""}`}>
+            {hasCompactDiff && activity.diff ? (
+              <CompactDiffCard fileName={subject.name} diff={activity.diff} note={activity.body} />
+            ) : (
+              <ToolBody kind={kind} activity={activity} status={tool.status} />
+            )}
+          </div>
+        </ToolCollapse>
+      ) : null}
+    </div>
+  );
+}
+
+function compactAction(kind: ToolKind): string {
+  if (kind === "write") return tr("已创建", "Created");
+  if (kind === "edit") return tr("已编辑", "Edited");
+  if (kind === "read") return tr("已读取", "Read");
+  return tr("已运行", "Ran");
+}
+
+/** 紧凑行只标异常状态:运行中转圈、失败红叉,完成不占位置。 */
+function CompactStatus({ running, failed }: { running: boolean; failed: boolean }) {
+  if (running) return <ActivityIndicator />;
+  if (failed) {
+    return (
+      <span className="tool-compact-error" role="img" aria-label={tr("失败", "Failed")}>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+      </span>
+    );
+  }
+  return null;
+}
+
+function CopyIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <rect x="9" y="9" width="13" height="13" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
+function CompactDiffCard({ fileName, diff, note }: { fileName: string; diff: string; note?: string }) {
+  const [copied, setCopied] = useState(false);
+  const stat = diffStat(diff);
+
+  return (
+    <section className="compact-diff-card" aria-label={tr(`${fileName} 的文件差异`, `${fileName} file diff`)}>
+      <header className="compact-diff-card-head">
+        <span className="compact-diff-card-name" title={fileName}>{fileName}</span>
+        {stat ? (
+          <span className="compact-diff-card-stat">
+            {stat.added > 0 ? <span className="tool-stat-add">+{stat.added}</span> : null}
+            {stat.removed > 0 ? <span className="tool-stat-del">-{stat.removed}</span> : null}
+          </span>
+        ) : null}
+        <button
+          className="compact-diff-card-copy"
+          type="button"
+          aria-label={copied ? tr("已复制差异", "Diff copied") : tr("复制差异", "Copy diff")}
+          title={copied ? tr("已复制", "Copied") : tr("复制差异", "Copy diff")}
+          onClick={() => {
+            void navigator.clipboard.writeText(diff).then(
+              () => {
+                setCopied(true);
+                window.setTimeout(() => setCopied(false), 1400);
+              },
+              () => setCopied(false),
+            );
+          }}
+        >
+          {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
+        </button>
+      </header>
+      {note ? <p className="compact-diff-card-note">{note}</p> : null}
+      <CompactDiffView diff={diff} />
+    </section>
+  );
+}
+
+/** 紧凑 diff 保留改动附近的上下文,长段未改内容自动折叠。 */
+function CompactDiffView({ diff }: { diff: string }) {
+  return (
+    <div className="compact-diff-scroll-shell">
+      <div
+        className="compact-diff-scroll-viewport"
+        role="region"
+        aria-label={tr("文件差异，可在区域内滚动", "File diff, scrollable")}
+        tabIndex={0}
+      >
+        <div className="compact-diff-scroll-content">
+          <DiffView diff={diff} compact />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ToolBody({
   kind,
   activity,
@@ -482,15 +847,16 @@ function ReadView({ body, running }: { body?: string; running: boolean }) {
   );
 }
 
-function DiffView({ diff }: { diff: string }) {
-  const rows = parseDiff(diff);
+function DiffView({ diff, compact = false }: { diff: string; compact?: boolean }) {
+  const parsedRows = parseDiff(diff);
+  const rows = compact ? collapseDiffContext(parsedRows) : parsedRows;
   if (rows.length === 0) return <p className="tool-wait">{tr("没有差异", "No diff")}</p>;
   return (
-    <div className="tool-sheet">
+    <div className={`tool-sheet${compact ? " tool-sheet-compact-diff" : ""}`}>
       {rows.map((row, index) =>
         row.kind === "gap" ? (
-          <div className="tool-diff-gap" key={index}>
-            {row.text}
+          <div className={`tool-diff-gap${compact ? " is-compact" : ""}`} key={index}>
+            {compact ? null : row.text}
           </div>
         ) : (
           <div className={`tool-code-line tool-diff-line ${row.kind}`} key={index}>
@@ -506,8 +872,44 @@ function DiffView({ diff }: { diff: string }) {
   );
 }
 
-function StatusMark({ status }: { status: ToolTrace["status"] }) {
-  if (status === "running") return <span className="tool-spinner" role="status" aria-label={tr("运行中", "Running")} />;
+/** 长上下文只显示靠近两侧改动的行,并以细分隔带代表折叠内容。 */
+function collapseDiffContext(rows: DiffRow[]): DiffRow[] {
+  const output: DiffRow[] = [];
+  const changedAfter = new Array<boolean>(rows.length + 1).fill(false);
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index];
+    changedAfter[index] = changedAfter[index + 1]! || row?.kind === "add" || row?.kind === "del";
+  }
+  let index = 0;
+  let hasChangeBefore = false;
+  while (index < rows.length) {
+    const row = rows[index];
+    if (row?.kind !== "ctx") {
+      output.push(row!);
+      if (row?.kind === "add" || row?.kind === "del") hasChangeBefore = true;
+      index += 1;
+      continue;
+    }
+
+    const start = index;
+    while (index < rows.length && rows[index]?.kind === "ctx") index += 1;
+    const context = rows.slice(start, index);
+    const hasChangeAfter = changedAfter[index] ?? false;
+    if (context.length > 3 && hasChangeBefore && hasChangeAfter) {
+      output.push(context[0]!);
+      output.push({ kind: "gap", gutter: "", text: "" });
+      output.push(context[context.length - 1]!);
+    } else {
+      output.push(...context);
+    }
+  }
+  return output;
+}
+
+function StatusMark({ status, compact = false }: { status: ToolTrace["status"]; compact?: boolean }) {
+  if (status === "running") {
+    return compact ? <ActivityIndicator /> : <span className="tool-spinner" role="status" aria-label={tr("运行中", "Running")} />;
+  }
   if (status === "error") {
     return (
       <span className="tool-status-mark error" role="img" aria-label={tr("失败", "Failed")}>
@@ -572,34 +974,7 @@ function subjectOf(kind: ToolKind, activity: ToolActivity, name: string): { name
   const normalized = path.replaceAll("\\", "/");
   const index = normalized.lastIndexOf("/");
   if (index <= 0) return { name: path, dir: "" };
-  return { name: normalized.slice(index + 1), dir: normalized.slice(0, index) };
-}
-
-function diffStat(diff: string | undefined): { added: number; removed: number } | null {
-  if (!diff) return null;
-  let added = 0;
-  let removed = 0;
-  for (const line of diff.split("\n")) {
-    if (line.startsWith("+") && !line.startsWith("+++")) added += 1;
-    else if (line.startsWith("-") && !line.startsWith("---")) removed += 1;
-  }
-  if (added === 0 && removed === 0) return null;
-  return { added, removed };
-}
-
-/** 汇总一组工具的 diff 增删行数,全部为空时返回 null。 */
-function totalDiffStat(tools: ToolTrace[]): { added: number; removed: number } | null {
-  let added = 0;
-  let removed = 0;
-  for (const tool of tools) {
-    const stat = diffStat(tool.activity?.diff);
-    if (stat) {
-      added += stat.added;
-      removed += stat.removed;
-    }
-  }
-  if (added === 0 && removed === 0) return null;
-  return { added, removed };
+  return splitPath(path);
 }
 
 function readLineCount(body: string | undefined): number | null {

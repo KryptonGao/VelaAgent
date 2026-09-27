@@ -17,7 +17,7 @@ import {
 } from "@vela/shared";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { useModels } from "../hooks/useModels";
-import type { Appearance, AppLocale, PreferencesApi } from "../hooks/usePreferences";
+import type { Appearance, AppLocale, FileIconTheme, PreferencesApi, ToolDisplay } from "../hooks/usePreferences";
 import type { ProjectApi } from "../hooks/useProject";
 import { modKeyLabel } from "../platform";
 import { darkThemes, lightThemes, type ColorScheme, type DarkTheme, type LightTheme, type ThemeId } from "../themes";
@@ -821,7 +821,19 @@ function AppearanceSection({
   preferences: PreferencesApi;
   mod: string;
 }) {
-  const { appearance, locale, theme, lightTheme, darkTheme, setAppearance, setLocale } = preferences;
+  const {
+    appearance,
+    locale,
+    theme,
+    lightTheme,
+    darkTheme,
+    toolDisplay,
+    fileIconTheme,
+    setAppearance,
+    setLocale,
+    setToolDisplay,
+    setFileIconTheme,
+  } = preferences;
   const text = copy.appearance;
   // 固定为另一种明暗时,点选主题顺带切过去,否则点了看不到效果。
   const pickTheme = (scheme: ColorScheme, id: ThemeId) => {
@@ -837,6 +849,14 @@ function AppearanceSection({
   const languages: { id: AppLocale; label: string }[] = [
     { id: "zh-CN", label: text.zh },
     { id: "en", label: text.en },
+  ];
+  const toolDisplayOptions: { id: ToolDisplay; label: string }[] = [
+    { id: "card", label: text.toolCard },
+    { id: "compact", label: text.toolCompact },
+  ];
+  const fileIconThemeOptions: { id: FileIconTheme; label: string }[] = [
+    { id: "devicon", label: text.devicon },
+    { id: "material", label: text.materialIconTheme },
   ];
   const shortcuts = [
     { label: text.items.sidebar, keys: [`${mod}B`] },
@@ -883,6 +903,22 @@ function AppearanceSection({
           value={locale}
           options={languages}
           onChange={setLocale}
+        />
+      </SettingsBlock>
+      <SettingsBlock title={text.toolDisplay} hint={text.toolDisplayHint}>
+        <Segmented
+          label={text.toolDisplay}
+          value={toolDisplay}
+          options={toolDisplayOptions}
+          onChange={setToolDisplay}
+        />
+      </SettingsBlock>
+      <SettingsBlock title={text.fileIconTheme} hint={text.fileIconThemeHint}>
+        <Segmented
+          label={text.fileIconTheme}
+          value={fileIconTheme}
+          options={fileIconThemeOptions}
+          onChange={setFileIconTheme}
         />
       </SettingsBlock>
       <SettingsBlock title={text.shortcuts} hint={text.shortcutsHint}>

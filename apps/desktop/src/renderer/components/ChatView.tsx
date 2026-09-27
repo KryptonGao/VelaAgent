@@ -5,9 +5,11 @@ import { FolderIcon } from "./icons";
 import { trackEnteredMessages, type EnterTrack } from "./message-motion";
 import type { useModels } from "../hooks/useModels";
 import type { ProjectApi } from "../hooks/useProject";
+import type { ToolDisplay } from "../hooks/usePreferences";
 import type { UiMessage } from "../hooks/useSession";
 import { Composer } from "./Composer";
 import { Markdown } from "./Markdown";
+import { ActivityIndicator } from "./ActivityIndicator";
 import { ToolList, type QuestionLookup } from "./ToolCard";
 import { SkillToken } from "./composer/SkillMenu";
 import { parseSkillPrompt } from "./composer/skill-picker";
@@ -92,6 +94,7 @@ interface ChatViewProps {
   rightCollapsed: boolean;
   onToggleRight: () => void;
   project: ProjectApi;
+  toolDisplay?: ToolDisplay;
   onSend: (text: string, images?: import("@vela/shared").ImageAttachment[]) => Promise<void>;
   onAbort: () => Promise<void>;
   onMode: (mode: import("@vela/shared").InteractionMode) => void;
@@ -111,6 +114,7 @@ export function ChatView({
   rightCollapsed,
   onToggleRight,
   project,
+  toolDisplay = "card",
   onSend,
   onAbort,
   onMode,
@@ -144,7 +148,8 @@ export function ChatView({
     const syncClearance = () => {
       const height = dock.getBoundingClientRect().height;
       if (height < 1) return;
-      root.style.setProperty("--composer-clearance", `${Math.ceil(height + 20)}px`);
+      // 给输入框顶部的渐变遮罩留出空间,让滚动视口在输入框上方结束。
+      root.style.setProperty("--composer-clearance", `${Math.ceil(height + 36)}px`);
       if (followRef.current.pinned) scrollFollowToEnd(scroller, followRef.current);
     };
 
@@ -187,12 +192,38 @@ export function ChatView({
     syncClearance();
     const observer = new ResizeObserver(syncClearance);
     observer.observe(dock);
+    // 展开思考或工具差异会改变消息高度,即使消息本身没有更新,贴底时也要跟随到底部,
+    // 否则新增内容会被固定在底部的输入框挡住。
+    const contentObserver = new ResizeObserver(() => {
+      if (followRef.current.pinned) scrollFollowToEnd(scroller, followRef.current);
+    });
+    const observedContent = new Set<Element>();
+    const syncObservedContent = () => {
+      const content = new Set(Array.from(scroller.children));
+      for (const child of observedContent) {
+        if (!content.has(child)) {
+          contentObserver.unobserve(child);
+          observedContent.delete(child);
+        }
+      }
+      for (const child of content) {
+        if (!observedContent.has(child)) {
+          observedContent.add(child);
+          contentObserver.observe(child);
+        }
+      }
+    };
+    syncObservedContent();
+    const contentMutations = new MutationObserver(syncObservedContent);
+    contentMutations.observe(scroller, { childList: true });
     scroller.addEventListener("scroll", onScroll, { passive: true });
     scroller.addEventListener("wheel", onWheel, { passive: true });
     scroller.addEventListener("touchstart", onTouchStart, { passive: true });
     scroller.addEventListener("touchmove", onTouchMove, { passive: true });
     return () => {
       observer.disconnect();
+      contentObserver.disconnect();
+      contentMutations.disconnect();
       scroller.removeEventListener("scroll", onScroll);
       scroller.removeEventListener("wheel", onWheel);
       scroller.removeEventListener("touchstart", onTouchStart);
@@ -255,6 +286,12 @@ export function ChatView({
           <span className="chat-active-title" title={title}>{title}</span>
         </div>
         <div className="chat-header-actions">
+          {project.workspace?.current ? (
+            <span className="chat-project-context" title={project.workspace.current}>
+              <span className="chat-project-name">{project.workspace.current.split(/[\\/]/).filter(Boolean).pop()}</span>
+              {project.git?.branch ? <span className="chat-project-branch">{project.git.branch}</span> : null}
+            </span>
+          ) : null}
           <button
             className={`view-icon-btn${rightCollapsed ? "" : " active"}`}
             type="button"
@@ -320,25 +357,31 @@ export function ChatView({
                     canManageChanges={Boolean(project.git?.repo)}
                     getQuestion={getQuestion}
                     onReplyQuestion={onReplyQuestion}
+                    toolDisplay={toolDisplay}
                   />
-                ) : turn.assistants.map((message) => (
-                  <Message
-                    key={message.id}
-                    message={message}
-                    thinkingActive={message.id === activeAssistantId && !message.text && message.tools.length === 0}
-                    entering={entering.has(message.id)}
-                    changes={turnChanges.get(message.id) ?? null}
-                    onOpenChanges={onOpenChanges}
-                    canManageChanges={Boolean(project.git?.repo)}
-                    getQuestion={getQuestion}
-                    onReplyQuestion={onReplyQuestion}
-                  />
-                ))}
+                ) : turn.assistants.length > 0 ? (
+                  <div className="assistant-live-turn">
+                    {turn.assistants.map((message) => (
+                      <Message
+                        key={message.id}
+                        message={message}
+                        showThinking={message.id === lastAssistant?.id}
+                        thinkingActive={message.id === activeAssistantId && !message.text && message.tools.length === 0}
+                        entering={entering.has(message.id)}
+                        changes={turnChanges.get(message.id) ?? null}
+                        onOpenChanges={onOpenChanges}
+                        canManageChanges={Boolean(project.git?.repo)}
+                        getQuestion={getQuestion}
+                        onReplyQuestion={onReplyQuestion}
+                        toolDisplay={toolDisplay}
+                      />
+                    ))}
+                  </div>
+                ) : null}
               </Fragment>
             );
           })
         )}
-        <div className="chat-scroll-spacer" aria-hidden="true" />
       </div>
 
       <Composer
@@ -420,6 +463,7 @@ function UserText({ text }: { text: string }) {
 
 function Message({
   message,
+  showThinking = true,
   thinkingActive,
   entering,
   changes,
@@ -427,8 +471,10 @@ function Message({
   canManageChanges,
   getQuestion,
   onReplyQuestion,
+  toolDisplay,
 }: {
   message: UiMessage;
+  showThinking?: boolean;
   thinkingActive: boolean;
   entering: boolean;
   changes: TurnChanges | null;
@@ -436,6 +482,7 @@ function Message({
   canManageChanges: boolean;
   getQuestion: QuestionLookup;
   onReplyQuestion: (id: string, answer: string | null) => void;
+  toolDisplay?: ToolDisplay;
 }) {
   const enterClass = entering ? " message-enter" : "";
   if (message.role === "user") {
@@ -453,7 +500,8 @@ function Message({
       <AssistantMessageContent
         message={message}
         thinkingActive={thinkingActive}
-        showThinking
+        showThinking={showThinking}
+        thinkingDisclosure
         showTools
         showText
         changes={changes}
@@ -461,6 +509,7 @@ function Message({
         canManageChanges={canManageChanges}
         getQuestion={getQuestion}
         onReplyQuestion={onReplyQuestion}
+        toolDisplay={toolDisplay}
       />
     </article>
   );
@@ -470,6 +519,7 @@ function AssistantMessageContent({
   message,
   thinkingActive,
   showThinking,
+  thinkingDisclosure = true,
   showTools,
   showText,
   changes,
@@ -477,10 +527,12 @@ function AssistantMessageContent({
   canManageChanges,
   getQuestion,
   onReplyQuestion,
+  toolDisplay,
 }: {
   message: UiMessage;
   thinkingActive: boolean;
   showThinking: boolean;
+  thinkingDisclosure?: boolean;
   showTools: boolean;
   showText: boolean;
   changes: TurnChanges | null;
@@ -488,14 +540,30 @@ function AssistantMessageContent({
   canManageChanges: boolean;
   getQuestion: QuestionLookup;
   onReplyQuestion: (id: string, answer: string | null) => void;
+  toolDisplay?: ToolDisplay;
 }) {
   return (
     <>
       {showThinking && message.thinking ? (
-        <Thinking text={message.thinking} active={thinkingActive} />
+        thinkingDisclosure ? (
+          <Thinking
+            text={message.thinking}
+            active={thinkingActive}
+            showActivityIndicator={toolDisplay === "compact"}
+          />
+        ) : (
+          <div className="stream-prose-block thinking-text process-thinking-text">
+            <Markdown text={message.thinking} />
+          </div>
+        )
       ) : null}
       {showTools && message.tools.length > 0 ? (
-        <ToolList tools={message.tools} getQuestion={getQuestion} onReplyQuestion={onReplyQuestion} />
+        <ToolList
+          tools={message.tools}
+          getQuestion={getQuestion}
+          onReplyQuestion={onReplyQuestion}
+          display={toolDisplay}
+        />
       ) : null}
       {showText && message.text ? (
         <div className="agent-reply-prose">
@@ -517,6 +585,7 @@ function CompletedAssistantTurn({
   canManageChanges,
   getQuestion,
   onReplyQuestion,
+  toolDisplay,
 }: {
   messages: UiMessage[];
   finalReply: UiMessage;
@@ -527,6 +596,7 @@ function CompletedAssistantTurn({
   canManageChanges: boolean;
   getQuestion: QuestionLookup;
   onReplyQuestion: (id: string, answer: string | null) => void;
+  toolDisplay?: ToolDisplay;
 }) {
   const [expanded, setExpanded] = useState(false);
   const processId = useId();
@@ -569,6 +639,7 @@ function CompletedAssistantTurn({
                   message={message}
                   thinkingActive={false}
                   showThinking
+                  thinkingDisclosure
                   showTools
                   showText={message.id !== finalReply.id}
                   changes={null}
@@ -576,6 +647,7 @@ function CompletedAssistantTurn({
                   canManageChanges={canManageChanges}
                   getQuestion={getQuestion}
                   onReplyQuestion={onReplyQuestion}
+                  toolDisplay={toolDisplay}
                 />
               </article>
             ))}
@@ -696,35 +768,63 @@ function UndoIcon() {
   );
 }
 
-/** 思考内容不超过 3 行时直接平铺展示,更长才折叠为可展开区块。 */
-function Thinking({ text, active }: { text: string; active: boolean }) {
-  const [open, setOpen] = useState(false);
-  const [short, setShort] = useState(false);
-  const bodyRef = useRef<HTMLDivElement>(null);
+/** 思考进行中默认展开,思考结束(出现新工具、开始回复或回合结束)时自动折叠;任意长度都能手动开合。 */
+function Thinking({
+  text,
+  active,
+  showActivityIndicator,
+}: {
+  text: string;
+  active: boolean;
+  showActivityIndicator: boolean;
+}) {
+  const [open, setOpen] = useState(active);
+  const [revealed, setRevealed] = useState(active);
+  const [fadeEdges, setFadeEdges] = useState({ top: false, bottom: false });
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const prevActive = useRef(active);
+
+  const syncFadeEdges = () => {
+    const element = scrollRef.current;
+    if (!element) return;
+    const maxScroll = element.scrollHeight - element.clientHeight;
+    const next = {
+      top: element.scrollTop > 2,
+      bottom: maxScroll > 2 && element.scrollTop < maxScroll - 2,
+    };
+    setFadeEdges((current) =>
+      current.top === next.top && current.bottom === next.bottom ? current : next,
+    );
+  };
 
   useLayoutEffect(() => {
-    if (!active) setOpen(false);
+    if (prevActive.current && !active) setOpen(false);
+    prevActive.current = active;
   }, [active]);
 
   useLayoutEffect(() => {
-    const el = bodyRef.current;
-    if (!el) return;
-    // 450 字符以上的文本在这个容器里不可能只有 3 行,跳过测量也免去流式期间的 Markdown 渲染。
-    if (text.length > 450) {
-      setShort(false);
+    const scrollElement = scrollRef.current;
+    const contentElement = contentRef.current;
+    if (!open || !revealed || !scrollElement || !contentElement) {
+      setFadeEdges({ top: false, bottom: false });
       return;
     }
-    const measure = () => {
-      // 13px 字号 × 1.65 行高 ≈ 21.5px/行,88px 约为 3 行文本(含段落间距)。
-      setShort(el.scrollHeight <= 88);
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [text]);
 
-  const expanded = open || short;
+    syncFadeEdges();
+    const observer = new ResizeObserver(syncFadeEdges);
+    observer.observe(scrollElement);
+    observer.observe(contentElement);
+    return () => observer.disconnect();
+  }, [open, revealed]);
+
+  const toggle = () => {
+    // 展开过就保留 Markdown 挂载,收起时才有平滑的高度过渡。
+    setRevealed(true);
+    setOpen((value) => !value);
+  };
+  const showActivity = active && showActivityIndicator;
+
   const label = (
     <>
       <span>{tr("思考", "Thinking")}</span>
@@ -734,23 +834,34 @@ function Thinking({ text, active }: { text: string; active: boolean }) {
     </>
   );
   return (
-    <div className={`time-spent-collapsible${expanded ? " expanded" : ""}`}>
-      {short ? (
-        <span className="time-spent-trigger">{label}</span>
-      ) : (
-        <button
-          className="time-spent-trigger"
-          type="button"
-          aria-expanded={expanded}
-          onClick={() => setOpen((value) => !value)}
-        >
-          {label}
-        </button>
-      )}
-      <div className="time-spent-body" aria-hidden={!expanded}>
+    <div className={`time-spent-collapsible${open ? " expanded" : ""}`}>
+      <button className={`time-spent-trigger${showActivity ? " is-running" : ""}`} type="button" aria-expanded={open} onClick={toggle}>
+        {label}
+        {showActivity ? <ActivityIndicator /> : null}
+      </button>
+      <div className="time-spent-body" aria-hidden={!open}>
         <div className="time-spent-body-inner">
-          <div className="stream-prose-block thinking-text" ref={bodyRef}>
-            {text.length <= 450 || open ? <Markdown text={text} /> : null}
+          <div className="thinking-scroll-shell">
+            <div
+              className="thinking-scroll-viewport"
+              ref={scrollRef}
+              onScroll={syncFadeEdges}
+              role="region"
+              aria-label={tr("思考内容，可在区域内滚动", "Thinking content, scrollable")}
+              tabIndex={0}
+            >
+              <div className="stream-prose-block thinking-text" ref={contentRef}>
+                {revealed ? <Markdown text={text} /> : null}
+              </div>
+            </div>
+            <div
+              className={`thinking-scroll-fade thinking-scroll-fade-top${fadeEdges.top ? " is-visible" : ""}`}
+              aria-hidden="true"
+            />
+            <div
+              className={`thinking-scroll-fade thinking-scroll-fade-bottom${fadeEdges.bottom ? " is-visible" : ""}`}
+              aria-hidden="true"
+            />
           </div>
         </div>
       </div>

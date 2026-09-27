@@ -140,6 +140,7 @@ export function useModels(setAppState: (state: AppState) => void) {
     catalogError,
     actionError,
     login,
+    reload,
     select,
     setThinking,
     add,

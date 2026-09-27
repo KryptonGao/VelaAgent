@@ -1,5 +1,6 @@
 import type { WorkspaceSearchResult } from "@vela/shared";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { FileTypeIcon } from "../FileTypeIcon";
 import { useFilePreview } from "./FilePreviewContext";
 import { ancestorsOf, buildFileTree, filterFilePaths, type FileTreeNode } from "./tree";
 import { localizeError, tr } from "../../locale";
@@ -135,7 +136,9 @@ export function ExplorerPane() {
                 onClick={() => preview.openFile(path)}
                 title={path}
               >
-                <ResultPath path={path} />
+                <span className="explorer-result-head">
+                  <ResultPath path={path} />
+                </span>
               </button>
             ))}
             {preview.fileList?.truncated ? (
@@ -229,6 +232,7 @@ function FileTree({
             title={node.path}
           >
             <span className="explorer-caret" aria-hidden="true" />
+            <FileTypeIcon path={node.path} />
             <span className="explorer-name">{node.name}</span>
           </button>
         ),
@@ -244,6 +248,7 @@ function ResultPath({ path }: { path: string }) {
   return (
     <>
       {dir ? <span className="explorer-result-dir">{dir}/</span> : null}
+      <FileTypeIcon path={path} />
       <span className="explorer-result-name">{name}</span>
     </>
   );

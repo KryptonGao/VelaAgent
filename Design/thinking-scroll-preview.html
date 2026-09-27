@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vela · 思考内容滚动设计稿</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #f2f4f7;
+      --sidebar: #f7f8fa;
+      --chat: #fff;
+      --bubble: #edf4fc;
+      --primary: #202124;
+      --secondary: #484b50;
+      --muted: #686d75;
+      --dim: #9aa0a8;
+      --accent: #2563eb;
+      --line: rgba(25, 28, 33, .08);
+      --scrollbar: rgba(0, 0, 0, .22);
+      --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 38px 28px 44px;
+      color: var(--primary);
+      background:
+        radial-gradient(ellipse at 48% -30%, #fff 0%, rgba(255,255,255,0) 64%),
+        var(--page);
+      font-family: var(--font);
+      -webkit-font-smoothing: antialiased;
+    }
+    .review-heading { width: min(1180px, 100%); margin: 0 auto 18px; }
+    .eyebrow { color: var(--accent); font-size: 11px; font-weight: 650; letter-spacing: .09em; text-transform: uppercase; }
+    h1 { margin: 6px 0 5px; font-size: 21px; font-weight: 640; letter-spacing: -.035em; }
+    .review-heading p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+    .window {
+      width: min(1180px, 100%);
+      height: min(744px, calc(100vh - 142px));
+      min-height: 620px;
+      margin: auto;
+      display: flex;
+      overflow: hidden;
+      border-radius: 15px;
+      background: var(--chat);
+      box-shadow: 0 22px 70px rgba(26, 38, 57, .13), 0 2px 8px rgba(26, 38, 57, .05);
+    }
+    .sidebar {
+      width: 224px;
+      flex: 0 0 224px;
+      padding: 19px 12px 13px;
+      display: flex;
+      flex-direction: column;
+      background: var(--sidebar);
+      color: var(--secondary);
+    }
+    .brand-row { display:flex; align-items:center; gap:9px; padding: 2px 9px 22px; font-size:14px; font-weight:650; }
+    .brand-mark { width:23px; height:23px; border-radius:8px; display:grid; place-items:center; color:#fff; background:linear-gradient(145deg,#61a3ff,#2563eb); font-size:12px; font-weight:700; box-shadow:0 3px 8px rgba(37,99,235,.2); }
+    .nav-item { height:34px; display:flex; align-items:center; gap:9px; padding:0 10px; border-radius:8px; font-size:12px; color:#5e646d; }
+    .nav-item.active { background:#fff; color:var(--primary); box-shadow:0 1px 4px rgba(30,41,59,.06); font-weight:560; }
+    .nav-icon { width:15px; display:inline-grid; place-items:center; color:#7c838d; font-size:14px; }
+    .section-label { margin:24px 10px 8px; color:#9298a1; font-size:10px; font-weight:600; letter-spacing:.045em; }
+    .project { padding:8px 10px 6px; display:flex; align-items:center; gap:7px; color:#68707a; font-size:11.5px; }
+    .project-mark { width:7px; height:7px; border-radius:50%; background:#8ca7d8; }
+    .sub-item { margin-left:17px; padding:8px 9px; border-radius:7px; color:#69717a; font-size:11px; line-height:1.45; }
+    .sub-item.current { color:#2e3744; background:#fff; box-shadow:0 1px 4px rgba(30,41,59,.05); }
+    .account { margin-top:auto; padding:13px 9px 2px; display:flex; align-items:center; gap:9px; border-top:1px solid var(--line); font-size:11.5px; }
+    .avatar { width:25px; height:25px; border-radius:50%; display:grid; place-items:center; color:white; background:linear-gradient(145deg,#f97316,#ec4899); font-size:10px; font-weight:650; }
+    .main { min-width:0; flex:1; display:flex; flex-direction:column; position:relative; background:var(--chat); }
+    .topbar { height:55px; flex:0 0 55px; display:flex; align-items:center; justify-content:space-between; padding:0 23px; border-bottom:1px solid rgba(25,28,33,.045); }
+    .chat-title { max-width:70%; overflow:hidden; color:#25272b; font-size:13px; font-weight:620; white-space:nowrap; text-overflow:ellipsis; }
+    .top-actions { display:flex; align-items:center; gap:8px; }
+    .ghost-button { height:28px; padding:0 10px; border-radius:7px; color:#575d66; font:inherit; font-size:11px; background:transparent; }
+    .ghost-button:last-child { background:#f5f6f8; }
+    .conversation { width:min(760px,100%); flex:1; min-height:0; margin:0 auto; padding:39px 26px 160px; overflow:auto; }
+    .user-row { display:flex; justify-content:flex-end; margin-bottom:28px; }
+    .user-bubble { max-width:83%; padding:10px 15px; border-radius:15px; background:var(--bubble); color:#30343a; font-size:13px; line-height:1.55; }
+    .assistant { display:flex; flex-direction:column; gap:11px; color:var(--primary); }
+    .think-toggle { width:max-content; min-height:28px; padding:0 2px; display:flex; align-items:center; gap:6px; border:0; color:var(--muted); background:transparent; font:inherit; font-size:13px; font-weight:520; cursor:pointer; }
+    .think-toggle:hover { color:var(--secondary); }
+    .chevron { width:10px; height:10px; transition:transform .2s ease; }
+    .think-toggle[aria-expanded="true"] .chevron { transform:rotate(90deg); }
+    .thinking-body { display:grid; grid-template-rows:1fr; transition:grid-template-rows .24s cubic-bezier(.16,1,.3,1); }
+    .thinking-body.closed { grid-template-rows:0fr; }
+    .thinking-body-inner { min-height:0; overflow:hidden; }
+    .scroll-shell { position:relative; }
+    .thought-scroll {
+      max-height:280px;
+      overflow-y:auto;
+      scrollbar-width:thin;
+      scrollbar-color:var(--scrollbar) transparent;
+      padding:7px 14px 9px 0;
+      color:var(--muted);
+      font-size:13px;
+      line-height:1.62;
+      overflow-wrap:anywhere;
+      scrollbar-gutter:stable;
+    }
+    .thought-scroll::-webkit-scrollbar { width:5px; }
+    .thought-scroll::-webkit-scrollbar-thumb { border-radius:99px; background:var(--scrollbar); }
+    .thought-scroll p { margin:0 0 11px; }
+    .thought-scroll p:last-child { margin-bottom:0; }
+    .thought-scroll strong { color:#4e5661; font-weight:570; }
+    .fade-edge {
+      position:absolute;
+      left:0; right:5px;
+      z-index:2;
+      height:66px;
+      opacity:0;
+      pointer-events:none;
+      transition:opacity .16s ease;
+      -webkit-backdrop-filter:blur(3px);
+      backdrop-filter:blur(3px);
+    }
+    .fade-edge.visible { opacity:1; }
+    .fade-edge.top {
+      top:0;
+      background:linear-gradient(to bottom,color-mix(in srgb,var(--chat) 88%,transparent) 0%,color-mix(in srgb,var(--chat) 35%,transparent) 38%,transparent 100%);
+      -webkit-mask-image:linear-gradient(to bottom,#000 0%,transparent 100%);
+      mask-image:linear-gradient(to bottom,#000 0%,transparent 100%);
+    }
+    .fade-edge.bottom {
+      bottom:0;
+      background:linear-gradient(to top,color-mix(in srgb,var(--chat) 88%,transparent) 0%,color-mix(in srgb,var(--chat) 35%,transparent) 38%,transparent 100%);
+      -webkit-mask-image:linear-gradient(to top,#000 0%,transparent 100%);
+      mask-image:linear-gradient(to top,#000 0%,transparent 100%);
+    }
+    .reply { color:var(--primary); font-size:14px; line-height:1.68; }
+    .reply p { margin:0 0 8px; }
+    .reply strong { font-weight:620; }
+    .composer-wrap { position:absolute; left:0; right:0; bottom:0; padding:35px 23px 18px; background:linear-gradient(to bottom,rgba(255,255,255,0),rgba(255,255,255,.91) 25%,#fff 54%); display:flex; justify-content:center; }
+    .composer { width:min(760px,100%); padding:12px 15px 10px; border:1px solid rgba(25,28,33,.10); border-radius:17px; background:#fff; box-shadow:0 8px 24px rgba(20,20,20,.075),0 1px 3px rgba(20,20,20,.035); }
+    .placeholder { color:#8e949d; font-size:12px; }
+    .composer-tools { margin-top:17px; display:flex; align-items:center; gap:8px; color:#727983; font-size:10px; }
+    .plus { width:19px; height:19px; display:grid; place-items:center; border-radius:50%; background:#f3f4f6; font-size:14px; }
+    .model { margin-left:auto; padding:5px 8px; border-radius:6px; background:#f5f6f8; color:#555d68; }
+    .send { width:22px; height:22px; display:grid; place-items:center; border-radius:50%; background:var(--accent); color:#fff; font-size:11px; }
+    .interaction-note { margin:11px auto 0; width:min(1180px,100%); display:flex; align-items:flex-start; gap:8px; color:#6d7480; font-size:11px; line-height:1.5; }
+    .note-dot { margin-top:4px; width:6px; height:6px; flex:0 0 6px; border-radius:50%; background:#6994e6; }
+    button:focus-visible, .thought-scroll:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+    @media (max-width:760px) {
+      body { padding:18px 12px 24px; }
+      .review-heading { margin-bottom:12px; }
+      .window { height:calc(100vh - 162px); min-height:520px; }
+      .sidebar { display:none; }
+      .conversation { padding:26px 18px 145px; }
+      .composer-wrap { padding:30px 12px 12px; }
+      .topbar { padding:0 16px; }
+      .chat-title { max-width:58%; }
+      .thought-scroll { max-height:240px; }
+    }
+    @media (prefers-reduced-motion:reduce) { *,*::before,*::after { transition:none !important; } }
+  </style>
+</head>
+<body>
+  <header class="review-heading">
+    <div class="eyebrow">Vela · interaction draft</div>
+    <h1>思考内容 · 展开态设计稿</h1>
+    <p>展开后限制内容区高度，正文在区域内独立滚动；滚动到中段时，上下边缘渐进模糊提示内容延续。</p>
+  </header>
+
+  <main class="window" aria-label="Vela 对话界面设计稿">
+    <aside class="sidebar" aria-label="侧边栏示意">
+      <div class="brand-row"><span class="brand-mark">V</span><span>Vela</span></div>
+      <div class="nav-item"><span class="nav-icon">＋</span>新对话</div>
+      <div class="nav-item"><span class="nav-icon">⌕</span>搜索</div>
+      <div class="section-label">最近</div>
+      <div class="project"><span class="project-mark"></span><span>VelaAgent</span></div>
+      <div class="sub-item current">优化长思考内容的显示体验</div>
+      <div class="sub-item">修复 Provider 设置页密钥逻辑</div>
+      <div class="section-label">项目</div>
+      <div class="project"><span class="project-mark" style="background:#89b89c"></span><span>StudyPulse</span></div>
+      <div class="project"><span class="project-mark" style="background:#c39ab8"></span><span>Glance</span></div>
+      <div class="account"><span class="avatar">CG</span><span>Chenkai Gao</span></div>
+    </aside>
+
+    <section class="main">
+      <header class="topbar">
+        <div class="chat-title">优化长思考内容的显示体验</div>
+        <div class="top-actions"><button class="ghost-button" type="button">···</button><button class="ghost-button" type="button">分享</button></div>
+      </header>
+
+      <section class="conversation" aria-label="对话内容">
+        <div class="user-row"><div class="user-bubble">请分析一下思考内容太长时的展示方式，并给一个更舒服的阅读体验。</div></div>
+        <article class="assistant">
+          <button class="think-toggle" id="thinkToggle" type="button" aria-expanded="true" aria-controls="thinkingBody">
+            <span>思考</span>
+            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+          <div class="thinking-body" id="thinkingBody">
+            <div class="thinking-body-inner">
+              <div class="scroll-shell">
+                <div class="thought-scroll" id="thoughtScroll" role="region" aria-label="思考内容，可在区域内滚动" tabindex="0">
+                  <p>我先从当前对话里的思考区开始看。现在点击「思考」后，整段内容会直接展开在回复前面；当思考很长时，回复就被推到很下面，回看对话也要滚很久。</p>
+                  <p>这里适合保留现有的折叠入口和文本排版，只约束展开后的内容区域。区域高度到达上限后，滚动发生在思考文本本身，周围的会话布局保持稳定。</p>
+                  <p><strong>阅读行为：</strong>滚轮或触控板在思考区域内移动时，优先浏览这段思考；滚动离开边界后仍可继续滚动整段对话，不让页面滚动陷阱困住用户。</p>
+                  <p><strong>边缘处理：</strong>滚动位置离开顶部后，上缘逐渐显出柔和模糊；下缘在还有后续内容时渐进淡化并轻微模糊。滚到顶部或底部时，对应边缘收起。</p>
+                  <p>模糊只用于提示内容在边缘继续延伸，不遮挡阅读区域中央的文字。右侧保留很窄的滚动条，方便定位，也让用户知道这一块可以独立滚动。</p>
+                  <p>段落、列表和 Markdown 内容仍然沿用原有文本样式。收起入口继续放在「思考」标题旁，展开或收起时保留轻缓的高度过渡。</p>
+                  <p>这份稿件用较长的示例文字模拟实际内容。试着在这里滚动：处于中间位置时，上下两道模糊边缘会同时出现；继续滚到底部，下缘会自然消失。</p>
+                </div>
+                <div class="fade-edge top" id="topFade" aria-hidden="true"></div>
+                <div class="fade-edge bottom" id="bottomFade" aria-hidden="true"></div>
+              </div>
+            </div>
+          </div>
+          <div class="reply"><p>可以将展开后的思考限定在固定的最大高度内，让长内容只在思考区内部滚动，并用上下渐进模糊提示边缘外还有内容。</p></div>
+        </article>
+      </section>
+
+      <div class="composer-wrap" aria-hidden="true">
+        <div class="composer">
+          <div class="placeholder">随心输入</div>
+          <div class="composer-tools"><span class="plus">＋</span><span>完全访问</span><span class="model">GPT-6 · 高</span><span class="send">↑</span></div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <div class="interaction-note"><span class="note-dot"></span><span>可交互：点击「思考」折叠或重新展开；在思考文字区域内滚动，观察上下模糊边缘随滚动位置显隐。此稿仅用于确认交互理解。</span></div>
+
+  <script>
+    const scrollArea = document.getElementById('thoughtScroll');
+    const topFade = document.getElementById('topFade');
+    const bottomFade = document.getElementById('bottomFade');
+    const toggle = document.getElementById('thinkToggle');
+    const body = document.getElementById('thinkingBody');
+
+    function updateFades() {
+      const maxScroll = scrollArea.scrollHeight - scrollArea.clientHeight;
+      topFade.classList.toggle('visible', scrollArea.scrollTop > 2);
+      bottomFade.classList.toggle('visible', maxScroll > 2 && scrollArea.scrollTop < maxScroll - 2);
+    }
+
+    scrollArea.addEventListener('scroll', updateFades, { passive: true });
+    window.addEventListener('resize', updateFades);
+    toggle.addEventListener('click', function () {
+      const open = toggle.getAttribute('aria-expanded') !== 'true';
+      toggle.setAttribute('aria-expanded', String(open));
+      body.classList.toggle('closed', !open);
+      if (open) requestAnimationFrame(updateFades);
+      else { topFade.classList.remove('visible'); bottomFade.classList.remove('visible'); }
+    });
+    updateFades();
+  </script>
+</body>
+</html>

@@ -13,10 +13,16 @@ import type { AppLocale } from "@vela/shared";
 export type Appearance = "system" | "light" | "dark";
 export type { AppLocale };
 
+/** 对话里工具调用的展示方式:卡片可逐个展开,紧凑每行一个、多次调用折叠成摘要。 */
+export type ToolDisplay = "card" | "compact";
+export type FileIconTheme = "devicon" | "material";
+
 const appearanceKey = "vela.appearance";
 const lightThemeKey = "vela.theme.light";
 const darkThemeKey = "vela.theme.dark";
 const localeKey = "vela.locale";
+const toolDisplayKey = "vela.toolDisplay";
+const fileIconThemeKey = "vela.fileIconTheme";
 const darkQuery = "(prefers-color-scheme: dark)";
 
 function readStored<T>(key: string, accept: (value: unknown) => value is T, fallback: T): T {
@@ -45,6 +51,14 @@ function isLocale(value: unknown): value is AppLocale {
   return value === "en" || value === "zh-CN";
 }
 
+function isToolDisplay(value: unknown): value is ToolDisplay {
+  return value === "card" || value === "compact";
+}
+
+function isFileIconTheme(value: unknown): value is FileIconTheme {
+  return value === "devicon" || value === "material";
+}
+
 function systemScheme(): ColorScheme {
   return window.matchMedia(darkQuery).matches ? "dark" : "light";
 }
@@ -61,6 +75,12 @@ export function usePreferences() {
     document.documentElement.lang = value;
     return value;
   });
+  const [toolDisplay, setToolDisplay] = useState<ToolDisplay>(() =>
+    readStored(toolDisplayKey, isToolDisplay, "compact"),
+  );
+  const [fileIconTheme, setFileIconTheme] = useState<FileIconTheme>(() =>
+    readStored(fileIconThemeKey, isFileIconTheme, "devicon"),
+  );
 
   useEffect(() => {
     const media = window.matchMedia(darkQuery);
@@ -87,6 +107,9 @@ export function usePreferences() {
     writeStored(localeKey, locale);
   }, [locale]);
 
+  useEffect(() => writeStored(toolDisplayKey, toolDisplay), [toolDisplay]);
+  useEffect(() => writeStored(fileIconThemeKey, fileIconTheme), [fileIconTheme]);
+
   return {
     appearance,
     scheme,
@@ -94,10 +117,14 @@ export function usePreferences() {
     lightTheme,
     darkTheme,
     locale,
+    toolDisplay,
+    fileIconTheme,
     setAppearance,
     setLightTheme,
     setDarkTheme,
     setLocale,
+    setToolDisplay,
+    setFileIconTheme,
   };
 }
 

@@ -6,16 +6,18 @@ import { tr } from "../locale";
 /**
  * ask_user_question 工具的消息内卡片。
  * 等待回答时显示可点选的选项、自由输入和跳过;回答后(或重启恢复的历史)转为只读,
- * 展示问题、选项与用户的答案。
+ * 展示问题、选项与用户的答案。紧凑模式下的历史只保留问题和最终回答。
  */
 export function QuestionCard({
   tool,
   request,
   onReply,
+  compact = false,
 }: {
   tool: ToolTrace;
   request: AskUserQuestionRequest | null;
   onReply: (id: string, answer: string | null) => void;
+  compact?: boolean;
 }) {
   const [custom, setCustom] = useState("");
   const [busy, setBusy] = useState(false);
@@ -35,6 +37,29 @@ export function QuestionCard({
     const text = custom.trim();
     if (!text) return;
     reply(text);
+  }
+
+  if (compact && tool.status !== "running") {
+    const answer = answerLine
+      ? answerLine.replace(/^(用户回答：|Your answer: )/, "")
+      : tool.status === "error"
+        ? tr("问题没有回答", "Question was not answered")
+        : tr("没有回答", "No answer");
+
+    return (
+      <article className="question-card is-compact-history">
+        <div className="question-compact-head">
+          <span className="question-compact-icon" aria-hidden="true">
+            <QuestionIcon size={13} />
+          </span>
+          <div className="question-card-q">{question}</div>
+        </div>
+        <div className="question-compact-answer">
+          <span className="question-compact-guide" aria-hidden="true" />
+          <div className={`question-compact-answer-text${answerLine ? "" : " is-empty"}`}>{answer}</div>
+        </div>
+      </article>
+    );
   }
 
   return (

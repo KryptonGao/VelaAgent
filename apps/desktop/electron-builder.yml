@@ -5,6 +5,7 @@ directories:
   output: dist
 files:
   - out/**
+  - THIRD_PARTY_LICENSES.md
   # Preserve pnpm's nested dependency layout to prevent fallback to incompatible root-hoisted versions.
   - from: ../../node_modules
     to: node_modules

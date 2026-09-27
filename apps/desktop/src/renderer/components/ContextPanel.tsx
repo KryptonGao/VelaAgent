@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
   contextCategories,
   type AppState,
@@ -53,6 +53,8 @@ export function ContextPanel({
   onChangesOpenChange,
 }: ContextPanelProps) {
   const [diffRequestPath, setDiffRequestPath] = useState<string | null>(null);
+  const [contextOpen, setContextOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const preview = useFilePreview();
   const session = state?.session;
   const context = state?.context;
@@ -102,11 +104,12 @@ export function ContextPanel({
           activeChanges={changesOpen}
         />
 
-        <section>
-          <div className="side-panel-title-row">
-            <span className="side-panel-heading">{tr("上下文", "Context")}</span>
-            <span className="side-panel-counter">{tr(`${context?.messageCount ?? 0} 条消息`, `${context?.messageCount ?? 0} messages`)}</span>
-          </div>
+        <PanelDisclosure
+          title={tr("上下文", "Context")}
+          meta={tr(`${context?.messageCount ?? 0} 条消息`, `${context?.messageCount ?? 0} messages`)}
+          open={contextOpen}
+          onToggle={() => setContextOpen((value) => !value)}
+        >
           <div className="context-metrics-card">
             <div className="context-metrics-header">
               <span className="context-metrics-label">{tr("工具调用", "Tool calls")}</span>
@@ -116,13 +119,14 @@ export function ContextPanel({
               {session?.cwd ?? "—"}
             </div>
           </div>
-        </section>
+        </PanelDisclosure>
 
-        <section>
-          <div className="side-panel-title-row">
-            <span className="side-panel-heading">{tr("已启用工具", "Enabled tools")}</span>
-            <span className="side-panel-counter">{session?.tools?.length ?? 0}</span>
-          </div>
+        <PanelDisclosure
+          title={tr("已启用工具", "Enabled tools")}
+          meta={String(session?.tools?.length ?? 0)}
+          open={toolsOpen}
+          onToggle={() => setToolsOpen((value) => !value)}
+        >
           {session?.tools && session.tools.length > 0 ? (
             <ul className="tool-chip-list">
               {session.tools.map((tool) => (
@@ -134,7 +138,7 @@ export function ContextPanel({
           ) : (
             <p className="tool-chip-empty">{tr("会话开始后显示", "Shown after the chat starts")}</p>
           )}
-        </section>
+        </PanelDisclosure>
           </div>
 
           <ContextUsageCard context={context} />
@@ -154,6 +158,40 @@ export function ContextPanel({
         />
       </SheetPresence>
     </aside>
+  );
+}
+
+function PanelDisclosure({
+  title,
+  meta,
+  open,
+  onToggle,
+  children,
+}: {
+  title: string;
+  meta: string;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  const contentId = useId();
+  return (
+    <section className={`panel-disclosure${open ? " open" : ""}`}>
+      <button
+        className="panel-disclosure-toggle"
+        type="button"
+        aria-expanded={open}
+        aria-controls={contentId}
+        onClick={onToggle}
+      >
+        <span className="panel-disclosure-title">{title}</span>
+        <span className="panel-disclosure-meta">{meta}</span>
+        <span className="panel-disclosure-chevron" aria-hidden="true"><ChevronDownIcon /></span>
+      </button>
+      <div id={contentId} className="panel-disclosure-content" hidden={!open}>
+        {children}
+      </div>
+    </section>
   );
 }
 
@@ -324,7 +362,7 @@ function GoalCard({
 }
 
 function ContextUsageCard({ context }: { context: ContextUsage | undefined }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const tokens = context?.tokens ?? 0;
   const contextWindow = context?.contextWindow ?? null;
   const segments = context?.segments;

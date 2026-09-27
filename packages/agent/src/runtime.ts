@@ -251,8 +251,6 @@ export class AgentRuntime {
       if (!entry) throw new Error("对话不存在或已结束");
       if (!entry.session) await this.startInternal(entry);
       this.activeId = entry.id;
-      // 提到最近使用,既刷新侧边栏排序,也让工作区跟随逻辑选中本对话。
-      this.touchEntry(entry);
       this.notifyActiveCwd(entry.snapshot.cwd);
       this.emitStatus(entry);
       return this.getSnapshot();

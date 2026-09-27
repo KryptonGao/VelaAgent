@@ -1,0 +1,888 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vela · 首次启动引导设计稿</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #f2f4f7;
+      --window: #fff;
+      --sidebar: #f7f8fa;
+      --surface: #fff;
+      --surface-subtle: #f6f7f8;
+      --surface-hover: #eff1f4;
+      --ink: #202124;
+      --ink-secondary: #4b5058;
+      --muted: #707782;
+      --dim: #989fa9;
+      --accent: #2563eb;
+      --accent-soft: #edf4ff;
+      --line: rgba(25, 28, 33, .09);
+      --success: #16845b;
+      --warning: #a15f16;
+      --danger: #b84139;
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --radius-xl: 20px;
+      --font: "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --shadow-window: 0 22px 70px rgba(26, 38, 57, .13), 0 2px 8px rgba(26, 38, 57, .05);
+      --shadow-card: 0 1px 3px rgba(20, 20, 20, .045);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 28px 28px 34px;
+      color: var(--ink);
+      background: radial-gradient(ellipse at 48% -30%, #fff 0%, rgba(255,255,255,0) 65%), var(--page);
+      font-family: var(--font);
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input, select { font: inherit; }
+    button { color: inherit; }
+    .review-header {
+      width: min(1180px, 100%);
+      margin: 0 auto 16px;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 18px;
+    }
+    .eyebrow {
+      color: var(--accent);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .review-header h1 { margin: 5px 0 4px; font-size: 21px; font-weight: 650; letter-spacing: -.035em; }
+    .review-header p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .preview-controls { display: flex; align-items: center; gap: 9px; flex-shrink: 0; }
+    .preview-label { color: var(--muted); font-size: 11px; }
+    .preview-switch {
+      display: inline-flex;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255,255,255,.72);
+      box-shadow: var(--shadow-card);
+    }
+    .preview-switch button {
+      min-height: 29px;
+      padding: 0 11px;
+      border: 0;
+      border-radius: 999px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .preview-switch button.active { color: var(--ink); background: white; box-shadow: 0 1px 4px rgba(25,28,33,.13); font-weight: 620; }
+
+    .window {
+      width: min(1180px, 100%);
+      height: min(756px, calc(100vh - 138px));
+      min-height: 600px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border: 1px solid rgba(27, 35, 47, .07);
+      border-radius: 15px;
+      background: var(--window);
+      box-shadow: var(--shadow-window);
+      transition: background .2s ease, color .2s ease;
+    }
+    .window[data-scheme="dark"] {
+      color-scheme: dark;
+      --window: #17191e;
+      --sidebar: #1d2026;
+      --surface: #22262e;
+      --surface-subtle: #262b34;
+      --surface-hover: #303641;
+      --ink: #f2f4f7;
+      --ink-secondary: #c8ced8;
+      --muted: #939dac;
+      --dim: #737e8e;
+      --accent: #6e9cff;
+      --accent-soft: rgba(93, 143, 239, .16);
+      --line: rgba(255,255,255,.09);
+      --success: #62c99c;
+      --warning: #e7ad62;
+      --danger: #ee8981;
+      --shadow-card: 0 2px 8px rgba(0,0,0,.18);
+    }
+    .window[data-theme="paper"] { --accent: #ad5a3e; --accent-soft: #f8eee8; }
+    .window[data-scheme="dark"][data-theme="graphite"] { --accent: #a992ff; --accent-soft: rgba(169,146,255,.14); }
+    .window[data-scheme="dark"][data-theme="ember"] { --accent: #f29a61; --accent-soft: rgba(242,154,97,.15); }
+    .window[data-theme="celadon"] { --accent: #14816c; --accent-soft: #eaf5f0; }
+    .titlebar {
+      height: 47px;
+      flex: 0 0 47px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 17px;
+      border-bottom: 1px solid var(--line);
+      background: var(--window);
+    }
+    .traffic-lights { display: flex; gap: 7px; width: 72px; }
+    .traffic-lights span { width: 10px; height: 10px; border-radius: 50%; background: #ff6058; }
+    .traffic-lights span:nth-child(2) { background: #ffbd2e; }
+    .traffic-lights span:nth-child(3) { background: #28c840; }
+    .titlebar-title { display: flex; align-items: center; gap: 8px; color: var(--ink-secondary); font-size: 11px; font-weight: 590; }
+    .brand-mark {
+      width: 20px; height: 20px; display: grid; place-items: center;
+      border-radius: 7px; color: white; background: linear-gradient(145deg, #6eafff, #2563eb);
+      font-size: 11px; font-weight: 750; box-shadow: 0 2px 7px rgba(37,99,235,.22);
+    }
+    .titlebar-right { width: 72px; display: flex; justify-content: flex-end; }
+    .local-badge { padding: 5px 9px; border-radius: 999px; color: var(--muted); background: var(--surface-subtle); font-size: 10px; }
+    .layout { min-height: 0; flex: 1; display: flex; }
+    .stepper {
+      width: 232px;
+      flex: 0 0 232px;
+      display: flex;
+      flex-direction: column;
+      padding: 29px 16px 18px;
+      background: var(--sidebar);
+      border-right: 1px solid var(--line);
+    }
+    .stepper-intro { padding: 0 9px 20px; }
+    .stepper-intro h2 { margin: 0 0 5px; font-size: 13px; line-height: 1.4; font-weight: 650; }
+    .stepper-intro p { margin: 0; color: var(--muted); font-size: 10.5px; line-height: 1.5; }
+    .step-nav { display: flex; flex-direction: column; gap: 4px; }
+    .step-nav button {
+      width: 100%; min-height: 39px; display: flex; align-items: center; gap: 10px;
+      padding: 0 10px; border: 0; border-radius: 9px; text-align: left;
+      color: var(--muted); background: transparent; font-size: 11.5px; cursor: default;
+    }
+    .step-nav button.available { cursor: pointer; }
+    .step-nav button.available:hover { background: var(--surface-hover); color: var(--ink); }
+    .step-nav button.active { color: var(--ink); background: var(--surface); box-shadow: var(--shadow-card); font-weight: 620; }
+    .step-nav button.done .step-number { color: white; background: var(--success); }
+    .step-number {
+      width: 21px; height: 21px; display: grid; place-items: center; flex: 0 0 21px;
+      border: 1px solid var(--line); border-radius: 50%; color: var(--dim); background: var(--window); font-size: 10px; font-weight: 600;
+    }
+    .step-nav button.active .step-number { border-color: var(--accent); color: white; background: var(--accent); }
+    .optional-tag { margin-left: auto; color: var(--dim); font-size: 9px; font-weight: 500; }
+    .stepper-foot { margin-top: auto; padding: 14px 9px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; line-height: 1.55; }
+    .stepper-foot strong { display: block; margin-bottom: 3px; color: var(--ink-secondary); font-size: 10.5px; font-weight: 610; }
+    .flow { min-width: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; background: var(--window); }
+    .screen-scroll { min-height: 0; flex: 1; overflow: auto; scrollbar-width: thin; scrollbar-color: rgba(100,110,125,.28) transparent; }
+    .screen { width: min(700px, 100%); min-height: 100%; margin: 0 auto; padding: 31px 38px 25px; display: none; flex-direction: column; }
+    .screen.active { display: flex; }
+    .screen-head { margin-bottom: 23px; }
+    .screen-kicker { margin-bottom: 7px; color: var(--accent); font-size: 10px; font-weight: 680; letter-spacing: .08em; text-transform: uppercase; }
+    .screen h1 { margin: 0 0 7px; font-size: 22px; line-height: 1.25; font-weight: 650; letter-spacing: -.035em; }
+    .screen-head p { max-width: 560px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+    .section { margin-bottom: 21px; }
+    .section:last-child { margin-bottom: 0; }
+    .section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 9px; }
+    .section-head h3 { margin: 0; font-size: 12px; font-weight: 640; }
+    .section-hint { color: var(--muted); font-size: 10.5px; line-height: 1.45; }
+    .segmented { display: inline-flex; max-width: 100%; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-subtle); }
+    .segmented button { min-height: 30px; padding: 0 12px; border: 0; border-radius: 7px; color: var(--muted); background: transparent; font-size: 10.5px; cursor: pointer; }
+    .segmented button.selected { color: var(--ink); background: var(--surface); box-shadow: 0 1px 3px rgba(20,28,40,.12); font-weight: 620; }
+    .theme-groups { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .theme-group-label { margin: 0 0 7px; color: var(--muted); font-size: 10px; font-weight: 600; }
+    .theme-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 7px; }
+    .theme-tile {
+      min-width: 0; padding: 5px; border: 1px solid var(--line); border-radius: 10px;
+      color: var(--ink-secondary); background: var(--surface); text-align: left; cursor: pointer;
+      transition: border-color .16s ease, transform .16s ease, box-shadow .16s ease;
+    }
+    .theme-tile:hover { transform: translateY(-1px); box-shadow: var(--shadow-card); }
+    .theme-tile.selected { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent); }
+    .mini-theme { height: 39px; display: flex; overflow: hidden; border-radius: 6px; background: var(--mini-bg); }
+    .mini-side { width: 24%; background: var(--mini-side); border-right: 1px solid var(--mini-line); }
+    .mini-main { flex: 1; display: flex; flex-direction: column; gap: 4px; padding: 6px; }
+    .mini-line { width: 60%; height: 3px; border-radius: 3px; background: var(--mini-line); }
+    .mini-line.short { width: 38%; }
+    .mini-bubble { width: 45%; height: 7px; margin: 1px 0 0 auto; border-radius: 5px; background: var(--mini-accent); }
+    .mini-accent { width: 18%; height: 3px; border-radius: 3px; background: var(--mini-accent); }
+    .theme-tile span:last-child { display: block; margin: 5px 2px 1px; overflow: hidden; font-size: 9.5px; font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
+    .mode-paper { --mini-bg: #fffdf8; --mini-side: #f1eadc; --mini-line: #cfc5b6; --mini-accent: #ad5a3e; }
+    .mode-daylight { --mini-bg: #fff; --mini-side: #f3f5f8; --mini-line: #d5dae2; --mini-accent: #3b82f6; }
+    .mode-celadon { --mini-bg: #f7fbf8; --mini-side: #eaf2ed; --mini-line: #c5d5cc; --mini-accent: #14816c; }
+    .mode-midnight { --mini-bg: #181d26; --mini-side: #202734; --mini-line: #4b586b; --mini-accent: #6e9cff; }
+    .mode-graphite { --mini-bg: #1e2028; --mini-side: #252732; --mini-line: #515466; --mini-accent: #a992ff; }
+    .mode-ember { --mini-bg: #211c1a; --mini-side: #2b2421; --mini-line: #5d4840; --mini-accent: #f29a61; }
+
+    .choice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .choice-card {
+      position: relative; min-width: 0; padding: 13px; border: 1px solid var(--line); border-radius: 13px;
+      color: var(--ink); background: var(--surface); text-align: left; cursor: pointer;
+      transition: border-color .16s ease, background .16s ease, box-shadow .16s ease;
+    }
+    .choice-card:hover { background: var(--surface-subtle); }
+    .choice-card.selected { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 13%, transparent); }
+    .choice-title { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 640; }
+    .choice-title .radio { width: 15px; height: 15px; border: 1.5px solid var(--dim); border-radius: 50%; background: var(--surface); }
+    .choice-card.selected .radio { border: 4px solid var(--accent); }
+    .choice-desc { display: block; margin: 5px 0 11px 23px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+    .tool-demo { min-height: 76px; padding: 8px; border-radius: 9px; background: var(--surface-subtle); }
+    .demo-card { display: flex; align-items: center; gap: 7px; padding: 6px 7px; border-radius: 7px; background: var(--surface); box-shadow: var(--shadow-card); }
+    .demo-icon { width: 18px; height: 18px; flex: 0 0 18px; display: grid; place-items: center; border-radius: 6px; color: #4779ca; background: #eaf1fb; font-family: ui-monospace, monospace; font-size: 9px; font-weight: 700; }
+    .demo-copy { min-width: 0; flex: 1; }
+    .demo-copy strong { display: block; font-size: 9px; font-weight: 610; }
+    .demo-copy small { display: block; margin-top: 2px; overflow: hidden; color: var(--muted); font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .demo-chevron { color: var(--dim); font-size: 10px; }
+    .demo-row { display: flex; align-items: center; gap: 7px; padding: 6px 4px; border-bottom: 1px solid var(--line); color: var(--ink-secondary); font-size: 9px; }
+    .demo-row:last-child { border-bottom: 0; }
+    .demo-row .demo-icon { width: 16px; height: 16px; flex-basis: 16px; }
+    .demo-count { margin-left: auto; color: var(--muted); font-size: 8.5px; }
+
+    .skill-list { display: flex; flex-direction: column; gap: 13px; }
+    .skill-source { padding: 12px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); }
+    .skill-source-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 9px; }
+    .source-name { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 640; }
+    .source-mark { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 7px; color: #fff; background: #4d6288; font-size: 9px; font-weight: 700; }
+    .source-mark.claude { color: #804b31; background: #f2e5d8; }
+    .text-button { padding: 4px 6px; border: 0; color: var(--accent); background: transparent; font-size: 10px; cursor: pointer; }
+    .skill-row { display: flex; align-items: flex-start; gap: 9px; padding: 9px 7px; border-radius: 8px; cursor: pointer; }
+    .skill-row:hover { background: var(--surface-subtle); }
+    .skill-row + .skill-row { border-top: 1px solid var(--line); }
+    .skill-row input { width: 14px; height: 14px; margin: 1px 0 0; accent-color: var(--accent); }
+    .skill-copy { min-width: 0; flex: 1; }
+    .skill-name { display: block; font-size: 10.5px; font-weight: 620; }
+    .skill-desc { display: block; margin-top: 3px; color: var(--muted); font-size: 9.5px; line-height: 1.4; }
+    .skill-meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+    .tiny-tag { padding: 2px 6px; border-radius: 999px; color: var(--muted); background: var(--surface-subtle); font-size: 8px; }
+    .tiny-tag.good { color: var(--success); background: color-mix(in srgb, var(--success) 10%, transparent); }
+    .skill-count { color: var(--muted); font-size: 10px; }
+
+    .provider-list { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 9px; }
+    .provider-card {
+      min-width: 0; min-height: 113px; padding: 11px; border: 1px solid var(--line); border-radius: 12px;
+      background: var(--surface); text-align: left; cursor: pointer; transition: .16s ease;
+    }
+    .provider-card:hover { background: var(--surface-subtle); }
+    .provider-card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 13%, transparent); }
+    .provider-card-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+    .provider-logo { width: 25px; height: 25px; display: grid; place-items: center; border-radius: 8px; color: var(--ink-secondary); background: var(--surface-subtle); font-size: 10px; font-weight: 700; }
+    .provider-state { color: var(--success); font-size: 8.5px; }
+    .provider-card strong { display: block; margin-top: 9px; font-size: 10.5px; font-weight: 640; }
+    .provider-card small { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; line-height: 1.35; }
+    .auth-choice { display: flex; gap: 7px; margin-top: 13px; }
+    .auth-button { min-height: 31px; padding: 0 11px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink-secondary); background: var(--surface); font-size: 10px; cursor: pointer; }
+    .auth-button.primary { border-color: var(--accent); color: white; background: var(--accent); }
+    .auth-button:hover { filter: brightness(.97); }
+    .custom-fields { display: none; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 12px; padding: 12px; border-radius: 11px; background: var(--surface-subtle); }
+    .custom-fields.visible { display: grid; }
+    .field { display: flex; flex-direction: column; gap: 5px; }
+    .field.full { grid-column: 1 / -1; }
+    .field label { color: var(--ink-secondary); font-size: 9px; font-weight: 580; }
+    .field input, .field select, .model-select {
+      width: 100%; min-height: 34px; padding: 0 9px; border: 1px solid var(--line); border-radius: 8px;
+      outline: none; color: var(--ink); background: var(--surface); font-size: 10px;
+    }
+    .field input:focus, .field select:focus, .model-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
+    .connected-banner { display: none; align-items: center; gap: 8px; margin-top: 13px; padding: 10px 11px; border-radius: 9px; color: var(--success); background: color-mix(in srgb, var(--success) 9%, transparent); font-size: 10px; }
+    .connected-banner.visible { display: flex; }
+    .connected-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+    .inline-error { display: none; margin-top: 9px; color: var(--danger); font-size: 10px; line-height: 1.45; }
+    .inline-error.visible { display: block; }
+    .model-block { max-width: 470px; }
+    .model-select { min-height: 40px; font-size: 11px; }
+    .reasoning-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
+    .reasoning-button { min-height: 33px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink-secondary); background: var(--surface); font-size: 10px; cursor: pointer; }
+    .reasoning-button:hover { background: var(--surface-subtle); }
+    .reasoning-button.selected { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); font-weight: 620; }
+    .callout { display: flex; align-items: flex-start; gap: 9px; max-width: 510px; margin-top: 17px; padding: 11px 12px; border-radius: 10px; color: var(--muted); background: var(--surface-subtle); font-size: 10px; line-height: 1.5; }
+    .callout-mark { width: 17px; height: 17px; flex: 0 0 17px; display: grid; place-items: center; border-radius: 50%; color: var(--accent); background: var(--accent-soft); font-size: 10px; font-weight: 700; }
+    .summary-list { max-width: 520px; display: flex; flex-direction: column; gap: 8px; margin: 20px 0 24px; }
+    .summary-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 13px; border-radius: 10px; background: var(--surface-subtle); font-size: 10.5px; }
+    .summary-row span:first-child { color: var(--muted); }
+    .summary-row strong { color: var(--ink-secondary); font-size: 10.5px; font-weight: 620; }
+    .complete-mark { width: 48px; height: 48px; display: grid; place-items: center; margin-bottom: 17px; border-radius: 16px; color: white; background: var(--success); box-shadow: 0 7px 18px color-mix(in srgb, var(--success) 25%, transparent); }
+    .complete-mark svg { width: 23px; height: 23px; }
+    .welcome { justify-content: center; min-height: 100%; padding-top: 39px; padding-bottom: 38px; }
+    .welcome-hero { max-width: 570px; }
+    .welcome-mark { width: 54px; height: 54px; display: grid; place-items: center; margin-bottom: 21px; border-radius: 18px; color: white; background: linear-gradient(145deg,#6eafff,#2563eb); box-shadow: 0 9px 24px rgba(37,99,235,.22); font-size: 25px; font-weight: 750; }
+    .welcome h1 { max-width: 500px; margin: 0 0 12px; font-size: 31px; line-height: 1.17; letter-spacing: -.045em; }
+    .welcome-copy { max-width: 480px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
+    .welcome-meta { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 19px; }
+    .welcome-meta span { padding: 6px 9px; border-radius: 999px; color: var(--ink-secondary); background: var(--surface-subtle); font-size: 9.5px; }
+    .welcome-preview { max-width: 510px; display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 32px; }
+    .welcome-feature { min-height: 75px; padding: 11px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); }
+    .welcome-feature strong { display: block; margin-bottom: 5px; font-size: 10px; font-weight: 630; }
+    .welcome-feature span { display: block; color: var(--muted); font-size: 9px; line-height: 1.4; }
+    .welcome-action { margin-top: 24px; }
+    .primary-button, .secondary-button {
+      min-height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+      padding: 0 15px; border: 1px solid transparent; border-radius: 9px; font-size: 10.5px; font-weight: 620; cursor: pointer;
+      transition: transform .15s ease, filter .15s ease, background .15s ease;
+    }
+    .primary-button { color: white; background: var(--accent); box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 26%, transparent); }
+    .primary-button:hover { filter: brightness(1.06); transform: translateY(-1px); }
+    .primary-button:disabled { opacity: .45; box-shadow: none; cursor: default; transform: none; }
+    .secondary-button { border-color: var(--line); color: var(--ink-secondary); background: var(--surface); }
+    .secondary-button:hover { background: var(--surface-subtle); }
+    .wizard-footer { min-height: 63px; flex: 0 0 63px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 34px; border-top: 1px solid var(--line); background: var(--window); }
+    .footer-left, .footer-right { display: flex; align-items: center; gap: 8px; }
+    .footer-note { color: var(--muted); font-size: 9.5px; }
+    .hidden { display: none !important; }
+    button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    @media (max-width: 820px) {
+      body { padding: 18px 12px 24px; }
+      .review-header { align-items: flex-start; flex-direction: column; }
+      .window { height: auto; min-height: calc(100vh - 190px); }
+      .layout { flex-direction: column; }
+      .stepper { width: auto; flex-basis: auto; padding: 13px 14px; border-right: 0; border-bottom: 1px solid var(--line); }
+      .stepper-intro, .stepper-foot { display: none; }
+      .step-nav { flex-direction: row; overflow-x: auto; gap: 5px; }
+      .step-nav button { width: auto; min-width: max-content; min-height: 33px; padding: 0 8px; font-size: 9px; }
+      .step-number { width: 18px; height: 18px; flex-basis: 18px; font-size: 8px; }
+      .optional-tag { display: none; }
+      .screen { padding: 24px 20px; }
+      .wizard-footer { padding: 0 18px; }
+    }
+    @media (max-width: 580px) {
+      .review-header h1 { font-size: 18px; }
+      .preview-controls { flex-wrap: wrap; }
+      .titlebar { padding: 0 11px; }
+      .traffic-lights, .titlebar-right { width: 52px; }
+      .theme-groups, .choice-grid { grid-template-columns: 1fr; }
+      .provider-list { grid-template-columns: 1fr; }
+      .provider-card { min-height: 82px; }
+      .welcome h1 { font-size: 26px; }
+      .welcome-preview { grid-template-columns: 1fr; }
+      .welcome-feature { min-height: 0; }
+      .custom-fields { grid-template-columns: 1fr; }
+      .field.full { grid-column: auto; }
+      .reasoning-grid { grid-template-columns: repeat(3, minmax(0,1fr)); }
+      .footer-note { display: none; }
+      .wizard-footer { min-height: 58px; flex-basis: 58px; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } }
+  </style>
+</head>
+<body>
+  <header class="review-header">
+    <div>
+      <div class="eyebrow">VELA · ONBOARDING CONCEPT</div>
+      <h1>首次启动 · 引导设计稿</h1>
+      <p>可交互视觉原型。切换资料状态，查看新用户与已有配置的引导路径。</p>
+    </div>
+    <div class="preview-controls" aria-label="原型预览控制">
+      <span class="preview-label">预览资料</span>
+      <div class="preview-switch" role="group" aria-label="切换预览资料状态">
+        <button type="button" class="active" data-profile="new" aria-pressed="true">新用户</button>
+        <button type="button" data-profile="existing" aria-pressed="false">已有配置</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="window" id="appWindow" data-scheme="light" data-theme="daylight" aria-label="Vela 首次启动引导原型">
+    <div class="titlebar">
+      <div class="traffic-lights" aria-hidden="true"><span></span><span></span><span></span></div>
+      <div class="titlebar-title"><span class="brand-mark">V</span><span>Vela · 开始设置</span></div>
+      <div class="titlebar-right"><span class="local-badge">保存在本机</span></div>
+    </div>
+    <div class="layout">
+      <aside class="stepper" aria-label="引导步骤">
+        <div class="stepper-intro">
+          <h2>设置你的工作环境</h2>
+          <p>完成后即可开始使用，之后也能在设置中调整。</p>
+        </div>
+        <nav class="step-nav">
+          <button type="button" data-step-link="1"><span class="step-number">1</span><span>语言与主题</span></button>
+          <button type="button" data-step-link="2"><span class="step-number">2</span><span>工具调用</span></button>
+          <button type="button" data-step-link="3"><span class="step-number">3</span><span>迁移 Skills</span><span class="optional-tag">可跳过</span></button>
+          <button type="button" data-step-link="4"><span class="step-number">4</span><span>添加供应商</span></button>
+          <button type="button" data-step-link="5"><span class="step-number">5</span><span>默认模型</span></button>
+        </nav>
+        <div class="stepper-foot">
+          <strong>你的配置由你掌控</strong>
+          偏好保存在本机。供应商凭据通过 Vela 现有的连接流程配置。
+        </div>
+      </aside>
+
+      <section class="flow" aria-live="polite">
+        <div class="screen-scroll" id="screenScroll">
+          <section class="screen welcome active" data-screen="0" aria-labelledby="welcomeTitle">
+            <div class="welcome-hero">
+              <div class="welcome-mark" aria-hidden="true">V</div>
+              <div class="screen-kicker">WELCOME TO VELA</div>
+              <h1 id="welcomeTitle">把 Vela 调成<br>你的工作方式</h1>
+              <p class="welcome-copy">花几分钟设置界面偏好、导入常用 Skills，并连接默认模型。每一步都可以回头修改。</p>
+              <div class="welcome-meta"><span>5 个步骤</span><span>Skills 迁移可跳过</span><span>约 3 分钟</span></div>
+              <div class="welcome-preview">
+                <div class="welcome-feature"><strong>界面偏好</strong><span>语言、明暗模式和配色</span></div>
+                <div class="welcome-feature"><strong>开发工作流</strong><span>工具调用显示与 Skills</span></div>
+                <div class="welcome-feature"><strong>连接模型</strong><span>供应商、默认模型和推理强度</span></div>
+              </div>
+              <div class="welcome-action"><button type="button" class="primary-button" data-next>开始设置 <span aria-hidden="true">→</span></button></div>
+            </div>
+          </section>
+
+          <section class="screen" data-screen="1" aria-labelledby="prefsTitle">
+            <header class="screen-head">
+              <div class="screen-kicker">STEP 1 · PERSONALIZE</div>
+              <h1 id="prefsTitle">先设置界面偏好</h1>
+              <p>选择你习惯的语言和外观。主题预览会随选择即时变化。</p>
+            </header>
+            <div class="section">
+              <div class="section-head"><h3>语言</h3><span class="section-hint">后续界面将使用所选语言</span></div>
+              <div class="segmented" role="group" aria-label="界面语言">
+                <button type="button" data-locale="zh-CN" class="selected">简体中文</button>
+                <button type="button" data-locale="en">English</button>
+              </div>
+            </div>
+            <div class="section">
+              <div class="section-head"><h3>明暗模式</h3><span class="section-hint">可跟随系统切换</span></div>
+              <div class="segmented" role="group" aria-label="明暗模式">
+                <button type="button" data-mode="system" class="selected">跟随系统</button>
+                <button type="button" data-mode="light">浅色</button>
+                <button type="button" data-mode="dark">深色</button>
+              </div>
+            </div>
+            <div class="section">
+              <div class="section-head"><h3>配色</h3><span class="section-hint">浅色和深色各选一个</span></div>
+              <div class="theme-groups">
+                <div>
+                  <p class="theme-group-label">浅色主题</p>
+                  <div class="theme-grid" role="group" aria-label="浅色主题">
+                    <button type="button" class="theme-tile mode-daylight selected" data-theme-choice="daylight" data-theme-scheme="light" aria-pressed="true"><span class="mini-theme"><span class="mini-side"></span><span class="mini-main"><i class="mini-line"></i><i class="mini-bubble"></i><i class="mini-line short"></i></span></span><span>晴空</span></button>
+                    <button type="button" class="theme-tile mode-paper" data-theme-choice="paper" data-theme-scheme="light" aria-pressed="false"><span class="mini-theme"><span class="mini-side"></span><span class="mini-main"><i class="mini-line"></i><i class="mini-bubble"></i><i class="mini-line short"></i></span></span><span>宣纸</span></button>
+                    <button type="button" class="theme-tile mode-celadon" data-theme-choice="celadon" data-theme-scheme="light" aria-pressed="false"><span class="mini-theme"><span class="mini-side"></span><span class="mini-main"><i class="mini-line"></i><i class="mini-bubble"></i><i class="mini-line short"></i></span></span><span>青瓷</span></button>
+                  </div>
+                </div>
+                <div>
+                  <p class="theme-group-label">深色主题</p>
+                  <div class="theme-grid" role="group" aria-label="深色主题">
+                    <button type="button" class="theme-tile mode-midnight selected" data-theme-choice="midnight" data-theme-scheme="dark" aria-pressed="true"><span class="mini-theme"><span class="mini-side"></span><span class="mini-main"><i class="mini-line"></i><i class="mini-bubble"></i><i class="mini-line short"></i></span></span><span>夜航</span></button>
+                    <button type="button" class="theme-tile mode-graphite" data-theme-choice="graphite" data-theme-scheme="dark" aria-pressed="false"><span class="mini-theme"><span class="mini-side"></span><span class="mini-main"><i class="mini-line"></i><i class="mini-bubble"></i><i class="mini-line short"></i></span></span><span>石墨</span></button>
+                    <button type="button" class="theme-tile mode-ember" data-theme-choice="ember" data-theme-scheme="dark" aria-pressed="false"><span class="mini-theme"><span class="mini-side"></span><span class="mini-main"><i class="mini-line"></i><i class="mini-bubble"></i><i class="mini-line short"></i></span></span><span>余烬</span></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="screen" data-screen="2" aria-labelledby="toolTitle">
+            <header class="screen-head">
+              <div class="screen-kicker">STEP 2 · TOOL CALLS</div>
+              <h1 id="toolTitle">工具调用想怎么显示？</h1>
+              <p>选择执行过程在对话里的呈现方式。可以之后随时切换。</p>
+            </header>
+            <div class="choice-grid" role="radiogroup" aria-label="工具调用显示方式">
+              <button type="button" class="choice-card" data-tool-display="card" role="radio" aria-checked="false">
+                <span class="choice-title"><i class="radio" aria-hidden="true"></i>卡片</span>
+                <span class="choice-desc">每个工具单独显示，可展开查看详情。</span>
+                <span class="tool-demo">
+                  <span class="demo-card"><i class="demo-icon">R</i><span class="demo-copy"><strong>读取文件</strong><small>src/App.tsx · 读取 142 行</small></span><span class="demo-chevron">⌄</span></span>
+                  <span class="demo-card" style="margin-top:5px"><i class="demo-icon">E</i><span class="demo-copy"><strong>编辑文件</strong><small>src/App.tsx · +12 −4</small></span><span class="demo-chevron">⌄</span></span>
+                </span>
+              </button>
+              <button type="button" class="choice-card selected" data-tool-display="compact" role="radio" aria-checked="true">
+                <span class="choice-title"><i class="radio" aria-hidden="true"></i>紧凑</span>
+                <span class="choice-desc">每个工具一行，多次调用折叠成摘要。</span>
+                <span class="tool-demo">
+                  <span class="demo-row"><i class="demo-icon">R</i><span>读取文件 <span style="color:var(--muted)">src/App.tsx</span></span><span class="demo-count">1 次</span></span>
+                  <span class="demo-row"><i class="demo-icon">E</i><span>编辑文件 <span style="color:var(--muted)">src/App.tsx</span></span><span class="demo-count">+12 −4</span></span>
+                  <span class="demo-row"><i class="demo-icon">⌘</i><span>运行命令</span><span class="demo-count">还有 3 项</span></span>
+                </span>
+              </button>
+            </div>
+          </section>
+
+          <section class="screen" data-screen="3" aria-labelledby="skillsTitle">
+            <header class="screen-head">
+              <div class="screen-kicker">STEP 3 · OPTIONAL</div>
+              <h1 id="skillsTitle">把常用 Skills 带过来</h1>
+              <p>从 Codex 或 Claude Code 选择要迁移的 Skills。迁移后会复制到 Vela 的 Skills 目录。</p>
+            </header>
+            <div class="section-head"><h3>找到的 Skills</h3><span class="skill-count" id="skillCount">已选 3 项</span></div>
+            <div class="skill-list">
+              <section class="skill-source" data-source="codex">
+                <div class="skill-source-head"><div class="source-name"><span class="source-mark">C</span>Codex</div><button type="button" class="text-button" data-select-source="codex">取消全选</button></div>
+                <label class="skill-row"><input type="checkbox" class="skill-check" checked><span class="skill-copy"><span class="skill-name">code-review</span><span class="skill-desc">检查代码变更中的正确性、回归风险和测试缺口。</span><span class="skill-meta"><span class="tiny-tag">个人</span><span class="tiny-tag good">可迁移</span></span></span></label>
+                <label class="skill-row"><input type="checkbox" class="skill-check" checked><span class="skill-copy"><span class="skill-name">release-helper</span><span class="skill-desc">整理发布检查项和版本说明。</span><span class="skill-meta"><span class="tiny-tag">项目</span><span class="tiny-tag good">可迁移</span></span></span></label>
+              </section>
+              <section class="skill-source" data-source="claude">
+                <div class="skill-source-head"><div class="source-name"><span class="source-mark claude">Cl</span>Claude Code</div><button type="button" class="text-button" data-select-source="claude">全选</button></div>
+                <label class="skill-row"><input type="checkbox" class="skill-check"><span class="skill-copy"><span class="skill-name">frontend-polish</span><span class="skill-desc">优化界面细节、排版和交互反馈。</span><span class="skill-meta"><span class="tiny-tag">个人</span><span class="tiny-tag good">可迁移</span></span></span></label>
+                <label class="skill-row"><input type="checkbox" class="skill-check" checked><span class="skill-copy"><span class="skill-name">test-planner</span><span class="skill-desc">根据功能变更整理有针对性的验证场景。</span><span class="skill-meta"><span class="tiny-tag">项目</span><span class="tiny-tag good">可迁移</span></span></span></label>
+              </section>
+            </div>
+            <div class="callout"><span class="callout-mark">i</span><span>已存在于 Vela 的同名 Skill 会标记出来，迁移前可逐项确认。你也可以稍后从设置中迁移。</span></div>
+          </section>
+
+          <section class="screen" data-screen="4" aria-labelledby="providerTitle">
+            <header class="screen-head">
+              <div class="screen-kicker">STEP 4 · CONNECT A PROVIDER</div>
+              <h1 id="providerTitle">连接第一个供应商</h1>
+              <p>选择要使用的模型服务。已有连接会保留，你可以直接确认或添加另一个供应商。</p>
+            </header>
+            <div class="provider-list" role="radiogroup" aria-label="选择供应商">
+              <button type="button" class="provider-card" data-provider="openai" aria-pressed="false">
+                <span class="provider-card-top"><span class="provider-logo">O</span><span class="provider-state" data-provider-state="openai"></span></span>
+                <strong>OpenAI</strong><small>账号登录或 API 密钥</small>
+              </button>
+              <button type="button" class="provider-card" data-provider="anthropic" aria-pressed="false">
+                <span class="provider-card-top"><span class="provider-logo">A</span><span class="provider-state" data-provider-state="anthropic"></span></span>
+                <strong>Anthropic</strong><small>API 密钥</small>
+              </button>
+              <button type="button" class="provider-card" data-provider="custom" aria-pressed="false">
+                <span class="provider-card-top"><span class="provider-logo">↗</span><span class="provider-state" data-provider-state="custom"></span></span>
+                <strong>自定义接口</strong><small>兼容接口与本地模型</small>
+              </button>
+            </div>
+            <div class="auth-choice" id="authChoice">
+              <button type="button" class="auth-button primary" data-connect-method="account">使用账号登录</button>
+              <button type="button" class="auth-button" data-connect-method="key">使用 API 密钥</button>
+            </div>
+            <div class="custom-fields" id="customFields">
+              <div class="field"><label for="providerName">供应商名称</label><input id="providerName" value="本地模型" placeholder="例如 Ollama"></div>
+              <div class="field"><label for="apiType">接口类型</label><select id="apiType"><option>OpenAI Compatible</option><option>Anthropic Messages</option></select></div>
+              <div class="field full"><label for="baseUrl">接口地址</label><input id="baseUrl" value="http://127.0.0.1:11434/v1"></div>
+              <div class="field"><label for="apiKey">密钥</label><input id="apiKey" type="password" placeholder="可选"></div>
+              <div class="field"><label for="modelId">模型 ID</label><input id="modelId" value="qwen-coder-latest"></div>
+              <div class="field full"><button type="button" class="auth-button primary" id="connectCustom">验证并添加接口</button></div>
+            </div>
+            <div class="connected-banner" id="connectedBanner"><span class="connected-dot"></span><span id="connectedText">已连接，可以继续选择默认模型。</span></div>
+            <div class="inline-error" id="providerError">连接暂时没有完成。可以重试，也可以切换登录方式。</div>
+            <div class="callout"><span class="callout-mark">i</span><span>登录与密钥配置沿用 Vela 当前的供应商连接流程。凭据保存在本机。</span></div>
+          </section>
+
+          <section class="screen" data-screen="5" aria-labelledby="modelTitle">
+            <header class="screen-head">
+              <div class="screen-kicker">STEP 5 · DEFAULT MODEL</div>
+              <h1 id="modelTitle">选一个默认模型</h1>
+              <p>模型会用于新对话。推理强度选项随模型能力变化。</p>
+            </header>
+            <div class="section model-block">
+              <div class="section-head"><h3>供应商</h3><span class="section-hint" id="modelProviderLabel">OpenAI</span></div>
+              <label class="field"><span class="hidden">模型</span><select class="model-select" id="modelSelect" aria-label="默认模型"></select></label>
+            </div>
+            <div class="section model-block">
+              <div class="section-head"><h3>推理强度</h3><span class="section-hint">仅显示所选模型支持的选项</span></div>
+              <div class="reasoning-grid" role="radiogroup" aria-label="推理强度" id="reasoningOptions">
+                <button type="button" class="reasoning-button" data-thinking="off" role="radio" aria-checked="false">关闭</button>
+                <button type="button" class="reasoning-button" data-thinking="minimal" role="radio" aria-checked="false">最低</button>
+                <button type="button" class="reasoning-button" data-thinking="low" role="radio" aria-checked="false">低</button>
+                <button type="button" class="reasoning-button selected" data-thinking="medium" role="radio" aria-checked="true">中</button>
+                <button type="button" class="reasoning-button" data-thinking="high" role="radio" aria-checked="false">高</button>
+                <button type="button" class="reasoning-button" data-thinking="xhigh" role="radio" aria-checked="false">极高</button>
+                <button type="button" class="reasoning-button" data-thinking="max" role="radio" aria-checked="false">最高</button>
+              </div>
+            </div>
+            <div class="callout"><span class="callout-mark">i</span><span>你可以在对话输入框中按需调整推理强度，也可以之后在设置里更改默认值。</span></div>
+          </section>
+
+          <section class="screen" data-screen="6" aria-labelledby="completeTitle">
+            <div class="complete-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m5 12 4 4L19 6"/></svg></div>
+            <header class="screen-head">
+              <div class="screen-kicker">READY TO GO</div>
+              <h1 id="completeTitle">Vela 已经准备好了</h1>
+              <p>你的工作环境已设置完成。之后可以在设置中随时调整。</p>
+            </header>
+            <div class="summary-list" id="summaryList">
+              <div class="summary-row"><span>语言</span><strong id="summaryLocale">简体中文</strong></div>
+              <div class="summary-row"><span>主题</span><strong id="summaryTheme">跟随系统 · 晴空 / 夜航</strong></div>
+              <div class="summary-row"><span>工具调用</span><strong id="summaryTools">紧凑</strong></div>
+              <div class="summary-row"><span>供应商</span><strong id="summaryProvider">OpenAI</strong></div>
+              <div class="summary-row"><span>默认模型</span><strong id="summaryModel">GPT Coding · 中</strong></div>
+            </div>
+            <div><button type="button" class="primary-button" data-finish>开始使用 Vela <span aria-hidden="true">→</span></button></div>
+          </section>
+        </div>
+        <footer class="wizard-footer" id="wizardFooter">
+          <div class="footer-left"><button type="button" class="secondary-button" id="backButton">上一步</button><span class="footer-note" id="footerNote">每一步都会保存，稍后可继续。</span></div>
+          <div class="footer-right"><button type="button" class="text-button hidden" id="skipButton">跳过本步</button><button type="button" class="primary-button" id="nextButton">继续 <span aria-hidden="true">→</span></button></div>
+        </footer>
+      </section>
+    </div>
+  </main>
+  <script>
+    (function () {
+      const windowEl = document.getElementById("appWindow");
+      const screens = Array.from(document.querySelectorAll("[data-screen]"));
+      const stepButtons = Array.from(document.querySelectorAll("[data-step-link]"));
+      const backButton = document.getElementById("backButton");
+      const nextButton = document.getElementById("nextButton");
+      const skipButton = document.getElementById("skipButton");
+      const wizardFooter = document.getElementById("wizardFooter");
+      const state = {
+        profile: "new",
+        step: 0,
+        locale: "zh-CN",
+        mode: "system",
+        lightTheme: "daylight",
+        darkTheme: "midnight",
+        toolDisplay: "compact",
+        provider: "",
+        connected: false,
+        model: "",
+        thinking: "medium",
+        skippedSkills: false
+      };
+      const modelCatalog = {
+        openai: [
+          { id: "gpt-coding", name: "GPT Coding · 最新" },
+          { id: "gpt-general", name: "GPT General · 最新" }
+        ],
+        anthropic: [
+          { id: "claude-sonnet", name: "Claude Sonnet · 最新" },
+          { id: "claude-opus", name: "Claude Opus · 最新" }
+        ],
+        custom: [
+          { id: "custom-coder", name: "Qwen Coder · 本地接口" },
+          { id: "custom-model", name: "自定义模型" }
+        ]
+      };
+      const thinkingCatalog = {
+        "gpt-coding": ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+        "gpt-general": ["off", "low", "medium", "high"],
+        "claude-sonnet": ["off", "low", "medium", "high"],
+        "claude-opus": ["off", "low", "medium", "high", "max"],
+        "custom-coder": ["off", "low", "medium", "high"],
+        "custom-model": ["off", "low", "medium"]
+      };
+      const labels = {
+        thinking: { off: "关闭", minimal: "最低", low: "低", medium: "中", high: "高", xhigh: "极高", max: "最高" },
+        provider: { openai: "OpenAI", anthropic: "Anthropic", custom: "自定义接口" },
+        theme: { daylight: "晴空", paper: "宣纸", celadon: "青瓷", midnight: "夜航", graphite: "石墨", ember: "余烬" },
+        mode: { system: "跟随系统", light: "浅色", dark: "深色" }
+      };
+
+      function currentStepIndex() { return Number(state.step); }
+      function setStep(step) {
+        state.step = Math.max(0, Math.min(6, step));
+        screens.forEach(function (screen) { screen.classList.toggle("active", Number(screen.dataset.screen) === state.step); });
+        stepButtons.forEach(function (button) {
+          const index = Number(button.dataset.stepLink);
+          button.classList.toggle("active", index === state.step);
+          button.classList.toggle("done", index < state.step && state.step < 6);
+          button.classList.toggle("available", index < state.step || index === state.step);
+          button.setAttribute("aria-current", index === state.step ? "step" : "false");
+        });
+        wizardFooter.classList.toggle("hidden", state.step === 0 || state.step === 6);
+        backButton.disabled = state.step <= 1;
+        skipButton.classList.toggle("hidden", state.step !== 3);
+        nextButton.classList.toggle("hidden", state.step === 6);
+        nextButton.textContent = state.step === 5 ? "完成设置  →" : "继续  →";
+        document.getElementById("screenScroll").scrollTop = 0;
+        updateNextState();
+      }
+      function updateNextState() {
+        let disabled = false;
+        if (state.step === 4) disabled = !state.connected;
+        if (state.step === 5) disabled = !state.model;
+        nextButton.disabled = disabled;
+      }
+      function setGroupSelected(selector, attr, value) {
+        document.querySelectorAll(selector).forEach(function (button) {
+          const selected = button.getAttribute(attr) === value;
+          button.classList.toggle("selected", selected);
+          button.setAttribute("aria-pressed", String(selected));
+          if (button.getAttribute("role") === "radio") button.setAttribute("aria-checked", String(selected));
+        });
+      }
+      function applyThemePreview() {
+        const scheme = state.mode === "dark" ? "dark" : "light";
+        const activeTheme = state.mode === "dark" ? state.darkTheme : state.lightTheme;
+        windowEl.dataset.scheme = scheme;
+        windowEl.dataset.theme = activeTheme;
+      }
+      function renderSkillsCount() {
+        const count = document.querySelectorAll(".skill-check:checked").length;
+        document.getElementById("skillCount").textContent = "已选 " + count + " 项";
+      }
+      function renderProvider() {
+        document.querySelectorAll("[data-provider]").forEach(function (button) {
+          const selected = button.dataset.provider === state.provider;
+          button.classList.toggle("selected", selected);
+          button.setAttribute("aria-pressed", String(selected));
+        });
+        document.querySelectorAll("[data-provider-state]").forEach(function (node) {
+          node.textContent = state.connected && node.dataset.providerState === state.provider ? "已连接" : "";
+        });
+        document.getElementById("connectedBanner").classList.toggle("visible", state.connected);
+        document.getElementById("customFields").classList.toggle("visible", state.provider === "custom");
+        document.getElementById("authChoice").classList.toggle("hidden", state.provider === "custom" || !state.provider);
+        document.getElementById("modelProviderLabel").textContent = labels.provider[state.provider] || "选择后显示";
+        renderModelOptions();
+        updateNextState();
+      }
+      function renderModelOptions() {
+        const select = document.getElementById("modelSelect");
+        const items = modelCatalog[state.provider] || [];
+        const prior = state.model;
+        select.innerHTML = "";
+        if (!items.length) {
+          const option = document.createElement("option");
+          option.value = "";
+          option.textContent = "先连接供应商";
+          select.appendChild(option);
+          state.model = "";
+          renderThinkingOptions();
+          return;
+        }
+        items.forEach(function (item) {
+          const option = document.createElement("option");
+          option.value = item.id;
+          option.textContent = item.name;
+          select.appendChild(option);
+        });
+        state.model = items.some(function (item) { return item.id === prior; }) ? prior : items[0].id;
+        select.value = state.model;
+        renderThinkingOptions();
+      }
+      function renderThinkingOptions() {
+        const allowed = thinkingCatalog[state.model] || [];
+        const buttons = Array.from(document.querySelectorAll("[data-thinking]"));
+        buttons.forEach(function (button) {
+          const available = allowed.includes(button.dataset.thinking);
+          button.classList.toggle("hidden", !available);
+          if (!available && state.thinking === button.dataset.thinking) state.thinking = allowed.includes("medium") ? "medium" : (allowed[0] || "off");
+        });
+        if (!allowed.includes(state.thinking)) state.thinking = allowed.includes("medium") ? "medium" : (allowed[0] || "off");
+        setGroupSelected("[data-thinking]", "data-thinking", state.thinking);
+      }
+      function updateSummary() {
+        document.getElementById("summaryLocale").textContent = state.locale === "en" ? "English" : "简体中文";
+        document.getElementById("summaryTheme").textContent = labels.mode[state.mode] + " · " + labels.theme[state.lightTheme] + " / " + labels.theme[state.darkTheme];
+        document.getElementById("summaryTools").textContent = state.toolDisplay === "card" ? "卡片" : "紧凑";
+        document.getElementById("summaryProvider").textContent = labels.provider[state.provider] || "未连接";
+        const selected = (modelCatalog[state.provider] || []).find(function (item) { return item.id === state.model; });
+        document.getElementById("summaryModel").textContent = selected ? selected.name + " · " + labels.thinking[state.thinking] : "未选择";
+      }
+
+      document.querySelectorAll("[data-profile]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          state.profile = button.dataset.profile;
+          document.querySelectorAll("[data-profile]").forEach(function (item) {
+            const active = item === button;
+            item.classList.toggle("active", active);
+            item.setAttribute("aria-pressed", String(active));
+          });
+          const existing = state.profile === "existing";
+          state.locale = "zh-CN";
+          state.mode = "system";
+          state.lightTheme = "daylight";
+          state.darkTheme = "midnight";
+          state.toolDisplay = existing ? "card" : "compact";
+          state.provider = existing ? "openai" : "";
+          state.connected = existing;
+          state.model = existing ? "gpt-coding" : "";
+          state.thinking = "medium";
+          document.querySelectorAll(".skill-check").forEach(function (check, index) { check.checked = existing ? index === 0 : index !== 2; });
+          setGroupSelected("[data-locale]", "data-locale", state.locale);
+          setGroupSelected("[data-mode]", "data-mode", state.mode);
+          setGroupSelected("[data-theme-choice]", "data-theme-choice", state.lightTheme);
+          document.querySelectorAll("[data-theme-choice][data-theme-scheme='dark']").forEach(function (tile) {
+            const selected = tile.dataset.themeChoice === state.darkTheme;
+            tile.classList.toggle("selected", selected);
+            tile.setAttribute("aria-pressed", String(selected));
+          });
+          setGroupSelected("[data-tool-display]", "data-tool-display", state.toolDisplay);
+          document.getElementById("providerError").classList.remove("visible");
+          renderSkillsCount();
+          renderProvider();
+          applyThemePreview();
+          updateSummary();
+          setStep(0);
+        });
+      });
+      document.querySelectorAll("[data-locale]").forEach(function (button) {
+        button.addEventListener("click", function () { state.locale = button.dataset.locale; setGroupSelected("[data-locale]", "data-locale", state.locale); });
+      });
+      document.querySelectorAll("[data-mode]").forEach(function (button) {
+        button.addEventListener("click", function () { state.mode = button.dataset.mode; setGroupSelected("[data-mode]", "data-mode", state.mode); applyThemePreview(); });
+      });
+      document.querySelectorAll("[data-theme-choice]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          if (button.dataset.themeScheme === "dark") state.darkTheme = button.dataset.themeChoice;
+          else state.lightTheme = button.dataset.themeChoice;
+          document.querySelectorAll("[data-theme-choice]").forEach(function (tile) {
+            const selected = tile.dataset.themeChoice === (tile.dataset.themeScheme === "dark" ? state.darkTheme : state.lightTheme);
+            tile.classList.toggle("selected", selected);
+            tile.setAttribute("aria-pressed", String(selected));
+          });
+          applyThemePreview();
+        });
+      });
+      document.querySelectorAll("[data-tool-display]").forEach(function (button) {
+        button.addEventListener("click", function () { state.toolDisplay = button.dataset.toolDisplay; setGroupSelected("[data-tool-display]", "data-tool-display", state.toolDisplay); });
+      });
+      document.querySelectorAll(".skill-check").forEach(function (check) { check.addEventListener("change", renderSkillsCount); });
+      document.querySelectorAll("[data-select-source]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          const source = button.dataset.selectSource;
+          const checks = Array.from(document.querySelectorAll("[data-source='" + source + "'] .skill-check"));
+          const allSelected = checks.length > 0 && checks.every(function (check) { return check.checked; });
+          checks.forEach(function (check) { check.checked = !allSelected; });
+          button.textContent = allSelected ? "全选" : "取消全选";
+          renderSkillsCount();
+        });
+      });
+      document.querySelectorAll("[data-provider]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          const changed = state.provider !== button.dataset.provider;
+          state.provider = button.dataset.provider;
+          if (changed) state.connected = false;
+          document.getElementById("providerError").classList.remove("visible");
+          renderProvider();
+          document.getElementById("connectedText").textContent = labels.provider[state.provider] + " 已连接，可以继续选择默认模型。";
+        });
+      });
+      document.querySelectorAll("[data-connect-method]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          if (!state.provider) return;
+          state.connected = true;
+          document.getElementById("providerError").classList.remove("visible");
+          renderProvider();
+          document.getElementById("connectedText").textContent = labels.provider[state.provider] + " 已连接，可以继续选择默认模型。";
+        });
+      });
+      document.getElementById("connectCustom").addEventListener("click", function () {
+        const baseUrl = document.getElementById("baseUrl").value.trim();
+        if (!baseUrl) {
+          document.getElementById("providerError").classList.add("visible");
+          return;
+        }
+        state.connected = true;
+        document.getElementById("providerError").classList.remove("visible");
+        renderProvider();
+        document.getElementById("connectedText").textContent = "自定义接口已添加，可以继续选择默认模型。";
+      });
+      document.getElementById("modelSelect").addEventListener("change", function (event) {
+        state.model = event.target.value;
+        renderThinkingOptions();
+        updateNextState();
+      });
+      document.querySelectorAll("[data-thinking]").forEach(function (button) {
+        button.addEventListener("click", function () { state.thinking = button.dataset.thinking; setGroupSelected("[data-thinking]", "data-thinking", state.thinking); });
+      });
+      stepButtons.forEach(function (button) {
+        button.addEventListener("click", function () {
+          const destination = Number(button.dataset.stepLink);
+          if (destination <= currentStepIndex()) setStep(destination);
+        });
+      });
+      backButton.addEventListener("click", function () { if (state.step > 1) setStep(state.step - 1); });
+      nextButton.addEventListener("click", function () {
+        if (state.step === 4 && !state.connected) return;
+        if (state.step === 5 && !state.model) return;
+        if (state.step === 5) updateSummary();
+        setStep(state.step + 1);
+      });
+      skipButton.addEventListener("click", function () { state.skippedSkills = true; setStep(4); });
+      document.querySelectorAll("[data-next]").forEach(function (button) { button.addEventListener("click", function () { setStep(1); }); });
+      document.querySelectorAll("[data-finish]").forEach(function (button) { button.addEventListener("click", function () { window.alert("设计稿预览完成。实际 App 会在这里进入主界面。"); }); });
+
+      renderSkillsCount();
+      renderProvider();
+      applyThemePreview();
+      setStep(0);
+    })();
+  </script>
+</body>
+</html>
