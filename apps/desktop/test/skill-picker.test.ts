@@ -11,13 +11,15 @@ import {
   slashTokenAt,
 } from "../src/renderer/components/composer/skill-picker.ts";
 
-function skill(name: string, description: string): SkillSummary {
+function skill(name: string, description: string, enabled = true): SkillSummary {
   return {
     name,
     description,
     location: `/skills/${name}/SKILL.md`,
     origin: "user",
     disableModelInvocation: false,
+    enabled,
+    canDelete: false,
   };
 }
 
@@ -67,6 +69,16 @@ describe("filterSkills", () => {
     ]);
     assert.deepEqual(filterSkills(skills, "app").map((item) => item.name), ["apple-design"]);
     assert.deepEqual(filterSkills(skills, "template").map((item) => item.name), ["design-report"]);
+  });
+
+  it("leaves out disabled skills", () => {
+    const mixed = [...skills, skill("hidden", "Should not appear", false)];
+    assert.deepEqual(filterSkills(mixed, "").map((item) => item.name), [
+      "apple-design",
+      "design-report",
+      "documents",
+    ]);
+    assert.deepEqual(filterSkills(mixed, "hidden"), []);
   });
 });
 

@@ -16,6 +16,7 @@ import {
   type LoginResult,
   type ModelAuthEvent,
   type ModelCatalog,
+  type OpenTarget,
   type PromptInput,
   type PullRequestInfo,
   type SandboxApprovalEvent,
@@ -62,6 +63,8 @@ const api: VelaApi = {
     ipcRenderer.invoke(IpcChannel.sessionUnarchive, id) as Promise<AppState>,
   getMessages: (conversationId: string) =>
     ipcRenderer.invoke(IpcChannel.sessionMessages, conversationId) as Promise<TranscriptMessage[]>,
+  getAgentMessages: (conversationId: string, agentId: string) =>
+    ipcRenderer.invoke(IpcChannel.sessionAgentMessages, conversationId, agentId) as Promise<TranscriptMessage[]>,
   getCatalog: () => ipcRenderer.invoke(IpcChannel.getCatalog) as Promise<ModelCatalog>,
   selectModel: (provider, id) => ipcRenderer.invoke(IpcChannel.selectModel, provider, id) as Promise<AppState>,
   setThinkingLevel: (level: ThinkingLevel) => ipcRenderer.invoke(IpcChannel.setThinkingLevel, level) as Promise<AppState>,
@@ -75,6 +78,10 @@ const api: VelaApi = {
   openSkillsDirectory: () => ipcRenderer.invoke(IpcChannel.openSkillsDir) as Promise<void>,
   scanExternalSkills: () => ipcRenderer.invoke(IpcChannel.scanExternalSkills) as Promise<ExternalSkillScan>,
   migrateSkills: (ids) => ipcRenderer.invoke(IpcChannel.migrateSkills, ids) as Promise<SkillMigrationResult>,
+  setSkillEnabled: (name, enabled) =>
+    ipcRenderer.invoke(IpcChannel.setSkillEnabled, name, enabled) as Promise<SkillCatalog>,
+  deleteSkill: (name, location) =>
+    ipcRenderer.invoke(IpcChannel.deleteSkill, name, location) as Promise<SkillCatalog>,
   removeModel: (provider, id) => ipcRenderer.invoke(IpcChannel.removeModel, provider, id) as Promise<AppState>,
   logout: (providerId) => ipcRenderer.invoke(IpcChannel.logout, providerId) as Promise<AppState>,
   login: (providerId, type: AuthMethodType) => ipcRenderer.invoke(IpcChannel.login, providerId, type) as Promise<LoginResult>,
@@ -124,6 +131,10 @@ const api: VelaApi = {
     ipcRenderer.invoke(IpcChannel.appPickAttachments, kind) as Promise<FileAttachmentPayload[]>,
   hydrateAttachments: (paths: string[]) =>
     ipcRenderer.invoke(IpcChannel.appHydrateAttachments, paths) as Promise<FileAttachmentPayload[]>,
+  listOpenTargets: () =>
+    ipcRenderer.invoke(IpcChannel.appListOpenTargets) as Promise<OpenTarget[]>,
+  openInTarget: (targetId: string, path: string) =>
+    ipcRenderer.invoke(IpcChannel.appOpenInTarget, targetId, path) as Promise<void>,
   pathForFile: (file: File) => webUtils.getPathForFile(file),
   onEvent: (listener) => {
     const wrapped = (_event: IpcRendererEvent, payload: unknown) => {
@@ -220,6 +231,16 @@ function isStreamEvent(value: unknown): value is AgentStreamEvent {
   const type = value.type;
   if (type === "user_message") {
     return typeof value.conversationId === "string" && typeof value.text === "string";
+  }
+  if (type === "agents") {
+    return typeof value.conversationId === "string" && Array.isArray(value.agents);
+  }
+  if (type === "agent_event") {
+    return (
+      typeof value.conversationId === "string" &&
+      typeof value.agentId === "string" &&
+      isObject(value.event)
+    );
   }
   return (
     type === "state" ||

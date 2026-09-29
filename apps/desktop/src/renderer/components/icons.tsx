@@ -44,6 +44,19 @@ export function BranchIcon({ size = 13 }: IconProps) {
   );
 }
 
+/** 子代理专用图标：一个父 agent 节点挂出两个子代理节点，跟通用工具图标区分开。 */
+export function SubagentIcon({ size = 13 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <rect x="8.5" y="3" width="7" height="7" rx="1.8" />
+      <rect x="3" y="14" width="7" height="7" rx="1.8" />
+      <rect x="14" y="14" width="7" height="7" rx="1.8" />
+      <path d="M12 10v2" />
+      <path d="M6.5 14v-2h11v2" />
+    </svg>
+  );
+}
+
 export function ShieldIcon({ size = 13 }: IconProps) {
   return (
     <svg {...base(size)}>
@@ -259,6 +272,17 @@ export function QuestionIcon({ size = 13 }: IconProps) {
       <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
       <path d="M9.7 9.3a2.4 2.4 0 0 1 4.7.7c0 1.6-2.4 2-2.4 3.2" />
       <line x1="12" y1="16.4" x2="12" y2="16.5" />
+    </svg>
+  );
+}
+
+export function TrashIcon({ size = 13 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+      <path d="M10 11v6M14 11v6" />
+      <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
     </svg>
   );
 }

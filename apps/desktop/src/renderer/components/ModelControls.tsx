@@ -13,6 +13,7 @@ import {
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useEscapeKey } from "../hooks/useDismissable";
 import type { LoginState } from "../hooks/useModels";
+import { modelKey } from "../hooks/usePreferences";
 import { SheetPresence } from "./Presence";
 import { localizeError, tr } from "../locale";
 
@@ -40,6 +41,8 @@ interface ModelControlsProps {
   catalog: ModelCatalog | null;
   catalogError: string | null;
   actionError: string | null;
+  /** 在输入框模型列表中隐藏的模型，key 为 `provider/id`。 */
+  hiddenModels: string[];
   login: LoginState;
   onSelect: (provider: string, id: string) => Promise<unknown>;
   onThinking: (level: ThinkingLevel) => Promise<unknown>;
@@ -203,6 +206,7 @@ export function ModelControls(props: ModelControlsProps) {
             actionError={props.actionError}
             provider={props.modelProvider}
             modelId={props.modelId}
+            hiddenModels={props.hiddenModels}
             onSelect={(provider, id) => {
               setMenu(null);
               void props.onSelect(provider, id);
@@ -258,6 +262,7 @@ function ModelMenu({
   actionError,
   provider,
   modelId,
+  hiddenModels,
   onSelect,
   onAdd,
   onAccounts,
@@ -267,12 +272,25 @@ function ModelMenu({
   actionError: string | null;
   provider: string | null;
   modelId: string | null;
+  hiddenModels: string[];
   onSelect: (provider: string, id: string) => void;
   onAdd: () => void;
   onAccounts: () => void;
 }) {
   const [query, setQuery] = useState("");
-  const groups = useMemo(() => groupModels(catalog?.models ?? [], query), [catalog, query]);
+  const groups = useMemo(
+    () => groupModels(catalog?.models ?? [], query, hiddenModels, provider, modelId),
+    [catalog, query, hiddenModels, provider, modelId],
+  );
+  const hiddenCount = useMemo(() => {
+    return (catalog?.models ?? []).filter(
+      (model) => model.available && hiddenModels.includes(modelKey(model.provider, model.id)),
+    ).length;
+  }, [catalog, hiddenModels]);
+  const allHidden = useMemo(() => {
+    const available = (catalog?.models ?? []).filter((model) => model.available);
+    return available.length > 0 && available.every((model) => hiddenModels.includes(modelKey(model.provider, model.id)));
+  }, [catalog, hiddenModels]);
 
   return (
     <div className="dock-popover model-popover">
@@ -295,7 +313,8 @@ function ModelMenu({
         {catalog && provider && modelId && !catalog.models.some((model) => model.available && model.provider === provider && model.id === modelId) ? (
           <p className="menu-note">{tr("当前模型还不能使用，请先在账号里登录。", "This model is unavailable. Sign in to the provider first.")}</p>
         ) : null}
-        {catalog && groups.length === 0 ? <p className="menu-note">{tr("还没有可用模型。先登录提供方，或添加一个兼容接口。", "No models are available. Sign in to a provider or add a compatible API.")}</p> : null}
+        {catalog && groups.length === 0 && !allHidden ? <p className="menu-note">{tr("还没有可用模型。先登录提供方，或添加一个兼容接口。", "No models are available. Sign in to a provider or add a compatible API.")}</p> : null}
+        {catalog && groups.length === 0 && allHidden ? <p className="menu-note">{tr("可用模型都已隐藏，可在设置的「模型与账号」里调整。", "All available models are hidden. Adjust this in Settings → Models & accounts.")}</p> : null}
         {groups.map((group) => (
           <section key={group.provider}>
             <div className="menu-section">{group.name}</div>
@@ -319,6 +338,11 @@ function ModelMenu({
           </section>
         ))}
       </div>
+      {hiddenCount > 0 ? (
+        <p className="menu-note menu-footer-note">
+          {tr(`已隐藏 ${hiddenCount} 个模型，可在设置里调整`, `${hiddenCount} hidden · manage in settings`)}
+        </p>
+      ) : null}
       <div className="menu-footer">
         <button className="menu-footer-btn" type="button" onClick={onAccounts}>{tr("账号", "Accounts")}</button>
         <button className="menu-footer-btn" type="button" onClick={onAdd}>{tr("添加模型", "Add model")}</button>
@@ -688,11 +712,19 @@ function Chevron() {
   );
 }
 
-function groupModels(models: ModelSummary[], query: string): { provider: string; name: string; models: ModelSummary[] }[] {
+function groupModels(
+  models: ModelSummary[],
+  query: string,
+  hidden: string[],
+  selectedProvider: string | null,
+  selectedId: string | null,
+): { provider: string; name: string; models: ModelSummary[] }[] {
   const needle = query.trim().toLowerCase();
   const groups = new Map<string, { provider: string; name: string; models: ModelSummary[] }>();
   for (const model of models) {
     if (!model.available) continue;
+    const current = model.provider === selectedProvider && model.id === selectedId;
+    if (!current && hidden.includes(modelKey(model.provider, model.id))) continue;
     const haystack = `${model.providerName} ${model.name} ${model.id}`.toLowerCase();
     if (needle && !haystack.includes(needle)) continue;
     const group = groups.get(model.provider) ?? { provider: model.provider, name: model.providerName, models: [] };

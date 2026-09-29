@@ -321,7 +321,7 @@ function parseUrl(value: unknown): string {
 }
 
 function parseSandboxMode(value: unknown): SandboxMode {
-  if (value === "ask" || value === "full") return value;
+  if (value === "ask" || value === "smart" || value === "full") return value;
   throw new Error("权限模式不正确");
 }
 

@@ -102,7 +102,7 @@ export function OnboardingView({ preferences, models, initialStep, onStepChange,
       },
       () => {
         if (!active) return;
-        setSavedAgentSettings({ provider: null, modelId: null, thinkingLevel: "medium", instructions: "" });
+        setSavedAgentSettings({ provider: null, modelId: null, thinkingLevel: "medium", newConversationSelection: "default", instructions: "" });
         setSettingsLoaded(true);
       },
     );
@@ -272,6 +272,7 @@ export function OnboardingView({ preferences, models, initialStep, onStepChange,
         provider: selectedProvider.id,
         modelId: selectedModel.id,
         thinkingLevel: normalizedThinking,
+        newConversationSelection: savedAgentSettings?.newConversationSelection ?? "default",
         instructions: savedAgentSettings?.instructions ?? "",
       };
       setSavedAgentSettings(await window.vela.saveAgentSettings(next));

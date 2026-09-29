@@ -7,11 +7,13 @@ import { tr } from "../../locale";
 
 const modeLabels: Record<SandboxMode, [string, string]> = {
   ask: ["每次询问", "Ask every time"],
+  smart: ["帮我批准", "Smart approval"],
   full: ["完全访问", "Full access"],
 };
 
 const modeDescriptions: Record<SandboxMode, [string, string]> = {
   ask: ["运行终端命令前需要你逐次批准。修改工作区外的文件前也需要批准；工作区内的文件修改无需逐次确认。", "Approve each terminal command and any file changes outside the workspace. Changes inside the workspace do not need separate approval."],
+  smart: ["先由当前对话选择的模型判断风险。只有风险操作或判断失败时才请求批准，低风险操作直接执行。", "The model selected for the current conversation checks each action first. Only risky actions, or when the check fails, need your approval; low-risk actions run directly."],
   full: ["在当前工具权限范围内执行命令和文件修改，不再逐项询问。", "Run commands and make file changes within the current tool permissions without asking each time."],
 };
 
@@ -46,7 +48,7 @@ export function SandboxPill({ project }: { project: ProjectApi }) {
       {open ? (
         <div className="dock-popover composer-popover up sandbox-popover">
           <div className="composer-popover-title">{tr("执行权限", "Execution permissions")}</div>
-          {(["ask", "full"] as SandboxMode[]).map((candidate) => (
+          {(["ask", "smart", "full"] as SandboxMode[]).map((candidate) => (
             <button
               type="button"
               key={candidate}
@@ -66,7 +68,7 @@ export function SandboxPill({ project }: { project: ProjectApi }) {
               {candidate === mode ? <CheckIcon /> : null}
             </button>
           ))}
-          <div className="composer-popover-footnote">{tr("执行权限会影响 Agent 能自动完成的操作。你可以随时在输入框旁切换。", "Permissions control which actions the agent can complete automatically. You can change them beside the message box at any time.")}</div>
+          <div className="composer-popover-footnote">{tr("执行权限会影响 Agent 能自动完成的操作。「帮我批准」由当前对话选择的模型判断风险。", "Permissions control which actions the agent can complete automatically. Smart approval uses the model selected for the current conversation to check risk.")}</div>
         </div>
       ) : null}
     </div>

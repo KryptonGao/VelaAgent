@@ -1,10 +1,21 @@
 import type { AskUserQuestionRequest, ToolActivity, ToolTrace } from "@vela/shared";
+import { isAgentToolName } from "@vela/shared";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type TransitionEvent } from "react";
 import { ActivityIndicator } from "./ActivityIndicator";
+import { Markdown } from "./Markdown";
+import { ScrollFade } from "./ScrollFade";
+import {
+  AgentStatusMark,
+  agentKindLabel,
+  agentStatusLabel,
+  findAgentInfo,
+  useAgentRoster,
+  useAgentWorkspace,
+} from "./AgentPanel";
 import { useFilePreview } from "./preview/FilePreviewContext";
 import { QuestionCard } from "./QuestionCard";
 import { FileTypeIcon } from "./FileTypeIcon";
-import { CheckIcon, EyeIcon, FilePlusIcon, PencilIcon, StackIcon, TerminalIcon } from "./icons";
+import { CheckIcon, ExternalIcon, EyeIcon, FilePlusIcon, PencilIcon, StackIcon, SubagentIcon, TerminalIcon } from "./icons";
 import {
   compactSummaryParts,
   diffStat,
@@ -13,6 +24,7 @@ import {
   toolCompactKind,
   type CompactSummaryPart,
 } from "./tool-compact";
+import { shouldFoldRun } from "./tool-sequence";
 import type { ToolDisplay } from "../hooks/usePreferences";
 import { localizeError, tr } from "../locale";
 
@@ -26,16 +38,12 @@ const kindLabels: Record<ToolKind, string> = {
   other: "Tool",
 };
 
-/** 同一段里连续工具达到该数量才折叠成一组。 */
-const RUN_MIN = 3;
-
 /** 按 toolCallId 查找待回答的问题;ask_user_question 卡片用。 */
 export type QuestionLookup = (toolCallId: string) => AskUserQuestionRequest | null;
 
 /**
- * 消息工具列表入口。卡片模式:连续 RUN_MIN 个及以上 bash/read/edit/write 折叠成一组,
+ * 消息工具列表入口。连续的可折叠工具达到阈值(卡片 RUN_MIN 个,紧凑 >1 个)时折叠成一组,
  * 其余工具(计划、目标、提问等)照常逐张展示,并打断连续区间。
- * 紧凑模式:每个工具一行;同一段超过 1 个时折叠成摘要行,单个直接展示。
  */
 export function ToolList({
   tools,
@@ -63,14 +71,10 @@ export function ToolList({
               compact={compact}
             />
           ))
+        ) : shouldFoldRun(segment.length, display) ? (
+          compact ? <CompactToolGroup key={segment[0].id} tools={segment} /> : <ToolRunGroup key={segment[0].id} tools={segment} />
         ) : compact ? (
-          segment.length > 1 ? (
-            <CompactToolGroup key={segment[0].id} tools={segment} />
-          ) : (
-            <CompactToolLine key={segment[0].id} tool={segment[0]} />
-          )
-        ) : segment.length >= RUN_MIN ? (
-          <ToolRunGroup key={segment[0].id} tools={segment} />
+          <CompactToolLine key={segment[0].id} tool={segment[0]} />
         ) : (
           segment.map((tool) => (
             <ToolCard key={tool.id} tool={tool} getQuestion={getQuestion} onReplyQuestion={onReplyQuestion} />
@@ -117,7 +121,7 @@ export function ToolCard(props: ToolCardProps) {
       />
     );
   }
-  if (props.tool.name === "task") return <TaskCard tool={props.tool} compact={props.compact} />;
+  if (isAgentToolName(props.tool.name)) return <AgentToolCard tool={props.tool} compact={props.compact} />;
   return <GenericToolCard {...props} />;
 }
 
@@ -167,85 +171,160 @@ function ToolCollapse({
   );
 }
 
-const stepLabels: Record<string, string> = {
-  bash: "Bash",
-  read: "Read",
-  edit: "Edit",
-  write: "Write",
-};
-
-function TaskCard({ tool, compact = false }: { tool: ToolTrace; compact?: boolean }) {
-  const [open, setOpen] = useState(tool.status === "running");
-  const [full, setFull] = useState(false);
-  const [overflows, setOverflows] = useState(false);
-  const sheetRef = useRef<HTMLDivElement>(null);
-  const { settled, onTransitionEnd } = useExpandSettle(open);
+/**
+ * 主对话里的子代理摘要卡：只展示路径、状态、任务和最终结论，
+ * 完整运行流在右侧 Agent Pane；点击卡片直接打开对应 Pane。
+ */
+function AgentToolCard({ tool, compact = false }: { tool: ToolTrace; compact?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const { onTransitionEnd } = useExpandSettle(open);
+  const { openAgent } = useAgentWorkspace();
+  const roster = useAgentRoster();
   const activity = tool.activity ?? {};
-  const title = taskTitle(activity.body);
-  const report = taskReport(activity.body);
-  const steps = activity.steps ?? [];
-  const label = activity.agent === "general" ? tr("执行", "Run") : tr("查阅", "Explore");
+  const live = findAgentInfo(roster, activity.agentId, activity.agentPath);
+  const task = taskTitle(activity.body);
+  const title = live?.path ?? activity.agentPath ?? task;
+  const conclusion = live?.error ?? live?.finalText ?? null;
+  const report = conclusion ?? (live ? "" : taskReport(activity.body));
+  const label = agentKindLabel(live?.kind ?? activity.agent);
+  const targetId = live?.id ?? activity.agentId ?? null;
+  const canOpen = Boolean(targetId);
+  const openInPane = (): void => {
+    if (targetId) openAgent(targetId);
+  };
+  const toggle = (): void => setOpen((value) => !value);
+  const summaryLabel = open ? tr("收起任务概况", "Collapse summary") : tr("展开任务概况", "Expand summary");
+  const titleText = live ? `${live.path} · ${agentStatusLabel(live.status)}` : title;
+  const summary = (
+    <ScrollFade
+      className="agent-summary-scroll"
+      contentClassName="process-thinking-text agent-summary-text"
+      ariaLabel={tr("子代理任务概况，可在区域内滚动", "Subagent summary, scrollable")}
+    >
+      {task && task !== title ? (
+        <div className="agent-summary-task">
+          <Markdown text={task} />
+        </div>
+      ) : null}
+      {report ? (
+        <div className={live?.error ? "agent-summary-error" : "agent-summary-report"}>
+          <Markdown text={live?.error ? localizeError(live.error) : report} />
+        </div>
+      ) : null}
+    </ScrollFade>
+  );
 
-  useLayoutEffect(() => {
-    if (!settled || full) return;
-    const node = sheetRef.current;
-    if (!node) return;
-    const measure = () => {
-      if (node.clientHeight < 1) {
-        setOverflows(false);
-        return;
-      }
-      setOverflows(node.scrollHeight - node.clientHeight > 1);
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [settled, full, report, activity.steps, tool.status]);
+  // 紧凑模式是一行：点名称去右侧 Pane，点其他任何地方开合概况。
+  if (compact) {
+    return (
+      <div className={`tool-compact-item tool-kind-other agent-compact${open ? " open" : ""}`}>
+        <div
+          className="tool-compact-line agent-compact-line"
+          onClick={(event) => {
+            // 整行都是开合区域，只有名称按钮打开右侧 Pane。
+            // 用 Element 而不是 HTMLElement：箭头是 SVG，事件目标可能是 SVGElement。
+            const target = event.target;
+            if (target instanceof Element && target.closest(".agent-compact-name")) return;
+            toggle();
+          }}
+        >
+          <button
+            className="agent-compact-toggle is-lead"
+            type="button"
+            aria-expanded={open}
+            title={summaryLabel}
+            aria-label={summaryLabel}
+          >
+            <span className="tool-compact-icon" aria-hidden="true">
+              <SubagentIcon size={13} />
+            </span>
+            <span className="tool-compact-action">{label}</span>
+          </button>
+          <button
+            className="agent-compact-name"
+            type="button"
+            disabled={!targetId}
+            title={canOpen ? tr(`在右侧查看 ${title}`, `Open ${title} in pane`) : titleText}
+            onClick={openInPane}
+          >
+            {title}
+          </button>
+          <button
+            className="agent-compact-toggle is-tail"
+            type="button"
+            aria-expanded={open}
+            title={summaryLabel}
+            aria-label={summaryLabel}
+          >
+            <svg className="tool-compact-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+            {live ? (
+              <AgentStatusMark status={live.status} />
+            ) : (
+              <CompactStatus running={tool.status === "running"} failed={tool.status === "error"} />
+            )}
+          </button>
+        </div>
+        <ToolCollapse open={open} onTransitionEnd={onTransitionEnd}>
+          <div className="tool-compact-out agent-compact-out">{summary}</div>
+        </ToolCollapse>
+      </div>
+    );
+  }
 
   return (
-    <article className={`tool-card tool-kind-other is-task is-${tool.status}${open ? " open" : ""}`}>
-      <button
-        className="tool-card-head"
-        type="button"
-        aria-expanded={open}
-        title={title}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <span className="tool-card-icon" aria-hidden="true">
-          <StackIcon size={13} />
-        </span>
-        <span className="tool-kind-label">{label}</span>
-        <span className="tool-card-main">
-          <span className="tool-card-name grow">{title}</span>
-        </span>
-        {!compact ? <StatusMark status={tool.status} /> : null}
-        <svg className="tool-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
-          <polyline points="9 18 15 12 9 6" />
-        </svg>
-        {compact ? <StatusMark status={tool.status} compact /> : null}
-      </button>
+    <article className={`tool-card tool-kind-other is-task is-${tool.status}${open ? " open" : ""}${canOpen ? " is-openable" : ""}`}>
+      <div className="tool-card-top">
+        <button
+          className="tool-card-head"
+          type="button"
+          title={titleText}
+          onClick={openInPane}
+          disabled={!canOpen}
+        >
+          <span className="tool-card-icon" aria-hidden="true">
+            <SubagentIcon size={13} />
+          </span>
+          <span className="tool-kind-label">{label}</span>
+          <span className="tool-card-main">
+            <span className="tool-card-name grow">{title}</span>
+          </span>
+          {live ? <AgentStatusMark status={live.status} /> : <StatusMark status={tool.status} compact />}
+        </button>
+        <button
+          className="tool-card-open"
+          type="button"
+          aria-expanded={open}
+          title={summaryLabel}
+          aria-label={summaryLabel}
+          onClick={toggle}
+        >
+          <svg className="tool-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </button>
+        {canOpen ? (
+          <button
+            className="tool-card-open"
+            type="button"
+            title={tr("在右侧打开运行", "Open run in pane")}
+            aria-label={tr("在右侧打开运行", "Open run in pane")}
+            onClick={openInPane}
+          >
+            <ExternalIcon size={12} />
+          </button>
+        ) : null}
+      </div>
       <ToolCollapse open={open} onTransitionEnd={onTransitionEnd}>
-        <div className="tool-card-body">
-          <div ref={sheetRef} className={`tool-clip${full ? " full" : ""}`}>
-            {steps.length > 0 ? (
-              <ul className="task-steps">
-                {steps.map((step) => (
-                  <li key={step.id} className={`task-step is-${step.status}`}>
-                    <span className="task-step-name">{stepLabels[step.name] ?? step.name}</span>
-                    <span className="task-step-summary">{step.summary || step.name}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : tool.status === "running" ? (
-              <p className="tool-wait">{tr("正在启动", "Starting…")}</p>
-            ) : null}
-            {report ? <pre className="tool-note task-report">{report}</pre> : null}
-          </div>
-          {(settled && overflows) || full ? (
-            <button className="tool-expand" type="button" onClick={() => setFull((value) => !value)}>
-              {full ? tr("收起", "Collapse") : tr("展开全部", "Expand all")}
-            </button>
+        <div className="tool-card-body agent-summary">
+          {summary}
+          {canOpen ? (
+            <span className="agent-open-hint">
+              {live && live.status === "running"
+                ? tr("运行中 · 点击查看完整过程", "Running · click to watch")
+                : tr("查看完整运行 ↗", "Open full run ↗")}
+            </span>
           ) : null}
         </div>
       </ToolCollapse>
@@ -358,7 +437,7 @@ function GenericToolCard({ tool, compact = false }: ToolCardProps) {
 }
 
 /** 一组连续工具的折叠卡片,展开后内部还是原来的 ToolCard。 */
-function ToolRunGroup({ tools }: { tools: ToolTrace[] }) {
+export function ToolRunGroup({ tools }: { tools: ToolTrace[] }) {
   const [open, setOpen] = useState(false);
   // 折叠时跟踪最新一个还在跑(或最后一个)的工具,让标题行保持实时。
   const current =
@@ -428,7 +507,7 @@ function ToolRunGroup({ tools }: { tools: ToolTrace[] }) {
 }
 
 /** 紧凑模式:同一段超过 1 个工具时折叠成一行摘要,点击展开逐行明细。 */
-function CompactToolGroup({ tools }: { tools: ToolTrace[] }) {
+export function CompactToolGroup({ tools }: { tools: ToolTrace[] }) {
   const [open, setOpen] = useState(false);
   const running = tools.some((tool) => tool.status === "running");
   const failed = tools.filter((tool) => tool.status === "error").length;
@@ -510,7 +589,7 @@ function compactPartLabel({ kind, count }: CompactSummaryPart): string {
 }
 
 /** 紧凑模式的一行:文件类点击文件名在右侧预览,bash 点击整行内联展开输出。 */
-function CompactToolLine({
+export function CompactToolLine({
   tool,
   hideAction = false,
   hideIcon = false,

@@ -8,6 +8,7 @@ import {
   type CustomModelInput,
   type ExecutionEnvironmentKind,
   type ModelCatalog,
+  type NewConversationSelection,
   type ProviderSummary,
   type SandboxMode,
   type SelectableEnvironmentKind,
@@ -17,13 +18,14 @@ import {
 } from "@vela/shared";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { useModels } from "../hooks/useModels";
-import type { Appearance, AppLocale, FileIconTheme, PreferencesApi, ToolDisplay } from "../hooks/usePreferences";
+import type { Appearance, AppLocale, FileIconTheme, PreferencesApi, ToolDisplay, ToolFold } from "../hooks/usePreferences";
 import type { ProjectApi } from "../hooks/useProject";
 import { modKeyLabel } from "../platform";
 import { darkThemes, lightThemes, type ColorScheme, type DarkTheme, type LightTheme, type ThemeId } from "../themes";
 import { LoginDialog } from "./ModelControls";
 import { SheetPresence } from "./Presence";
 import { SkillMigrationDialog } from "./SkillMigrationDialog";
+import { TrashIcon } from "./icons";
 import { settingsCopy, type SettingsCopy } from "./settings-copy";
 import { localizeError, tr } from "../locale";
 
@@ -91,7 +93,7 @@ export function SettingsView({
             />
           </div>
           <div hidden={section !== "models"}>
-            <ModelsSection copy={copy} models={models} />
+            <ModelsSection copy={copy} models={models} preferences={preferences} />
           </div>
           <div hidden={section !== "permissions"}>
             <PermissionsSection copy={copy} project={project} />
@@ -185,13 +187,24 @@ function AgentSection({
     setDraft((current) => {
       if (!current) return current;
       const nextChoices = levelsFor(catalog, current.provider, current.modelId);
-      return { ...current, thinkingLevel: clampChoice(nextChoices, "medium"), instructions: "" };
+      return {
+        ...current,
+        thinkingLevel: clampChoice(nextChoices, "medium"),
+        newConversationSelection: "default",
+        instructions: "",
+      };
     });
     setError(null);
   }
 
+  const newConversationChoices: { id: NewConversationSelection; label: string }[] = [
+    { id: "default", label: text.newConversationDefault },
+    { id: "lastUsed", label: text.newConversationLastUsed },
+  ];
+
   const restored =
     draft !== null &&
+    draft.newConversationSelection === "default" &&
     draft.instructions.trim() === "" &&
     thinking === clampChoice(choices, "medium");
 
@@ -240,6 +253,15 @@ function AgentSection({
             </button>
           ))}
         </div>
+      </SettingsBlock>
+
+      <SettingsBlock title={text.newConversation} hint={text.newConversationHint}>
+        <Segmented
+          label={text.newConversation}
+          value={draft?.newConversationSelection ?? "default"}
+          options={newConversationChoices}
+          onChange={(value) => setDraft((current) => (current ? { ...current, newConversationSelection: value } : current))}
+        />
       </SettingsBlock>
 
       <SettingsBlock title={text.instructions} hint={text.instructionsHint}>
@@ -356,6 +378,9 @@ function SkillsBlock({ copy, workspacePath }: { copy: SettingsCopy; workspacePat
   const text = copy.agent;
   const [catalog, setCatalog] = useState<SkillCatalog | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [pending, setPending] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [migrationOpen, setMigrationOpen] = useState(false);
   const [migrationNotice, setMigrationNotice] = useState<string | null>(null);
@@ -399,6 +424,41 @@ function SkillsBlock({ copy, workspacePath }: { copy: SettingsCopy; workspacePat
     setRefreshKey((current) => current + 1);
   }
 
+  async function toggleSkill(skill: SkillCatalog["skills"][number]): Promise<void> {
+    const api = window.vela;
+    if (!api || pending) return;
+    setPending(skill.name);
+    setActionError(null);
+    setConfirmingDelete(null);
+    try {
+      setCatalog(await api.setSkillEnabled(skill.name, !skill.enabled));
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : text.skillsLoadError);
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function deleteSkill(skill: SkillCatalog["skills"][number]): Promise<void> {
+    const api = window.vela;
+    if (!api || pending) return;
+    if (confirmingDelete !== skill.name) {
+      setConfirmingDelete(skill.name);
+      setActionError(null);
+      return;
+    }
+    setPending(skill.name);
+    setActionError(null);
+    try {
+      setCatalog(await api.deleteSkill(skill.name, skill.location));
+      setConfirmingDelete(null);
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : text.skillsLoadError);
+    } finally {
+      setPending(null);
+    }
+  }
+
   return (
     <SettingsBlock title={text.skills} hint={text.skillsHint}>
       {catalog ? <div className="settings-path">{catalog.skillsDir}</div> : null}
@@ -427,9 +487,23 @@ function SkillsBlock({ copy, workspacePath }: { copy: SettingsCopy; workspacePat
       {catalog && catalog.skills.length > 0 ? (
         <div className="settings-stack">
           {catalog.skills.map((skill) => (
-            <SkillRow key={skill.location} skill={skill} originLabel={text.skillOrigins[skill.origin]} commandOnly={text.skillCommandOnly} />
+            <SkillRow
+              key={skill.location}
+              skill={skill}
+              copy={text}
+              originLabel={text.skillOrigins[skill.origin]}
+              commandOnly={text.skillCommandOnly}
+              pending={pending === skill.name}
+              confirmingDelete={confirmingDelete === skill.name}
+              onToggle={() => void toggleSkill(skill)}
+              onDelete={() => void deleteSkill(skill)}
+            />
           ))}
         </div>
+      ) : null}
+      {actionError ? <p className="settings-error">{localizeError(actionError)}</p> : null}
+      {catalog && catalog.skills.some((skill) => !skill.canDelete) ? (
+        <p className="settings-note">{text.skillDeleteNote}</p>
       ) : null}
       {catalog && catalog.diagnostics.length > 0 ? (
         <div className="settings-stack">
@@ -448,26 +522,67 @@ function SkillsBlock({ copy, workspacePath }: { copy: SettingsCopy; workspacePat
 
 function SkillRow({
   skill,
+  copy,
   originLabel,
   commandOnly,
+  pending,
+  confirmingDelete,
+  onToggle,
+  onDelete,
 }: {
   skill: SkillCatalog["skills"][number];
+  copy: SettingsCopy["agent"];
   originLabel: string;
   commandOnly: string;
+  pending: boolean;
+  confirmingDelete: boolean;
+  onToggle: () => void;
+  onDelete: () => void;
 }) {
   return (
-    <div className="settings-skill">
-      <span className="settings-radio-title">{skill.name}</span>
-      <span className="settings-radio-hint">{skill.description}</span>
-      <span className="settings-skill-meta">
-        <span>{originLabel}</span>
-        {skill.disableModelInvocation ? <span>{commandOnly}</span> : null}
-      </span>
+    <div className={`settings-skill${skill.enabled ? "" : " disabled"}`}>
+      <div className="settings-skill-main">
+        <span className="settings-radio-title">
+          {skill.name}
+          {skill.enabled ? null : <span className="settings-skill-state">{copy.skillDisabled}</span>}
+        </span>
+        <span className="settings-radio-hint">{skill.description}</span>
+        <span className="settings-skill-meta">
+          <span>{originLabel}</span>
+          {skill.disableModelInvocation ? <span>{commandOnly}</span> : null}
+        </span>
+      </div>
+      <div className="settings-skill-actions">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={skill.enabled}
+          aria-label={skill.enabled ? copy.skillDisable : copy.skillEnable}
+          title={copy.skillToggleHint}
+          className={`settings-skill-toggle${skill.enabled ? " on" : ""}`}
+          disabled={pending}
+          onClick={onToggle}
+        >
+          <span className="settings-skill-toggle-knob" />
+        </button>
+        {skill.canDelete ? (
+          <button
+            type="button"
+            className={`settings-skill-remove${confirmingDelete ? " confirm" : ""}`}
+            aria-label={confirmingDelete ? copy.skillDeleteConfirm : copy.skillDelete}
+            title={copy.skillDeleteHint}
+            disabled={pending}
+            onClick={onDelete}
+          >
+            {confirmingDelete ? copy.skillDeleteConfirm : <TrashIcon size={13} />}
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }
 
-function ModelsSection({ copy, models }: { copy: SettingsCopy; models: ModelsApi }) {
+function ModelsSection({ copy, models, preferences }: { copy: SettingsCopy; models: ModelsApi; preferences: PreferencesApi }) {
   const text = copy.models;
   const catalog = models.catalog;
   const [pendingRemove, setPendingRemove] = useState<string | null>(null);
@@ -477,6 +592,7 @@ function ModelsSection({ copy, models }: { copy: SettingsCopy; models: ModelsApi
   const [added, setAdded] = useState(false);
 
   const providers = catalog?.providers ?? [];
+  const modelGroups = groupAvailable(catalog);
 
   async function removeProvider(provider: ProviderSummary): Promise<void> {
     const custom = (catalog?.models ?? []).filter((model) => model.provider === provider.id && model.custom);
@@ -545,6 +661,53 @@ function ModelsSection({ copy, models }: { copy: SettingsCopy; models: ModelsApi
             );
           })}
         </div>
+      </SettingsBlock>
+
+      <SettingsBlock title={text.visibility} hint={text.visibilityHint}>
+        {modelGroups.length === 0 ? <p className="settings-note">{text.visibilityEmpty}</p> : null}
+        {preferences.hiddenModels.length > 0 ? (
+          <div className="settings-actions">
+            <button className="settings-secondary" type="button" onClick={preferences.showAllModels}>
+              {text.visibilityShowAll(preferences.hiddenModels.length)}
+            </button>
+          </div>
+        ) : null}
+        {modelGroups.length > 0 ? (
+          <div className="settings-stack">
+            {modelGroups.map((group) => (
+              <div className="settings-visibility-group" key={group.provider}>
+                <div className="settings-kicker">{group.name}</div>
+                {group.models.map((model) => {
+                  const visible = !preferences.isModelHidden(model.provider, model.id);
+                  return (
+                    <div className={`settings-skill${visible ? "" : " disabled"}`} key={`${group.provider}/${model.id}`}>
+                      <div className="settings-skill-main">
+                        <span className="settings-radio-title">
+                          {model.name}
+                          {visible ? null : <span className="settings-skill-state">{text.visibilityHidden}</span>}
+                        </span>
+                        <span className="settings-radio-hint">{model.id}</span>
+                      </div>
+                      <div className="settings-skill-actions">
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={visible}
+                          aria-label={visible ? text.visibilityHide : text.visibilityShow}
+                          title={visible ? text.visibilityHide : text.visibilityShow}
+                          className={`settings-skill-toggle${visible ? " on" : ""}`}
+                          onClick={() => preferences.setModelHidden(model.provider, model.id, visible)}
+                        >
+                          <span className="settings-skill-toggle-knob" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        ) : null}
       </SettingsBlock>
 
       <SettingsBlock title={text.add}>
@@ -673,6 +836,7 @@ function PermissionsSection({ copy, project }: { copy: SettingsCopy; project: Pr
   const mode = project.sandboxMode;
   const options: { id: SandboxMode; title: string; hint: string }[] = [
     { id: "ask", title: text.ask, hint: text.askHint },
+    { id: "smart", title: text.smart, hint: text.smartHint },
     { id: "full", title: text.full, hint: text.fullHint },
   ];
 
@@ -828,10 +992,12 @@ function AppearanceSection({
     lightTheme,
     darkTheme,
     toolDisplay,
+    toolFold,
     fileIconTheme,
     setAppearance,
     setLocale,
     setToolDisplay,
+    setToolFold,
     setFileIconTheme,
   } = preferences;
   const text = copy.appearance;
@@ -853,6 +1019,10 @@ function AppearanceSection({
   const toolDisplayOptions: { id: ToolDisplay; label: string }[] = [
     { id: "card", label: text.toolCard },
     { id: "compact", label: text.toolCompact },
+  ];
+  const toolFoldOptions: { id: ToolFold; label: string }[] = [
+    { id: "message", label: text.toolFoldMessage },
+    { id: "position", label: text.toolFoldPosition },
   ];
   const fileIconThemeOptions: { id: FileIconTheme; label: string }[] = [
     { id: "devicon", label: text.devicon },
@@ -911,6 +1081,14 @@ function AppearanceSection({
           value={toolDisplay}
           options={toolDisplayOptions}
           onChange={setToolDisplay}
+        />
+      </SettingsBlock>
+      <SettingsBlock title={text.toolFold} hint={text.toolFoldHint}>
+        <Segmented
+          label={text.toolFold}
+          value={toolFold}
+          options={toolFoldOptions}
+          onChange={setToolFold}
         />
       </SettingsBlock>
       <SettingsBlock title={text.fileIconTheme} hint={text.fileIconThemeHint}>
@@ -1124,6 +1302,7 @@ function sameSettings(draft: AgentSettings, saved: AgentSettings, thinking: Thin
     draft.provider === saved.provider &&
     draft.modelId === saved.modelId &&
     thinking === saved.thinkingLevel &&
+    draft.newConversationSelection === saved.newConversationSelection &&
     draft.instructions === saved.instructions
   );
 }

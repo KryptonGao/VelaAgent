@@ -1,10 +1,14 @@
 import type { SubagentKind, ToolActivity, ToolStep } from "@vela/shared";
+import { followupTaskToolName, sendMessageToolName, spawnAgentToolName } from "./subagent";
 
 const maxChars = 80_000;
 
 /** 工具开始时能确定的内容：命令或路径。文件正文和 diff 要等执行结束。 */
 export function activityFromCall(toolName: string, args: unknown): ToolActivity {
-  if (toolName === "task") return taskCallActivity(args);
+  if (toolName === spawnAgentToolName) return spawnCallActivity(args);
+  if (toolName === sendMessageToolName || toolName === followupTaskToolName) {
+    return agentMessageCallActivity(toolName, args);
+  }
   const command = readString(args, "command");
   const path = readString(args, "path") ?? readString(args, "file_path");
   if (toolName === "bash") return command ? { command } : {};
@@ -16,9 +20,8 @@ export function activityFromCall(toolName: string, args: unknown): ToolActivity 
   return {};
 }
 
-/** bash 执行过程中的增量输出，或 task 子代理的步骤快照。没有可展示内容时不发事件。 */
-export function activityFromOutput(result: unknown, toolName?: string): ToolActivity | null {
-  if (toolName === "task") return taskProgressActivity(result);
+/** bash 执行过程中的增量输出。没有可展示内容时不发事件。 */
+export function activityFromOutput(result: unknown, _toolName?: string): ToolActivity | null {
   const text = textOf(result);
   if (!text) return null;
   return { body: clip(text) };
@@ -31,7 +34,9 @@ export function activityFromExecution(
   result: unknown,
   isError: boolean,
 ): ToolActivity {
-  if (toolName === "task") return taskExecutionActivity(args, result, isError);
+  if (toolName === spawnAgentToolName || toolName === sendMessageToolName || toolName === followupTaskToolName) {
+    return agentExecutionActivity(toolName, args, result, isError);
+  }
   const call = activityFromCall(toolName, args);
   const text = textOf(result);
   if (isError) {
@@ -72,9 +77,10 @@ export function activityFromExecution(
   return { command: call.command, path: call.path, body: text ? clip(text) : undefined };
 }
 
-const maxTaskSteps = 40;
+const maxAgentSteps = 40;
 
-function taskCallActivity(args: unknown): ToolActivity {
+/** spawn_agent 开始时卡片标题就是任务摘要。 */
+function spawnCallActivity(args: unknown): ToolActivity {
   const agent = readAgent(args);
   return {
     ...(agent ? { agent } : {}),
@@ -82,35 +88,54 @@ function taskCallActivity(args: unknown): ToolActivity {
   };
 }
 
-/** 进行中的更新只带步骤，避免盖掉标题行上的任务摘要。 */
-function taskProgressActivity(result: unknown): ToolActivity | null {
-  const details = detailsOf(result);
-  const agent = readAgent(details);
-  const steps = readSteps(details);
-  if (!agent && !steps) return null;
-  const mutated = readMutated(details);
+/** 发消息和追加任务开始时先展示目标，路径等结果里有了再补。 */
+function agentMessageCallActivity(toolName: string, args: unknown): ToolActivity {
+  const ref = readString(args, "agent_id")?.trim() ?? "";
+  const body =
+    toolName === sendMessageToolName
+      ? oneLine(readString(args, "message") ?? "")
+      : oneLine(readString(args, "task") ?? "");
   return {
-    ...(agent ? { agent } : {}),
-    ...(steps ? { steps } : {}),
-    ...(mutated ? { mutated } : {}),
+    ...(ref.startsWith("/") ? { agentPath: ref } : {}),
+    body: ref ? `${ref}\n${body}` : body,
   };
 }
 
-function taskExecutionActivity(args: unknown, result: unknown, isError: boolean): ToolActivity {
+/** spawn / send / followup 结束后把结论、步骤和 agent 标识一起给到卡片。 */
+function agentExecutionActivity(
+  toolName: string,
+  args: unknown,
+  result: unknown,
+  isError: boolean,
+): ToolActivity {
   const details = detailsOf(result);
-  const agent = readAgent(args) ?? readAgent(details);
+  const agentId = readString(details, "agentId");
+  const path = readString(details, "path");
+  const agent = readAgent(details) ?? readAgent(args);
   const steps = readSteps(details);
   const mutated = readMutated(details);
-  const title = oneLine(readString(args, "task") ?? "");
   const text = textOf(result);
+  const title = agentTaskTitle(toolName, args);
   const summary = isError ? text || "执行失败" : text;
   const body = summary && summary !== title ? `${title}\n\n${clip(summary)}` : title;
   return {
     ...(agent ? { agent } : {}),
+    ...(agentId ? { agentId } : {}),
+    ...(path ? { agentPath: path } : {}),
     ...(steps ? { steps } : {}),
     ...(mutated ? { mutated } : {}),
     body,
   };
+}
+
+function agentTaskTitle(toolName: string, args: unknown): string {
+  if (toolName === spawnAgentToolName) return oneLine(readString(args, "task") ?? "");
+  if (toolName === followupTaskToolName) {
+    return oneLine(readString(args, "task") ?? "") || oneLine(readString(args, "agent_id") ?? "");
+  }
+  const target = readString(args, "agent_id")?.trim();
+  const message = oneLine(readString(args, "message") ?? "");
+  return target ? `${target}\n${message}` : message;
 }
 
 function oneLine(text: string): string {
@@ -134,7 +159,7 @@ function readSteps(details: unknown): ToolStep[] | undefined {
     const step = readStep(item);
     if (step) steps.push(step);
   }
-  return steps.slice(-maxTaskSteps);
+  return steps.slice(-maxAgentSteps);
 }
 
 function readStep(value: unknown): ToolStep | null {

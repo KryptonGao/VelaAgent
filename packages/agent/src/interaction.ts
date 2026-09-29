@@ -12,7 +12,7 @@ import {
 } from "@vela/shared";
 import { Type } from "typebox";
 import { isPlanSafeCommand } from "./plan-command";
-import { subagentToolName } from "./subagent";
+import { agentToolNames } from "./subagent";
 import type { GoalValidationDraft } from "./goal-validation";
 
 export const goalContinuePrompt =
@@ -36,7 +36,7 @@ const goalPrompt = `你正处于 Goal 模式。目标已经记录在对话里，
 可以读取、编辑和运行命令。每推进一段就调用 update_goal：还在做就保持 active，并写一句进展；真正做完再设为 complete。
 完成前必须先调用 record_goal_validation。按风险级别检查 diff、定向测试、构建、类型检查和回归；未运行的类别要说明原因。只引用本目标中实际完成的 bash 工具调用 id，不能编造命令结果。
 检查命令之后如果还运行了其他 bash 命令，也要归类为「other」记录，或在它之后重跑检查；运行时会把未记录的后续命令视为可能修改工作区。
-中高风险改动必须检查 diff 并运行定向测试；高风险改动还必须运行更广范围的回归。失败后修复并重跑，或记录失败调用及其确实与本次改动无关的依据。验证后如果又运行 bash、edit、write 或 general task，必须重新验证。
+中高风险改动必须检查 diff 并运行定向测试；高风险改动还必须运行更广范围的回归。失败后修复并重跑，或记录失败调用及其确实与本次改动无关的依据。验证后如果又运行 bash、edit、write 或 spawn_agent 起 general 子代理，必须重新验证。
 最终回复列出跑过的检查及结果、跳过的检查及原因，以及带已知问题完成时仍失败的项目。
 不要把目标标成 complete，除非要求的结果已经达成。你不能暂停目标，暂停由用户决定。
 如果这一轮还没完成，做下一步能做的事，不要停下来等用户说继续。`;
@@ -44,14 +44,12 @@ const goalPrompt = `你正处于 Goal 模式。目标已经记录在对话里，
 const agentPlanPrompt =
   "当前有一份待执行的计划。完成某个步骤后调用 complete_step，传入该步骤的 id。执行中遇到需要用户拍板的决定，可以用 ask_user_question 提问。";
 
-const taskPrompt = `需要大范围查阅或把一块相对独立的工作交给干净上下文时，调用 task。
-agent 为 explore 时只读，适合搜索和梳理代码。
-agent 为 general 时可以读取、编辑和运行命令，权限与当前会话相同。
-一次只派一个子代理。任务要写清楚目标、范围和完成标准。
-子代理不会看到这段对话，结果返回后由你继续，不要把子代理的过程原样复述给用户。
-简单的单文件读写不要用 task。`;
+const agentTreePrompt = `需要大范围查阅或把一块独立工作派出去时，用 spawn_agent 启动常驻子代理：agent 为 explore（只读）或 general（可改文件），立即返回 agent id 和路径，不等待结果。
+name 是路径最后一段（如 backend）；fork 决定子代理继承多少当前上下文：none 不继承（默认），all 全量，数字表示最近 N 轮。
+子代理完成后结论会自动回到你这里；需要结果才能继续时用 followup_task 等它完成，只是补充要求就用 send_message。
+可以并行派多个子代理，但注意它们会并发修改工作区；简单的单文件读写不要派子代理。任务要写清楚目标、范围和完成标准，不要把子代理的过程原样复述给用户。`;
 
-const workTools = ["read", "bash", "edit", "write", subagentToolName];
+const workTools = ["read", "bash", "edit", "write", ...agentToolNames];
 
 export function toolNamesFor(mode: InteractionMode, hasPlan: boolean): string[] {
   if (mode === "plan") return ["read", "bash", "submit_plan", "ask_user_question"];
@@ -61,8 +59,8 @@ export function toolNamesFor(mode: InteractionMode, hasPlan: boolean): string[] 
 
 export function modeSystemPrompt(mode: InteractionMode, hasPlan: boolean): string {
   if (mode === "plan") return planPrompt;
-  if (mode === "goal") return `${goalPrompt}\n\n${taskPrompt}`;
-  return hasPlan ? `${agentPlanPrompt}\n\n${taskPrompt}` : taskPrompt;
+  if (mode === "goal") return `${goalPrompt}\n\n${agentTreePrompt}`;
+  return hasPlan ? `${agentPlanPrompt}\n\n${agentTreePrompt}` : agentTreePrompt;
 }
 
 const planExecutionHeader = "请按下面的计划实现。完成某个步骤后调用 complete_step，传入该步骤的 id。";

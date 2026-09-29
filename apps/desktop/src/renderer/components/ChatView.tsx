@@ -1,16 +1,20 @@
 import type { AppState, InteractionMode } from "@vela/shared";
-import { Fragment, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useAgentWorkspace } from "./AgentPanel";
 import { modKeyLabel } from "../platform";
-import { FolderIcon } from "./icons";
+import { FolderIcon, StackIcon } from "./icons";
 import { trackEnteredMessages, type EnterTrack } from "./message-motion";
 import type { useModels } from "../hooks/useModels";
 import type { ProjectApi } from "../hooks/useProject";
-import type { ToolDisplay } from "../hooks/usePreferences";
+import type { ToolDisplay, ToolFold } from "../hooks/usePreferences";
 import type { UiMessage } from "../hooks/useSession";
 import { Composer } from "./Composer";
 import { Markdown } from "./Markdown";
-import { ActivityIndicator } from "./ActivityIndicator";
-import { ToolList, type QuestionLookup } from "./ToolCard";
+import { OpenInAppButton } from "./OpenInAppButton";
+import { Thinking } from "./Thinking";
+import { ToolCard, ToolList, CompactToolGroup, CompactToolLine, ToolRunGroup, type QuestionLookup } from "./ToolCard";
+import { toolCompactKind } from "./tool-compact";
+import { buildTurnItems, groupProcessItems, type ProcessNode } from "./tool-sequence";
 import { SkillToken } from "./composer/SkillMenu";
 import { parseSkillPrompt } from "./composer/skill-picker";
 import { useFilePreview } from "./preview/FilePreviewContext";
@@ -95,6 +99,9 @@ interface ChatViewProps {
   onToggleRight: () => void;
   project: ProjectApi;
   toolDisplay?: ToolDisplay;
+  toolFold?: ToolFold;
+  /** 在输入框模型列表中隐藏的模型，key 为 `provider/id`。 */
+  hiddenModels?: string[];
   onSend: (text: string, images?: import("@vela/shared").ImageAttachment[]) => Promise<void>;
   onAbort: () => Promise<void>;
   onMode: (mode: import("@vela/shared").InteractionMode) => void;
@@ -115,6 +122,8 @@ export function ChatView({
   onToggleRight,
   project,
   toolDisplay = "card",
+  toolFold = "message",
+  hiddenModels = [],
   onSend,
   onAbort,
   onMode,
@@ -262,6 +271,15 @@ export function ChatView({
   const entering = enterTrack.current.enter;
   const mod = modKeyLabel(platform);
   const rightLabel = rightCollapsed ? tr("展开右侧面板", "Expand right panel") : tr("收起右侧面板", "Collapse right panel");
+  const { agents: roster, activeAgentId, openAgent } = useAgentWorkspace();
+  const subagents = useMemo(() => roster.filter((agent) => agent.kind !== "root"), [roster]);
+  const runningSubagents = subagents.filter((agent) => agent.status === "running").length;
+  const openMostRelevantAgent = (): void => {
+    const target = [...subagents].sort(
+      (a, b) => Number(b.status === "running") - Number(a.status === "running") || b.updatedAt - a.updatedAt,
+    )[0];
+    if (target) openAgent(target.id);
+  };
   const turnChanges = useMemo(
     () => changesByFinalMessage(messages, streaming, project.workspace?.current ?? null),
     [messages, streaming, project.workspace?.current],
@@ -291,6 +309,23 @@ export function ChatView({
               <span className="chat-project-name">{project.workspace.current.split(/[\\/]/).filter(Boolean).pop()}</span>
               {project.git?.branch ? <span className="chat-project-branch">{project.git.branch}</span> : null}
             </span>
+          ) : null}
+          <OpenInAppButton path={project.workspace?.current ?? null} />
+          {subagents.length > 0 ? (
+            <button
+              className={`chat-agents-button${activeAgentId ? " active" : ""}`}
+              type="button"
+              title={tr("查看子代理运行", "View subagent runs")}
+              aria-label={tr("查看子代理运行", "View subagent runs")}
+              onClick={openMostRelevantAgent}
+            >
+              <StackIcon size={13} />
+              <span>
+                {runningSubagents > 0
+                  ? tr(`${runningSubagents} 运行中`, `${runningSubagents} running`)
+                  : tr(`${subagents.length} 个子代理`, `${subagents.length} subagents`)}
+              </span>
+            </button>
           ) : null}
           <button
             className={`view-icon-btn${rightCollapsed ? "" : " active"}`}
@@ -358,14 +393,36 @@ export function ChatView({
                     getQuestion={getQuestion}
                     onReplyQuestion={onReplyQuestion}
                     toolDisplay={toolDisplay}
+                    toolFold={toolFold}
                   />
                 ) : turn.assistants.length > 0 ? (
+                  toolFold === "position" ? (
+                    <div className="assistant-live-turn">
+                      <article className="assistant-block">
+                        <ToolSequence
+                          messages={turn.assistants}
+                          activeAssistantId={activeAssistantId}
+                          entering={entering}
+                          toolDisplay={toolDisplay}
+                          getQuestion={getQuestion}
+                          onReplyQuestion={onReplyQuestion}
+                        />
+                        {changes ? (
+                          <TurnChangesCard
+                            changes={changes}
+                            onOpenChanges={onOpenChanges}
+                            canManageChanges={Boolean(project.git?.repo)}
+                          />
+                        ) : null}
+                      </article>
+                    </div>
+                  ) : (
                   <div className="assistant-live-turn">
+                    {/* 每一步 assistant 的思考都跟着自己的工具调用走;Thinking 组件负责运行中展开、结束后折叠。 */}
                     {turn.assistants.map((message) => (
                       <Message
                         key={message.id}
                         message={message}
-                        showThinking={message.id === lastAssistant?.id}
                         thinkingActive={message.id === activeAssistantId && !message.text && message.tools.length === 0}
                         entering={entering.has(message.id)}
                         changes={turnChanges.get(message.id) ?? null}
@@ -377,6 +434,7 @@ export function ChatView({
                       />
                     ))}
                   </div>
+                  )
                 ) : null}
               </Fragment>
             );
@@ -394,6 +452,7 @@ export function ChatView({
         modelReady={session?.modelReady ?? false}
         thinkingLevel={session?.thinkingLevel ?? "medium"}
         thinkingLevels={session?.thinkingLevels ?? ["off"]}
+        hiddenModels={hiddenModels}
         models={models}
         mode={session?.mode ?? "agent"}
         sendError={sendError}
@@ -463,7 +522,6 @@ function UserText({ text }: { text: string }) {
 
 function Message({
   message,
-  showThinking = true,
   thinkingActive,
   entering,
   changes,
@@ -474,7 +532,6 @@ function Message({
   toolDisplay,
 }: {
   message: UiMessage;
-  showThinking?: boolean;
   thinkingActive: boolean;
   entering: boolean;
   changes: TurnChanges | null;
@@ -486,11 +543,27 @@ function Message({
 }) {
   const enterClass = entering ? " message-enter" : "";
   if (message.role === "user") {
+    const images = message.images ?? [];
     return (
       <div className={`user-msg-container${enterClass}`}>
-        <div className="user-bubble">
-          <UserText text={message.text} />
-        </div>
+        {images.length > 0 ? (
+          <div className="user-attachments">
+            {images.map((image, index) => (
+              <img
+                key={index}
+                className="user-attachment-thumb"
+                src={`data:${image.mimeType};base64,${image.data}`}
+                alt={tr(`图片 ${index + 1}`, `Image ${index + 1}`)}
+                draggable={false}
+              />
+            ))}
+          </div>
+        ) : null}
+        {message.text ? (
+          <div className="user-bubble">
+            <UserText text={message.text} />
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -500,7 +573,6 @@ function Message({
       <AssistantMessageContent
         message={message}
         thinkingActive={thinkingActive}
-        showThinking={showThinking}
         thinkingDisclosure
         showTools
         showText
@@ -518,7 +590,6 @@ function Message({
 function AssistantMessageContent({
   message,
   thinkingActive,
-  showThinking,
   thinkingDisclosure = true,
   showTools,
   showText,
@@ -531,7 +602,6 @@ function AssistantMessageContent({
 }: {
   message: UiMessage;
   thinkingActive: boolean;
-  showThinking: boolean;
   thinkingDisclosure?: boolean;
   showTools: boolean;
   showText: boolean;
@@ -544,7 +614,7 @@ function AssistantMessageContent({
 }) {
   return (
     <>
-      {showThinking && message.thinking ? (
+      {message.thinking ? (
         thinkingDisclosure ? (
           <Thinking
             text={message.thinking}
@@ -575,6 +645,87 @@ function AssistantMessageContent({
   );
 }
 
+/** 位置关系折叠:整轮拍平成序列后合并相邻工具;思考、可见正文和交互卡片都会打断。 */
+function ToolSequence({
+  messages,
+  activeAssistantId,
+  entering,
+  includeText,
+  toolDisplay,
+  getQuestion,
+  onReplyQuestion,
+}: {
+  messages: UiMessage[];
+  activeAssistantId?: string;
+  entering?: Set<string>;
+  includeText?: (message: UiMessage) => boolean;
+  toolDisplay: ToolDisplay;
+  getQuestion: QuestionLookup;
+  onReplyQuestion: (id: string, answer: string | null) => void;
+}) {
+  const nodes = useMemo(
+    () => groupProcessItems(buildTurnItems(messages, { includeText }), toolDisplay),
+    [messages, includeText, toolDisplay],
+  );
+  const messageById = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
+  const compact = toolDisplay === "compact";
+
+  const withEnter = (key: string, messageId: string, content: ReactNode): ReactNode =>
+    entering?.has(messageId)
+      ? <div key={key} className="message-enter">{content}</div>
+      : <Fragment key={key}>{content}</Fragment>;
+
+  const renderTool = (node: Extract<ProcessNode, { type: "tool" | "run" }>): ReactNode => {
+    if (node.type === "run") {
+      return withEnter(node.id, node.messageId, compact ? <CompactToolGroup tools={node.tools} /> : <ToolRunGroup tools={node.tools} />);
+    }
+    return withEnter(
+      node.id,
+      node.messageId,
+      compact && toolCompactKind(node.tool.name) ? (
+        <CompactToolLine tool={node.tool} />
+      ) : (
+        <ToolCard tool={node.tool} getQuestion={getQuestion} onReplyQuestion={onReplyQuestion} compact={compact} />
+      ),
+    );
+  };
+
+  const output: ReactNode[] = [];
+  let buffer: Extract<ProcessNode, { type: "tool" | "run" }>[] = [];
+  const flushTools = () => {
+    if (buffer.length === 0) return;
+    output.push(
+      <div key={`tools:${buffer[0]!.id}`} className={compact ? "tool-card-list is-compact" : "tool-card-list"}>
+        {buffer.map((node) => renderTool(node))}
+      </div>,
+    );
+    buffer = [];
+  };
+
+  for (const node of nodes) {
+    if (node.type === "tool" || node.type === "run") {
+      buffer.push(node);
+      continue;
+    }
+    flushTools();
+    if (node.type === "thinking") {
+      const message = messageById.get(node.messageId);
+      const active = node.messageId === activeAssistantId && Boolean(message && !message.text && message.tools.length === 0);
+      output.push(withEnter(node.id, node.messageId, <Thinking text={node.text} active={active} showActivityIndicator={compact} />));
+    } else {
+      output.push(
+        withEnter(
+          node.id,
+          node.messageId,
+          <div className="agent-reply-prose"><Markdown text={node.text} /></div>,
+        ),
+      );
+    }
+  }
+  flushTools();
+  return <>{output}</>;
+}
+
 function CompletedAssistantTurn({
   messages,
   finalReply,
@@ -586,6 +737,7 @@ function CompletedAssistantTurn({
   getQuestion,
   onReplyQuestion,
   toolDisplay,
+  toolFold,
 }: {
   messages: UiMessage[];
   finalReply: UiMessage;
@@ -597,6 +749,7 @@ function CompletedAssistantTurn({
   getQuestion: QuestionLookup;
   onReplyQuestion: (id: string, answer: string | null) => void;
   toolDisplay?: ToolDisplay;
+  toolFold?: ToolFold;
 }) {
   const [expanded, setExpanded] = useState(false);
   const processId = useId();
@@ -633,24 +786,35 @@ function CompletedAssistantTurn({
         )}
         <div id={processId} className="time-spent-body" aria-hidden={!expanded}>
           <div className="time-spent-body-inner">
-            {messages.map((message) => (
-              <article className="assistant-block assistant-turn-process-item" key={message.id}>
-                <AssistantMessageContent
-                  message={message}
-                  thinkingActive={false}
-                  showThinking
-                  thinkingDisclosure
-                  showTools
-                  showText={message.id !== finalReply.id}
-                  changes={null}
-                  onOpenChanges={onOpenChanges}
-                  canManageChanges={canManageChanges}
+            {toolFold === "position" ? (
+              <article className="assistant-block assistant-turn-process-item">
+                <ToolSequence
+                  messages={messages}
+                  includeText={(message) => message.id !== finalReply.id}
+                  toolDisplay={toolDisplay ?? "card"}
                   getQuestion={getQuestion}
                   onReplyQuestion={onReplyQuestion}
-                  toolDisplay={toolDisplay}
                 />
               </article>
-            ))}
+            ) : (
+              messages.map((message) => (
+                <article className="assistant-block assistant-turn-process-item" key={message.id}>
+                  <AssistantMessageContent
+                    message={message}
+                    thinkingActive={false}
+                    thinkingDisclosure
+                    showTools
+                    showText={message.id !== finalReply.id}
+                    changes={null}
+                    onOpenChanges={onOpenChanges}
+                    canManageChanges={canManageChanges}
+                    getQuestion={getQuestion}
+                    onReplyQuestion={onReplyQuestion}
+                    toolDisplay={toolDisplay}
+                  />
+                </article>
+              ))
+            )}
           </div>
         </div>
       </div>
@@ -765,107 +929,6 @@ function UndoIcon() {
       <path d="M9 14 4 9l5-5" />
       <path d="M4 9h10a6 6 0 0 1 0 12h-2" />
     </svg>
-  );
-}
-
-/** 思考进行中默认展开,思考结束(出现新工具、开始回复或回合结束)时自动折叠;任意长度都能手动开合。 */
-function Thinking({
-  text,
-  active,
-  showActivityIndicator,
-}: {
-  text: string;
-  active: boolean;
-  showActivityIndicator: boolean;
-}) {
-  const [open, setOpen] = useState(active);
-  const [revealed, setRevealed] = useState(active);
-  const [fadeEdges, setFadeEdges] = useState({ top: false, bottom: false });
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const prevActive = useRef(active);
-
-  const syncFadeEdges = () => {
-    const element = scrollRef.current;
-    if (!element) return;
-    const maxScroll = element.scrollHeight - element.clientHeight;
-    const next = {
-      top: element.scrollTop > 2,
-      bottom: maxScroll > 2 && element.scrollTop < maxScroll - 2,
-    };
-    setFadeEdges((current) =>
-      current.top === next.top && current.bottom === next.bottom ? current : next,
-    );
-  };
-
-  useLayoutEffect(() => {
-    if (prevActive.current && !active) setOpen(false);
-    prevActive.current = active;
-  }, [active]);
-
-  useLayoutEffect(() => {
-    const scrollElement = scrollRef.current;
-    const contentElement = contentRef.current;
-    if (!open || !revealed || !scrollElement || !contentElement) {
-      setFadeEdges({ top: false, bottom: false });
-      return;
-    }
-
-    syncFadeEdges();
-    const observer = new ResizeObserver(syncFadeEdges);
-    observer.observe(scrollElement);
-    observer.observe(contentElement);
-    return () => observer.disconnect();
-  }, [open, revealed]);
-
-  const toggle = () => {
-    // 展开过就保留 Markdown 挂载,收起时才有平滑的高度过渡。
-    setRevealed(true);
-    setOpen((value) => !value);
-  };
-  const showActivity = active && showActivityIndicator;
-
-  const label = (
-    <>
-      <span>{tr("思考", "Thinking")}</span>
-      <svg className="time-spent-trigger-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-        <polyline points="9 18 15 12 9 6" />
-      </svg>
-    </>
-  );
-  return (
-    <div className={`time-spent-collapsible${open ? " expanded" : ""}`}>
-      <button className={`time-spent-trigger${showActivity ? " is-running" : ""}`} type="button" aria-expanded={open} onClick={toggle}>
-        {label}
-        {showActivity ? <ActivityIndicator /> : null}
-      </button>
-      <div className="time-spent-body" aria-hidden={!open}>
-        <div className="time-spent-body-inner">
-          <div className="thinking-scroll-shell">
-            <div
-              className="thinking-scroll-viewport"
-              ref={scrollRef}
-              onScroll={syncFadeEdges}
-              role="region"
-              aria-label={tr("思考内容，可在区域内滚动", "Thinking content, scrollable")}
-              tabIndex={0}
-            >
-              <div className="stream-prose-block thinking-text" ref={contentRef}>
-                {revealed ? <Markdown text={text} /> : null}
-              </div>
-            </div>
-            <div
-              className={`thinking-scroll-fade thinking-scroll-fade-top${fadeEdges.top ? " is-visible" : ""}`}
-              aria-hidden="true"
-            />
-            <div
-              className={`thinking-scroll-fade thinking-scroll-fade-bottom${fadeEdges.bottom ? " is-visible" : ""}`}
-              aria-hidden="true"
-            />
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }
 

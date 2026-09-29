@@ -1,4 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { AgentInfo } from "@vela/shared";
+import { AgentPane } from "./components/AgentPane";
+import { AgentWorkspaceProvider } from "./components/AgentPanel";
 import { ChatView } from "./components/ChatView";
 import { ContextPanel } from "./components/ContextPanel";
 import { FileIconThemeProvider } from "./components/FileTypeIcon";
@@ -10,7 +13,8 @@ import { FilePreviewProvider } from "./components/preview/FilePreviewContext";
 import { useModels } from "./hooks/useModels";
 import { usePreferences } from "./hooks/usePreferences";
 import { useProject } from "./hooks/useProject";
-import { useSession } from "./hooks/useSession";
+import { useSession, type UiMessage } from "./hooks/useSession";
+import { useSidebarResize } from "./hooks/useSidebarResize";
 import { AppLocaleProvider, setActiveLocale, tr } from "./locale";
 
 const onboardingCompleteKey = "vela.onboarding.complete";
@@ -33,11 +37,45 @@ function readOnboardingStep(): number {
   }
 }
 
+/**
+ * 从已渲染的工具记录里还原一个已结束子代理的快照。
+ * agent 树只在内存里，应用重启后点击历史卡片时用它让 Agent Pane 仍能打开。
+ */
+function findAgentInMessages(messages: UiMessage[], agentId: string): AgentInfo | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const tools = messages[index]?.tools ?? [];
+    for (const tool of tools) {
+      const activity = tool.activity;
+      if (activity?.agentId !== agentId) continue;
+      const path = activity.agentPath ?? tool.name;
+      const name = path.split("/").filter(Boolean).pop() ?? path;
+      return {
+        id: agentId,
+        parentId: null,
+        path,
+        name,
+        kind: activity.agent ?? "general",
+        status: tool.status === "running" ? "running" : tool.status === "error" ? "failed" : "completed",
+        depth: 1,
+        task: "",
+        steps: activity.steps ?? [],
+        mutated: activity.mutated === true,
+        finalText: tool.activity.body ?? null,
+        error: null,
+        createdAt: 0,
+        updatedAt: 0,
+      };
+    }
+  }
+  return null;
+}
+
 export function App() {
   const session = useSession();
   const models = useModels(session.setAppState);
   const project = useProject();
   const preferences = usePreferences();
+  const resize = useSidebarResize();
   setActiveLocale(preferences.locale);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   // Keep the conversation as the default focus; open the inspector when a tool
@@ -45,9 +83,19 @@ export function App() {
   const [rightCollapsed, setRightCollapsed] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [changesOpen, setChangesOpen] = useState(false);
+  /** 右侧 Agent Pane 当前展示的子代理；null 时保持单栏。 */
+  const [openAgentId, setOpenAgentId] = useState<string | null>(null);
   const [onboardingComplete, setOnboardingComplete] = useState(readOnboardingComplete);
   const [onboardingStep, setOnboardingStep] = useState(readOnboardingStep);
   const platform = window.vela?.platform ?? "darwin";
+  // 优先用实时 agent 树；应用重启后树已丢失，就从消息流里的工具记录还原，保证点击能打开 Pane。
+  const openAgent = useMemo(() => {
+    if (!openAgentId) return null;
+    return (
+      session.agents.find((agent) => agent.id === openAgentId) ??
+      findAgentInMessages(session.messages, openAgentId)
+    );
+  }, [openAgentId, session.agents, session.messages]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -142,6 +190,7 @@ export function App() {
         <div className={`vela-window platform-${platform}${leftCollapsed ? " left-collapsed" : ""}`}>
           <Sidebar
             collapsed={leftCollapsed}
+            resize={resize}
             platform={platform}
             conversations={session.conversations}
             activeConversationId={session.activeConversationId}
@@ -162,30 +211,52 @@ export function App() {
           <div className="main-stage">
             <Presence present={!settingsOpen} className="main-stage-pane">
               <FilePreviewProvider onExpand={() => setRightCollapsed(false)}>
-                <ChatView
-                  messages={session.messages}
-                  state={session.state}
-                  sendError={session.sendError}
-                  platform={platform}
-                  leftCollapsed={leftCollapsed}
-                  onToggleLeft={() => setLeftCollapsed((value) => !value)}
-                  rightCollapsed={rightCollapsed}
-                  onToggleRight={() => setRightCollapsed((value) => !value)}
-                  project={project}
-                  toolDisplay={preferences.toolDisplay}
-                  onSend={session.send}
-                  onAbort={session.abort}
-                  onMode={session.setMode}
-                  models={models}
-                  getQuestion={session.getQuestion}
-                  onReplyQuestion={(id, answer) => void session.replyQuestion(id, answer)}
-                  onOpenChanges={() => {
-                    setRightCollapsed(false);
-                    setChangesOpen(true);
-                  }}
-                />
+                <AgentWorkspaceProvider
+                  agents={session.agents}
+                  activeAgentId={openAgent ? openAgent.id : null}
+                  openAgent={setOpenAgentId}
+                  closeAgent={() => setOpenAgentId(null)}
+                >
+                  <ChatView
+                    messages={session.messages}
+                    state={session.state}
+                    sendError={session.sendError}
+                    platform={platform}
+                    leftCollapsed={leftCollapsed}
+                    onToggleLeft={() => setLeftCollapsed((value) => !value)}
+                    rightCollapsed={rightCollapsed}
+                    onToggleRight={() => setRightCollapsed((value) => !value)}
+                    project={project}
+                    toolDisplay={preferences.toolDisplay}
+                    toolFold={preferences.toolFold}
+                    hiddenModels={preferences.hiddenModels}
+                    onSend={session.send}
+                    onAbort={session.abort}
+                    onMode={session.setMode}
+                    models={models}
+                    getQuestion={session.getQuestion}
+                    onReplyQuestion={(id, answer) => void session.replyQuestion(id, answer)}
+                    onOpenChanges={() => {
+                      setRightCollapsed(false);
+                      setChangesOpen(true);
+                    }}
+                  />
+                  {openAgent ? (
+                    <AgentPane
+                      agent={openAgent}
+                      agents={session.agents}
+                      messages={session.getAgentMessages(openAgent.id)}
+                      toolDisplay={preferences.toolDisplay}
+                      resize={resize}
+                      onSwitch={setOpenAgentId}
+                      onClose={() => setOpenAgentId(null)}
+                      ensureMessages={session.ensureAgentMessages}
+                    />
+                  ) : null}
+                </AgentWorkspaceProvider>
                 <ContextPanel
                   collapsed={rightCollapsed}
+                  resize={resize}
                   state={session.state}
                   project={project}
                   onToggle={() => setRightCollapsed(true)}

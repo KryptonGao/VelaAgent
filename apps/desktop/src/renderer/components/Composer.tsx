@@ -32,6 +32,8 @@ export interface ComposerProps {
   modelReady: boolean;
   thinkingLevel: ThinkingLevel;
   thinkingLevels: ThinkingLevel[];
+  /** 在输入框模型列表中隐藏的模型，key 为 `provider/id`。 */
+  hiddenModels: string[];
   models: ReturnType<typeof useModels>;
   mode: InteractionMode;
   sendError: string | null;
@@ -52,6 +54,7 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
   modelReady,
   thinkingLevel,
   thinkingLevels,
+  hiddenModels,
   models,
   mode,
   sendError,
@@ -105,7 +108,7 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
 
   useEffect(() => {
     if (!skill || !skills) return;
-    if (!skills.some((item) => item.location === skill.location)) setSkill(null);
+    if (!skills.some((item) => item.location === skill.location && item.enabled)) setSkill(null);
   }, [skill, skills]);
 
   useEffect(() => {
@@ -146,11 +149,14 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
 
   function addAttachments(payloads: FileAttachmentPayload[]): void {
     setAttachments((current) => {
-      const known = new Set(current.map((entry) => entry.path));
+      // 粘贴图片没有路径，用图片数据本身去重，避免同一张图被剪贴板的多个表示重复加入。
+      const keyOf = (entry: FileAttachmentPayload) => entry.path || entry.image?.data || entry.name;
+      const known = new Set(current.map(keyOf));
       const merged = [...current];
       for (const payload of payloads) {
-        if (payload.path && known.has(payload.path)) continue;
-        known.add(payload.path);
+        const key = keyOf(payload);
+        if (known.has(key)) continue;
+        known.add(key);
         merged.push(payload);
       }
       return merged.slice(0, 12);
@@ -174,26 +180,27 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
   }
 
   async function handlePaste(event: React.ClipboardEvent): Promise<void> {
-    const images = Array.from(event.clipboardData.items).filter((item) =>
-      item.type.startsWith("image/"),
-    );
-    if (images.length === 0) return;
+    // Chromium 从系统剪贴板取图片时常常把 item.type 留空（图片字节已经转成 PNG），
+    // 所以不能只按 image/* 过滤，否则这类图片会被静默丢掉。
+    const files = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === "file" && (item.type === "" || item.type.startsWith("image/")))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => file !== null && file.size > 0)
+      .slice(0, maxPastedImages);
+    if (files.length === 0) return;
     event.preventDefault();
     const payloads: FileAttachmentPayload[] = [];
-    for (const item of images.slice(0, 6)) {
-      const file = item.getAsFile();
-      if (!file) continue;
-      const data = await readAsBase64(file);
-      if (data) {
-        payloads.push({
-          path: "",
-          name: file.name || tr("粘贴的图片", "Pasted image"),
-          kind: "image",
-          image: { type: "image", data, mimeType: item.type },
-        });
+    const seen = new Set<string>();
+    for (const file of files) {
+      const prepared = await preparePastedImage(file);
+      if (!prepared) continue;
+      if (prepared.fingerprint) {
+        if (seen.has(prepared.fingerprint)) continue;
+        seen.add(prepared.fingerprint);
       }
+      payloads.push(prepared.payload);
     }
-    addAttachments(payloads);
+    if (payloads.length > 0) addAttachments(payloads);
   }
 
   function selectSkill(nextSkill: SkillSummary): void {
@@ -398,6 +405,7 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
               catalog={models.catalog}
               catalogError={models.catalogError}
               actionError={models.actionError}
+              hiddenModels={hiddenModels}
               login={models.login}
               onSelect={models.select}
               onThinking={models.setThinking}
@@ -445,15 +453,162 @@ function placeholderFor(mode: InteractionMode): string {
   return tr("随心输入", "Ask anything or describe a task");
 }
 
-function readAsBase64(file: File): Promise<string | null> {
+const maxPastedImages = 6;
+/** 转码时限制长边，避免超大图在 base64 传输与模型侧被拒。 */
+const maxTranscodeEdge = 4096;
+const maxTranscodedBytes = 9 * 1024 * 1024;
+
+type DecodedImage = ImageBitmap | HTMLImageElement;
+
+interface PreparedPastedImage {
+  payload: FileAttachmentPayload;
+  /** 原始字节摘要，用于批内去重。 */
+  fingerprint: string;
+}
+
+interface TranscodedImage {
+  bytes: Uint8Array;
+  data: string;
+  mimeType: string;
+}
+
+/** 主进程最终只接受这四种格式，这里按字节判断，不信任剪贴板给的 MIME。 */
+function detectImageMimeType(bytes: Uint8Array): string | null {
+  const startsWith = (prefix: readonly number[]) =>
+    prefix.every((value, index) => bytes[index] === value);
+  if (startsWith([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return "image/png";
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  const signature = String.fromCharCode(...bytes.subarray(0, 6));
+  if (signature === "GIF87a" || signature === "GIF89a") return "image/gif";
+  if (signature.startsWith("RIFF") && String.fromCharCode(...bytes.subarray(8, 12)) === "WEBP") {
+    return "image/webp";
+  }
+  return null;
+}
+
+function toBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
+}
+
+async function digestBytes(bytes: Uint8Array): Promise<string> {
+  try {
+    // 这里的字节都来自完整的 ArrayBuffer，不会是 SharedArrayBuffer。
+    const digest = await crypto.subtle.digest("SHA-256", bytes.buffer as ArrayBuffer);
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  } catch {
+    return "";
+  }
+}
+
+async function decodeImage(blob: Blob): Promise<DecodedImage | null> {
+  try {
+    return await createImageBitmap(blob);
+  } catch {
+    // 个别格式（如带固有尺寸的 SVG）走 <img> 更稳，交给下面的回退路径。
+  }
   return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = typeof reader.result === "string" ? reader.result : "";
-      const comma = result.indexOf(",");
-      resolve(comma >= 0 ? result.slice(comma + 1) : null);
+    const url = URL.createObjectURL(blob);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
     };
-    reader.onerror = () => resolve(null);
-    reader.readAsDataURL(file);
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(null);
+    };
+    image.src = url;
   });
+}
+
+function closeDecodedImage(source: DecodedImage | null): void {
+  if (source && typeof ImageBitmap !== "undefined" && source instanceof ImageBitmap) {
+    source.close();
+  }
+}
+
+function imageSize(source: DecodedImage): { width: number; height: number } {
+  if (source instanceof HTMLImageElement) {
+    return { width: source.naturalWidth, height: source.naturalHeight };
+  }
+  return { width: source.width, height: source.height };
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    try {
+      canvas.toBlob((blob) => resolve(blob), type, quality);
+    } catch {
+      // 画布被跨域资源污染时 toBlob 会直接抛错。
+      resolve(null);
+    }
+  });
+}
+
+/** 把 Chromium 能解码、但模型不接受的格式统一转成 PNG（过大再退 JPEG）。 */
+async function transcodeImage(source: DecodedImage): Promise<TranscodedImage | null> {
+  const { width, height } = imageSize(source);
+  if (!width || !height) return null;
+  const scale = Math.min(1, maxTranscodeEdge / Math.max(width, height));
+  const targetWidth = Math.max(1, Math.round(width * scale));
+  const targetHeight = Math.max(1, Math.round(height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+  context.drawImage(source, 0, 0, targetWidth, targetHeight);
+  let blob = await canvasToBlob(canvas, "image/png");
+  if (blob && blob.size > maxTranscodedBytes) {
+    // PNG 太大时压成 JPEG；先铺白底，避免透明区域变黑。
+    context.globalCompositeOperation = "destination-over";
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, targetWidth, targetHeight);
+    const jpeg = await canvasToBlob(canvas, "image/jpeg", 0.9);
+    if (jpeg && jpeg.size < blob.size) blob = jpeg;
+  }
+  if (!blob || blob.size === 0 || blob.size > maxTranscodedBytes) return null;
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const mimeType = detectImageMimeType(bytes);
+  if (!mimeType) return null;
+  return { bytes, data: toBase64(bytes), mimeType };
+}
+
+/** 读取剪贴板里的一个文件，返回可直接发送的图片附件；无法解码时返回 null。 */
+async function preparePastedImage(file: File): Promise<PreparedPastedImage | null> {
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(await file.arrayBuffer());
+  } catch {
+    return null;
+  }
+  if (bytes.byteLength === 0) return null;
+  const name = file.name || tr("粘贴的图片", "Pasted image");
+  const detected = detectImageMimeType(bytes);
+  if (detected) {
+    return {
+      payload: { path: "", name, kind: "image", image: { type: "image", data: toBase64(bytes), mimeType: detected } },
+      fingerprint: await digestBytes(bytes),
+    };
+  }
+  // 剪贴板给出的可能是 TIFF/BMP/SVG 等模型不支持的格式，统一转成 PNG/JPEG。
+  const decoded = await decodeImage(file);
+  if (!decoded) return null;
+  const transcoded = await transcodeImage(decoded);
+  closeDecodedImage(decoded);
+  if (!transcoded) return null;
+  return {
+    payload: {
+      path: "",
+      name,
+      kind: "image",
+      image: { type: "image", data: transcoded.data, mimeType: transcoded.mimeType },
+    },
+    fingerprint: await digestBytes(transcoded.bytes),
+  };
 }

@@ -49,10 +49,11 @@ export function skillOriginLabel(origin: SkillOrigin): string {
   return tr("个人", "Personal");
 }
 
-/** 名称前缀优先，其次是名称包含，最后才是描述包含。 */
+/** 名称前缀优先，其次是名称包含，最后才是描述包含。停用的 Skill 不参与补全。 */
 export function filterSkills(skills: SkillSummary[], query: string): SkillSummary[] {
   const q = query.trim().toLowerCase();
   const ranked = skills.flatMap((skill) => {
+    if (!skill.enabled) return [];
     const rank = matchRank(skill, q);
     return rank === null ? [] : [{ skill, rank }];
   });

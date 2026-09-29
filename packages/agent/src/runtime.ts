@@ -10,6 +10,8 @@ import {
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
   thinkingLevels,
+  type AgentInfo,
+  type AgentRuntimeStreamEvent,
   type AgentSettings,
   type AskUserQuestionEvent,
   type AuthMethodType,
@@ -24,6 +26,8 @@ import {
   type ModelAuthEvent,
   type ModelCatalog,
   type PlanStep,
+  type SandboxRiskInput,
+  type SandboxRiskVerdict,
   type SessionSnapshot,
   type SessionStatus,
   type ContextUsage,
@@ -75,15 +79,32 @@ import {
   type ToolOutcome,
 } from "./interaction";
 import { QuestionManager } from "./question-manager";
+import {
+  buildSandboxRiskMessage,
+  parseSandboxRiskVerdict,
+  sandboxRiskMaxTokens,
+  sandboxRiskSystemPrompt,
+  sandboxRiskTimeoutMs,
+} from "./sandbox-risk";
 import { loadSkillCatalog } from "./skill-catalog";
+import {
+  deleteSkill as deleteSkillFiles,
+  readDisabledSkills,
+  setSkillEnabled as storeSkillEnabled,
+} from "./skill-management";
 import { migrateExternalSkills, scanExternalSkills as scanExternalSkillSources } from "./skill-migration";
 import { activityFromCall, activityFromExecution, activityFromOutput } from "./tool-activity";
 import {
-  createSubagentTool,
-  runBuiltinSubagent,
-  subagentToolName,
-  type SubagentRequest,
-  type SubagentResult,
+  AgentControl,
+  type AgentRootMessage,
+  type AgentSessionRequest,
+} from "./agent-control";
+import {
+  agentKindPrompt,
+  agentToolNames,
+  agentToolNamesFor,
+  createExploreGuardExtension,
+  spawnAgentToolName,
 } from "./subagent";
 
 export type RuntimeEvent =
@@ -94,6 +115,8 @@ export type RuntimeEvent =
   | { type: "tool_start"; conversationId: string; toolCallId: string; toolName: string; activity: ToolActivity }
   | { type: "tool_output"; conversationId: string; toolCallId: string; activity: ToolActivity }
   | { type: "tool_end"; conversationId: string; toolCallId: string; toolName: string; isError: boolean; activity: ToolActivity }
+  | { type: "agents"; conversationId: string; agents: AgentInfo[] }
+  | { type: "agent_event"; conversationId: string; agentId: string; event: AgentRuntimeStreamEvent }
   | { type: "user_message"; conversationId: string; text: string }
   | { type: "error"; conversationId: string; message: string };
 
@@ -121,6 +144,8 @@ interface Conversation {
   updatedAt: number;
   /** 创建时写入,启动会话时附加到系统提示。 */
   instructions: string;
+  /** 会话资源对应的 Skill 配置修订号;停用或删除 Skill 后递增,下次发言前重新加载。 */
+  skillsRevision: number;
   /** Goal 自动续跑被用户停止后置位,避免当前轮结束后继续。 */
   stopRequested: boolean;
   /** drive() 进行中。两轮之间 Pi 会话会短暂空闲,不能靠 isStreaming 判断。 */
@@ -139,6 +164,10 @@ interface Conversation {
   };
   /** 非空表示已归档:侧边栏隐藏、工作区恢复跳过,可在设置里搜索后取消归档。 */
   archivedAt: number | null;
+  /** 这个对话的 agent 树控制面；会话启动时创建，会话销毁时释放。 */
+  control: AgentControl | null;
+  /** 已经触发过 Goal 工作区修订的子代理 id，避免同一次改动重复计数。 */
+  agentMutationsSeen: Set<string>;
 }
 
 /**
@@ -158,12 +187,16 @@ export class AgentRuntime {
   private readonly toolArgs = new Map<string, unknown>();
   /** toolCallId -> Goal id 与执行时工作区修订号。 */
   private readonly toolGoalContexts = new Map<string, { goalId: string; workRevision: number }>();
+  /** toolCallId -> 子代理工具参数；子代理事件不带参数，结果事件用它还原命令和路径。 */
+  private readonly agentToolArgs = new Map<string, unknown>();
   private readonly questions = new QuestionManager();
-  /** 同一对话的 task 排队执行，避免一轮里多个子会话同时改工作区。 */
-  private readonly subagentTail = new Map<string, Promise<void>>();
   private readonly initializePromise: Promise<void>;
   private readonly store: ConversationStore;
   private currentCwd: string;
+  /** 被停用的 Skill 名称；启动会话时据此过滤，null 表示还没读取。 */
+  private disabledSkills: Set<string> | null = null;
+  /** 每次停用、启用或删除 Skill 时递增，用于让已打开的会话在下次发言前刷新 Skill。 */
+  private skillsRevision = 0;
   private gate: Promise<void> = Promise.resolve();
 
   constructor(private readonly options: AgentRuntimeOptions) {
@@ -237,6 +270,8 @@ export class AgentRuntime {
   async createConversation(cwd: string): Promise<SessionSnapshot> {
     return this.exclusive(async () => {
       await this.ready();
+      // 新对话可能沿用「上次使用」,所以先把当前对话正在用的选择记下来。
+      await this.rememberActiveSelection();
       const sessionManager = SessionManager.create(cwd, this.sessionDir());
       const entry = this.addEntry(cwd, sessionManager);
       return this.startInternal(entry);
@@ -365,7 +400,9 @@ export class AgentRuntime {
     entry.planExecutionQueued = false;
     this.questions.cancelConversation(entry.id);
     if (entry.snapshot.mode === "goal") this.pauseGoal(entry, null);
+    entry.control?.abortAll();
     if (entry.session) await entry.session.abort();
+    entry.control?.setRootStatus("aborted");
     this.patchEntry(entry, { status: "ready", updatedAt: Date.now() });
   }
 
@@ -388,6 +425,7 @@ export class AgentRuntime {
         return this.getSnapshot();
       }
       this.currentCwd = cwd;
+      await this.rememberActiveSelection();
       const entry = this.addEntry(cwd);
       return this.startInternal(entry);
     });
@@ -398,11 +436,54 @@ export class AgentRuntime {
     return directory.catalog();
   }
 
+  /**
+   * 用当前对话选择的模型判断一次沙箱操作的风险。
+   * 模型不可用、超时或输出无法识别时返回 unknown,由权限管理器按风险处理。
+   */
+  async evaluateSandboxRisk(input: SandboxRiskInput): Promise<SandboxRiskVerdict> {
+    let directory: ModelDirectory;
+    try {
+      directory = await this.readyDirectory();
+    } catch {
+      return "unknown";
+    }
+    const entry = this.activeConversation();
+    const model = entry?.session?.model;
+    if (!model || !directory.isAvailable(model)) return "unknown";
+    const task = entry?.snapshot.goal?.objective ?? entry?.snapshot.title ?? null;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), sandboxRiskTimeoutMs);
+    try {
+      const response = await directory.runtime.completeSimple(
+        model,
+        {
+          systemPrompt: sandboxRiskSystemPrompt,
+          messages: [
+            { role: "user", content: buildSandboxRiskMessage(input, task), timestamp: Date.now() },
+          ],
+        },
+        { maxTokens: sandboxRiskMaxTokens, temperature: 0, signal: controller.signal },
+      );
+      return parseSandboxRiskVerdict(
+        response.content
+          .filter((item) => item.type === "text")
+          .map((item) => item.text)
+          .join(""),
+      );
+    } catch {
+      return "unknown";
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   selectModel(provider: string, id: string): Promise<SessionSnapshot> {
     return this.exclusive(async () => {
       const directory = await this.readyDirectory();
       const model = directory.requireAvailable(provider, id);
-      await this.applyModel(model, clampToModel(model, this.liveThinking(directory)));
+      const level = clampToModel(model, this.liveThinking(directory));
+      await this.applyModel(model, level);
+      await directory.rememberLastUsed(model.provider, model.id, level);
       return this.getSnapshot();
     });
   }
@@ -416,6 +497,7 @@ export class AgentRuntime {
       const next = model ? clampToModel(model, level) : level;
       active?.session?.setThinkingLevel(next);
       if (active) this.syncFromSession(active);
+      if (model) await directory.rememberLastUsed(model.provider, model.id, next);
       return this.getSnapshot();
     });
   }
@@ -433,6 +515,26 @@ export class AgentRuntime {
   /** 按当前工作区扫描用户 Skill、项目 Skill 和 ~/.agents/skills。 */
   listSkills(cwd: string): Promise<SkillCatalog> {
     return loadSkillCatalog({ cwd, agentDir: this.options.agentDir });
+  }
+
+  /** 启用或停用一个 Skill；已打开的对话会在下次发言前重新加载资源。 */
+  setSkillEnabled(cwd: string, name: string, enabled: boolean): Promise<SkillCatalog> {
+    return this.exclusive(async () => {
+      await storeSkillEnabled(this.options.agentDir, name, enabled);
+      this.disabledSkills = await readDisabledSkills(this.options.agentDir);
+      this.skillsRevision += 1;
+      return this.listSkills(cwd);
+    });
+  }
+
+  /** 删除 Vela 用户 Skill 目录里的 Skill；已打开的对话会在下次发言前重新加载资源。 */
+  deleteSkill(cwd: string, name: string, location: string): Promise<SkillCatalog> {
+    return this.exclusive(async () => {
+      await deleteSkillFiles({ agentDir: this.options.agentDir, name, location });
+      this.disabledSkills = await readDisabledSkills(this.options.agentDir);
+      this.skillsRevision += 1;
+      return this.listSkills(cwd);
+    });
   }
 
   /** 列出 Codex 与 Claude Code 中可复制到 Vela 的 Skill。 */
@@ -453,6 +555,33 @@ export class AgentRuntime {
       codexHome: process.env.CODEX_HOME,
       claudeHome: process.env.CLAUDE_CONFIG_DIR,
     };
+  }
+
+  private async loadDisabledSkills(): Promise<Set<string>> {
+    this.disabledSkills ??= await readDisabledSkills(this.options.agentDir);
+    return this.disabledSkills;
+  }
+
+  /** 从资源里去掉被停用的 Skill，让模型和 /skill:名称 都看不到。 */
+  private withoutDisabledSkills<T extends { skills: Array<{ name: string }> }>(base: T): T {
+    const disabled = this.disabledSkills;
+    if (!disabled || disabled.size === 0) return base;
+    return { ...base, skills: base.skills.filter((skill) => !disabled.has(skill.name)) };
+  }
+
+  /** 停用、启用或删除 Skill 后，让会话在下次发言前重新加载 Skill 列表。 */
+  private async refreshEntrySkills(entry: Conversation): Promise<void> {
+    const session = entry.session;
+    if (!session || entry.skillsRevision === this.skillsRevision) return;
+    const revision = this.skillsRevision;
+    try {
+      await session.reload();
+    } catch (error) {
+      if (process.env.VELA_DEBUG) console.error("[vela] 重新加载 Skill 失败:", error);
+      return;
+    }
+    // 重新加载期间 Skill 又变了就留到下一次发言再刷。
+    if (revision === this.skillsRevision) entry.skillsRevision = revision;
   }
 
   saveAgentSettings(input: AgentSettings): Promise<AgentSettings> {
@@ -561,6 +690,18 @@ export class AgentRuntime {
     return transcriptFromMessages(session.agent.state.messages);
   }
 
+  /**
+   * 某个常驻 agent 自己的消息历史；右侧 Agent Pane 首次打开时用它回填。
+   * agentId 等于对话 id 时返回主代理消息。
+   */
+  getAgentMessages(conversationId: string, agentId: string): TranscriptMessage[] {
+    const entry = this.conversations.get(conversationId);
+    if (!entry) return [];
+    const session = agentId === entry.id ? entry.session : entry.control?.getSession(agentId) ?? null;
+    if (!session) return [];
+    return transcriptFromMessages(session.messages);
+  }
+
   dispose(): void {
     this.directory?.cancelLogin();
     this.questions.cancelAll();
@@ -568,7 +709,7 @@ export class AgentRuntime {
     this.conversations.clear();
     this.toolArgs.clear();
     this.toolGoalContexts.clear();
-    this.subagentTail.clear();
+    this.agentToolArgs.clear();
     this.activeId = null;
     this.store.flushSync();
   }
@@ -597,6 +738,7 @@ export class AgentRuntime {
         createdAt: stored.createdAt,
         updatedAt: stored.updatedAt,
         instructions: stored.instructions,
+        skillsRevision: 0,
         stopRequested: false,
         driving: false,
         planExecutionQueued: false,
@@ -604,6 +746,8 @@ export class AgentRuntime {
         goalValidationSequence: Math.max(0, ...(stored.goal?.validation?.checks.map((check) => check.sequence) ?? [0])),
         generation: { stepStartedAt: null, firstTokenAt: null, outputTokens: 0, elapsedMs: 0 },
         archivedAt: stored.archivedAt,
+        control: null,
+        agentMutationsSeen: new Set(),
       });
     }
     const directory = await ModelDirectory.open(this.options.agentDir);
@@ -682,6 +826,7 @@ export class AgentRuntime {
       createdAt: Date.now(),
       updatedAt: Date.now(),
       instructions: this.directory?.getSettings().instructions ?? "",
+      skillsRevision: this.skillsRevision,
       stopRequested: false,
       driving: false,
       planExecutionQueued: false,
@@ -689,6 +834,8 @@ export class AgentRuntime {
       goalValidationSequence: 0,
       generation: { stepStartedAt: null, firstTokenAt: null, outputTokens: 0, elapsedMs: 0 },
       archivedAt: null,
+      control: null,
+      agentMutationsSeen: new Set(),
     };
     this.conversations.set(entry.id, entry);
     this.activeId = entry.id;
@@ -702,7 +849,7 @@ export class AgentRuntime {
     this.patchEntry(entry, { status: "starting", error: null });
     try {
       const directory = await this.readyDirectory();
-      const chosen = directory.availableSelection();
+      const { model: chosen, thinkingLevel } = this.conversationSelection(directory);
       const cwd = entry.snapshot.cwd;
       // 新对话:登记时已建或此处新建;恢复的对话:按文件打开以接续历史。
       const sessionManager = entry.sessionManager
@@ -711,10 +858,12 @@ export class AgentRuntime {
           : SessionManager.create(cwd, this.sessionDir()));
       const settingsManager = SettingsManager.inMemory();
       const instructions = entry.instructions.trim();
+      await this.loadDisabledSkills();
       const resourceLoader = new DefaultResourceLoader({
         cwd,
         agentDir: this.options.agentDir,
         settingsManager,
+        skillsOverride: (base) => this.withoutDisabledSkills(base),
         extensionFactories: [{
           name: "vela-mode",
           hidden: true,
@@ -726,34 +875,53 @@ export class AgentRuntime {
         appendSystemPromptOverride: instructions ? (base) => [...base, instructions] : undefined,
       });
       await resourceLoader.reload();
-      const { session } = await createAgentSession({
-        cwd,
-        agentDir: this.options.agentDir,
-        sessionManager,
-        settingsManager,
-        resourceLoader,
-        modelRuntime: directory.runtime,
-        model: chosen,
-        thinkingLevel: directory.selection.thinkingLevel,
-        // tools 是 Pi 的注册表白名单(内置与自定义都过滤),模式工具必须并入才能被激活。
-        tools: [...defaultToolNames, ...modeToolNames, subagentToolName],
-        customTools: [
-          ...(this.options.toolFactory?.(cwd) ?? []),
-          ...createModeTools({
-            submitPlan: (draft) => this.submitPlan(entry, draft),
-            completeStep: (id) => this.completeStep(entry, id),
-            updateGoal: (status, note) => this.updateGoal(entry, status, note),
-            recordGoalValidation: (draft) => this.recordGoalValidation(entry, draft),
-            askUser: (input) => this.askUser(entry, input),
-          }),
-          createSubagentTool({
-            run: (request) => this.enqueueSubagent(entry.id, () => this.runSubagent(entry, request)),
-          }),
-        ],
+      const control = new AgentControl({
+        conversationId: entry.id,
+        host: {
+          createChildSession: (input) => this.createChildSession(entry, input),
+          deliverToRoot: (input) => {
+            void this.deliverAgentMessage(entry, input.message);
+          },
+          onAgentEvent: (input) => this.handleAgentPiEvent(input.conversationId, input.agentId, input.event),
+        },
+        onChange: (agents) => this.handleAgentsChange(entry, agents),
       });
+      let session: AgentSession;
+      try {
+        const created = await createAgentSession({
+          cwd,
+          agentDir: this.options.agentDir,
+          sessionManager,
+          settingsManager,
+          resourceLoader,
+          modelRuntime: directory.runtime,
+          model: chosen,
+          thinkingLevel,
+          // tools 是 Pi 的注册表白名单(内置与自定义都过滤),模式和 agent 树工具必须并入才能被激活。
+          tools: [...defaultToolNames, ...modeToolNames, ...agentToolNames],
+          customTools: [
+            ...(this.options.toolFactory?.(cwd) ?? []),
+            ...createModeTools({
+              submitPlan: (draft) => this.submitPlan(entry, draft),
+              completeStep: (id) => this.completeStep(entry, id),
+              updateGoal: (status, note) => this.updateGoal(entry, status, note),
+              recordGoalValidation: (draft) => this.recordGoalValidation(entry, draft),
+              askUser: (input) => this.askUser(entry, input),
+            }),
+            ...control.createAgentTools(entry.id),
+          ],
+        });
+        session = created.session;
+      } catch (error) {
+        control.dispose();
+        throw error;
+      }
       // 没有显式选择时，Pi 会挑第一个带本机环境变量的模型。这里清掉，只保留用户在 Vela 里选的模型。
       if (!chosen) clearSessionModel(session);
       this.attachEntry(entry, session, sessionManager);
+      entry.control = control;
+      control.registerRoot(session);
+      entry.skillsRevision = this.skillsRevision;
       this.syncFromSession(entry);
       this.applyActiveTools(entry);
       this.patchEntry(entry, {
@@ -775,16 +943,43 @@ export class AgentRuntime {
     return this.getSnapshot();
   }
 
+  /**
+   * 新对话(以及懒启动的会话)使用哪个模型和思考强度:
+   * 「设置默认」取设置页的默认选择,「上次使用」取最近一次在对话中用过的选择,
+   * 上次使用的模型不可用时回退到设置默认。
+   */
+  private conversationSelection(directory: ModelDirectory): { model: Model<Api> | undefined; thinkingLevel: ThinkingLevel } {
+    if (directory.selection.newConversationSelection === "lastUsed") {
+      const lastUsed = directory.availableLastUsed();
+      if (lastUsed) {
+        return { model: lastUsed, thinkingLevel: clampToModel(lastUsed, directory.lastUsedThinkingLevel()) };
+      }
+    }
+    const model = directory.availableSelection();
+    return {
+      model,
+      thinkingLevel: model ? clampToModel(model, directory.selection.thinkingLevel) : directory.selection.thinkingLevel,
+    };
+  }
+
+  /** 把当前对话正在使用的模型与思考强度记为「上次使用」;没有会话时不动。 */
+  private async rememberActiveSelection(): Promise<void> {
+    const directory = this.directory;
+    const session = this.activeConversation()?.session;
+    if (!directory || !session?.model) return;
+    await directory.rememberLastUsed(session.model.provider, session.model.id, session.thinkingLevel);
+  }
+
   private async applySavedModel(): Promise<void> {
     const directory = this.directory;
     if (!directory) return;
-    const chosen = directory.availableSelection();
+    const { model: chosen, thinkingLevel } = this.conversationSelection(directory);
     if (!chosen) {
       const active = this.activeConversation();
       if (active) this.syncFromSession(active);
       return;
     }
-    await this.applyModel(chosen, directory.selection.thinkingLevel);
+    await this.applyModel(chosen, thinkingLevel);
   }
 
   private async applyModel(model: Model<Api>, thinkingLevel: ThinkingLevel): Promise<void> {
@@ -815,6 +1010,8 @@ export class AgentRuntime {
   private detachEntry(entry: Conversation): void {
     entry.unsubscribe?.();
     entry.unsubscribe = null;
+    entry.control?.dispose();
+    entry.control = null;
     entry.session?.dispose();
     entry.session = null;
   }
@@ -910,6 +1107,63 @@ export class AgentRuntime {
         toolName: event.toolName,
         isError: event.isError,
         activity,
+      });
+    }
+  }
+
+  /**
+   * 子代理会话事件的翻译：只管自己的运行流，不碰主对话的标题、Goal 和生成统计。
+   * 事件带 agentId 发给渲染层，右侧 Agent Pane 据此按 agent 分桶实时渲染。
+   */
+  private handleAgentPiEvent(conversationId: string, agentId: string, event: AgentSessionEvent): void {
+    const emit = (streamEvent: AgentRuntimeStreamEvent): void => {
+      this.emit({ type: "agent_event", conversationId, agentId, event: streamEvent });
+    };
+    if (event.type === "message_start" && event.message.role === "assistant") {
+      emit({ type: "assistant_start" });
+      return;
+    }
+    if (event.type === "message_update") {
+      const update = event.assistantMessageEvent;
+      if (update.type === "text_delta") emit({ type: "text_delta", delta: update.delta });
+      else if (update.type === "thinking_delta") emit({ type: "thinking_delta", delta: update.delta });
+      return;
+    }
+    if (event.type === "message_end") {
+      const message = event.message;
+      if (message.role === "user") {
+        const text = userMessageText(message);
+        if (text.trim()) emit({ type: "user_message", text });
+        return;
+      }
+      const failure = message.role === "assistant" ? message.errorMessage?.trim() : undefined;
+      if (failure) emit({ type: "error", message: failure });
+      return;
+    }
+    if (event.type === "tool_execution_start") {
+      this.agentToolArgs.set(event.toolCallId, event.args);
+      emit({
+        type: "tool_start",
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        activity: activityFromCall(event.toolName, event.args),
+      });
+      return;
+    }
+    if (event.type === "tool_execution_update") {
+      const activity = activityFromOutput(event.partialResult, event.toolName);
+      if (activity) emit({ type: "tool_output", toolCallId: event.toolCallId, activity });
+      return;
+    }
+    if (event.type === "tool_execution_end") {
+      const args = this.agentToolArgs.get(event.toolCallId);
+      this.agentToolArgs.delete(event.toolCallId);
+      emit({
+        type: "tool_end",
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        isError: event.isError,
+        activity: activityFromExecution(event.toolName, args, event.result, event.isError),
       });
     }
   }
@@ -1063,6 +1317,7 @@ export class AgentRuntime {
   ): Promise<void> {
     entry.stopRequested = false;
     entry.driving = true;
+    entry.control?.setRootStatus("running");
     let current: { text: string; images?: ImageAttachment[]; hidden?: boolean } | null = {
       text,
       images,
@@ -1072,6 +1327,8 @@ export class AgentRuntime {
     let rename = options.rename;
     let continuations = 0;
     try {
+      // Skill 有变更时，先刷新系统提示和技能命令再发言。
+      await this.refreshEntrySkills(entry);
       while (current) {
         if (entry.stopRequested) {
           this.pauseGoal(entry, null);
@@ -1119,6 +1376,7 @@ export class AgentRuntime {
       }
     } finally {
       entry.driving = false;
+      entry.control?.setRootStatus(entry.stopRequested ? "aborted" : "idle");
       if (entry.snapshot.status === "streaming") {
         this.patchEntry(entry, { status: "ready", updatedAt: Date.now() });
       }
@@ -1182,40 +1440,131 @@ export class AgentRuntime {
     }
   }
 
-  private enqueueSubagent<T>(conversationId: string, run: () => Promise<T>): Promise<T> {
-    const previous = this.subagentTail.get(conversationId) ?? Promise.resolve();
-    let release: () => void = () => undefined;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const tail = previous.then(() => gate);
-    this.subagentTail.set(conversationId, tail);
-    return previous.then(run).finally(() => {
-      release();
-      if (this.subagentTail.get(conversationId) === tail) this.subagentTail.delete(conversationId);
-    });
-  }
-
-  private async runSubagent(entry: Conversation, request: SubagentRequest): Promise<SubagentResult> {
-    const session = entry.session;
-    const directory = this.directory;
-    const model = session?.model;
-    if (!session || !directory || !model || !directory.isAvailable(model)) {
+  /**
+   * 为 agent 树创建子会话：独立 Pi 会话、独立上下文，继承父会话的模型、思考强度、
+   * 沙箱工具和指令；explore 追加只读守卫并只保留只读工具。
+   */
+  private async createChildSession(entry: Conversation, input: AgentSessionRequest): Promise<AgentSession> {
+    const directory = await this.readyDirectory();
+    const parentSession = input.parentSession;
+    const model = parentSession.model;
+    if (!model || !directory.isAvailable(model)) {
       throw new Error("先选择一个已登录或已配置密钥的模型");
     }
-    return runBuiltinSubagent({
-      agent: request.agent,
-      task: request.task,
-      cwd: entry.snapshot.cwd,
+    const cwd = entry.snapshot.cwd;
+    const settingsManager = SettingsManager.inMemory();
+    const instructions = entry.instructions.trim();
+    const resourceLoader = new DefaultResourceLoader({
+      cwd,
+      agentDir: this.options.agentDir,
+      settingsManager,
+      noSkills: true,
+      noPromptTemplates: true,
+      noThemes: true,
+      noExtensions: true,
+      extensionFactories: input.kind === "explore"
+        ? [{ name: "vela-explore", hidden: true, factory: createExploreGuardExtension() }]
+        : [],
+      appendSystemPromptOverride: (base) => [
+        ...base,
+        ...(instructions ? [instructions] : []),
+        agentKindPrompt(input.kind),
+      ],
+    });
+    await resourceLoader.reload();
+    // fork 的消息先写进独立的内存会话，子代理看到的是父上下文副本，之后互不影响。
+    const sessionManager = SessionManager.inMemory(cwd);
+    for (const message of input.forkMessages) {
+      sessionManager.appendMessage(message as Parameters<SessionManager["appendMessage"]>[0]);
+    }
+    const sandboxTools = this.options.toolFactory?.(cwd) ?? [];
+    const childSandboxTools = input.kind === "explore"
+      ? sandboxTools.filter((tool) => tool.name === "bash" || tool.name === "read")
+      : sandboxTools;
+    const { session } = await createAgentSession({
+      cwd,
       agentDir: this.options.agentDir,
       model,
-      thinkingLevel: session.thinkingLevel,
+      thinkingLevel: parentSession.thinkingLevel,
       modelRuntime: directory.runtime,
-      instructions: entry.instructions,
-      tools: this.options.toolFactory?.(entry.snapshot.cwd) ?? [],
-      signal: request.signal,
-      onProgress: request.onProgress,
+      sessionManager,
+      settingsManager,
+      resourceLoader,
+      tools: agentToolNamesFor(input.kind),
+      customTools: [...childSandboxTools, ...input.customTools],
     });
+    session.setSessionName(input.path);
+    return session;
+  }
+
+  private handleAgentsChange(entry: Conversation, agents: AgentInfo[]): void {
+    this.emit({ type: "agents", conversationId: entry.id, agents });
+    // 子代理改完工作区后，按一次修订推进 Goal 验证的有效性。
+    for (const agent of agents) {
+      if (agent.kind === "root" || !agent.mutated || agent.status === "running") continue;
+      if (entry.agentMutationsSeen.has(agent.id)) continue;
+      entry.agentMutationsSeen.add(agent.id);
+      if (entry.snapshot.goal) this.advanceGoalWorkRevision(entry);
+    }
+  }
+
+  /**
+   * 子代理结论/消息进入 root 会话：主代理空闲就自动唤醒继续处理，运行中作为
+   * follow-up 追加，用户已停止则只进上下文不唤醒。
+   */
+  private async deliverAgentMessage(entry: Conversation, message: AgentRootMessage): Promise<void> {
+    const session = entry.session;
+    if (!session) return;
+    const payload = {
+      customType: message.kind === "result" ? "vela_agent_result" : "vela_agent_message",
+      content: formatAgentRootMessage(message),
+      display: false,
+      details: {
+        agentId: message.agentId,
+        path: message.path,
+        kind: message.agentKind,
+        status: message.status ?? null,
+      },
+    };
+    if (entry.stopRequested) {
+      await this.sendAgentMessageSafely(session, payload, { triggerTurn: false });
+      return;
+    }
+    if (entry.driving || session.isStreaming) {
+      await this.sendAgentMessageSafely(
+        session,
+        payload,
+        session.isStreaming ? { deliverAs: "followUp", triggerTurn: true } : { triggerTurn: false },
+      );
+      return;
+    }
+    entry.driving = true;
+    this.patchEntry(entry, { status: "streaming", error: null, updatedAt: Date.now() });
+    entry.control?.setRootStatus("running");
+    try {
+      await session.sendCustomMessage(payload, { triggerTurn: true });
+    } catch (error) {
+      this.failPrompt(entry, error instanceof Error ? error.message : "子代理结论投递失败");
+    } finally {
+      entry.driving = false;
+      entry.control?.setRootStatus(entry.stopRequested ? "aborted" : "idle");
+      if (entry.snapshot.status === "streaming") {
+        this.patchEntry(entry, { status: "ready", updatedAt: Date.now() });
+      }
+    }
+  }
+
+  /** 投递失败只记日志，不让子代理完成事件把主循环弄挂。 */
+  private async sendAgentMessageSafely(
+    session: AgentSession,
+    payload: Parameters<AgentSession["sendCustomMessage"]>[0],
+    options?: Parameters<AgentSession["sendCustomMessage"]>[1],
+  ): Promise<void> {
+    try {
+      await session.sendCustomMessage(payload, options);
+    } catch (error) {
+      if (process.env.VELA_DEBUG) console.error("[vela] 子代理消息投递失败:", error);
+    }
   }
 
   private applyActiveTools(entry: Conversation): void {
@@ -1464,9 +1813,18 @@ function cloneGoal(goal: ConversationGoal | null): ConversationGoal | null {
 
 function isPotentialGoalMutation(toolName: string, args: unknown): boolean {
   if (toolName === "bash" || toolName === "edit" || toolName === "write") return true;
-  if (toolName !== subagentToolName) return false;
+  if (toolName !== spawnAgentToolName) return false;
   if (!args || typeof args !== "object") return true;
   return (args as { agent?: unknown }).agent !== "explore";
+}
+
+/** 投递给主代理的 agent 消息正文；其余元数据随 custom message details 透出。 */
+function formatAgentRootMessage(message: AgentRootMessage): string {
+  if (message.kind === "message") {
+    return `[来自子代理 ${message.path} 的消息]\n\n${message.text}`;
+  }
+  const label = message.status === "completed" ? "已完成" : message.status === "aborted" ? "已停止" : "失败";
+  return `[子代理 ${message.path} ${label}]\n\n${message.text}`;
 }
 
 function readSessionError(session: AgentSession): string | null {
@@ -1484,10 +1842,11 @@ function transcriptFromMessages(messages: AgentMessage[]): TranscriptMessage[] {
         ? [{ type: "text" as const, text: message.content }]
         : message.content;
       const text = userMessageText(message);
-      const imageCount = parts.filter((part) => part.type === "image").length;
-      const fullText = imageCount > 0 ? `${text}\n\n[图片 ×${imageCount}]` : text;
-      if (!fullText.trim() || isPlanExecutionPrompt(text)) continue;
-      result.push({ id: randomUUID(), role: "user", text: fullText, thinking: "", tools: [] });
+      const images = parts
+        .filter((part) => part.type === "image")
+        .map((part) => ({ type: "image" as const, data: part.data, mimeType: part.mimeType }));
+      if ((!text.trim() && images.length === 0) || isPlanExecutionPrompt(text)) continue;
+      result.push({ id: randomUUID(), role: "user", text, images, thinking: "", tools: [] });
       continue;
     }
 

@@ -12,8 +12,10 @@ import {
   type CustomModelInput,
   type ImageAttachment,
   type InteractionMode,
+  isAgentToolName,
   isInteractionMode,
   type ModelAuthEvent,
+  type NewConversationSelection,
   type PromptInput,
   type ThinkingLevel,
 } from "@vela/shared";
@@ -21,13 +23,13 @@ import { BrowserWindow, ipcMain, shell } from "electron";
 
 const maxPromptLength = 100_000;
 const maxImageCount = 10;
-const maxImageBase64Length = 12_000_000;
-const imageMimeTypes = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+const maxImageBytes = 10 * 1024 * 1024;
+const maxImageBase64Length = 4 * Math.ceil(maxImageBytes / 3);
 const mutatingToolNames = new Set(["bash", "edit", "write"]);
 
 function toolMutatedWorkspace(toolName: string, mutated: boolean | undefined): boolean {
   if (mutatingToolNames.has(toolName)) return true;
-  return toolName === "task" && mutated === true;
+  return isAgentToolName(toolName) && mutated === true;
 }
 
 export interface SessionHostHooks {
@@ -38,6 +40,9 @@ export interface SessionHostHooks {
 }
 
 export class SessionHost {
+  /** 已经触发过 Git 刷新的子代理 id，避免状态事件重复刷新。 */
+  private readonly mutatedAgents = new Set<string>();
+
   constructor(
     private readonly runtime: AgentRuntime,
     private readonly hooks: SessionHostHooks,
@@ -122,6 +127,12 @@ export class SessionHost {
     ipcMain.handle(IpcChannel.sessionMessages, (_event, rawId: unknown) => {
       return this.runtime.getMessages(parseConversationId(rawId, "对话"));
     });
+    ipcMain.handle(IpcChannel.sessionAgentMessages, (_event, rawConversation: unknown, rawAgent: unknown) => {
+      return this.runtime.getAgentMessages(
+        parseConversationId(rawConversation, "对话"),
+        parseId(rawAgent, "Agent"),
+      );
+    });
     ipcMain.handle(IpcChannel.getCatalog, () => this.runtime.getCatalog());
     ipcMain.handle(IpcChannel.selectModel, async (_event, provider: unknown, id: unknown) => {
       await this.runtime.selectModel(parseId(provider, "提供方"), parseId(id, "模型"));
@@ -147,6 +158,13 @@ export class SessionHost {
     ipcMain.handle(IpcChannel.scanExternalSkills, () => this.runtime.scanExternalSkills(this.hooks.currentCwd()));
     ipcMain.handle(IpcChannel.migrateSkills, (_event, raw: unknown) => {
       return this.runtime.migrateSkills(this.hooks.currentCwd(), parseSkillIds(raw));
+    });
+    ipcMain.handle(IpcChannel.setSkillEnabled, (_event, rawName: unknown, rawEnabled: unknown) => {
+      if (typeof rawEnabled !== "boolean") throw new Error("Skill 不正确");
+      return this.runtime.setSkillEnabled(this.hooks.currentCwd(), parseSkillName(rawName), rawEnabled);
+    });
+    ipcMain.handle(IpcChannel.deleteSkill, (_event, rawName: unknown, rawLocation: unknown) => {
+      return this.runtime.deleteSkill(this.hooks.currentCwd(), parseSkillName(rawName), parseSkillLocation(rawLocation));
     });
     ipcMain.handle(IpcChannel.openSkillsDir, async () => {
       const error = await shell.openPath(this.runtime.skillsDirectory());
@@ -199,6 +217,16 @@ export class SessionHost {
     }
 
     this.broadcast(event);
+    if (event.type === "agents") {
+      // 子代理改完工作区后刷新 Git；同一个代理只触发一次。
+      for (const agent of event.agents) {
+        if (agent.kind === "root" || !agent.mutated || agent.status === "running") continue;
+        if (this.mutatedAgents.has(agent.id)) continue;
+        this.mutatedAgents.add(agent.id);
+        this.hooks.onAgentMutation?.();
+      }
+      return;
+    }
     if (event.type === "tool_start" || event.type === "tool_end" || event.type === "error") {
       if (event.type === "tool_end" && toolMutatedWorkspace(event.toolName, event.activity.mutated)) {
         this.hooks.onAgentMutation?.();
@@ -309,8 +337,16 @@ function parseAgentSettings(raw: unknown): AgentSettings {
     provider,
     modelId,
     thinkingLevel: parseThinkingLevel(record.thinkingLevel),
+    newConversationSelection: parseNewConversationSelection(record.newConversationSelection),
     instructions,
   };
+}
+
+function parseNewConversationSelection(value: unknown): NewConversationSelection {
+  // 旧版本没有这个字段,按「设置默认」处理。
+  if (value === undefined || value === null || value === "") return "default";
+  if (value === "default" || value === "lastUsed") return value;
+  throw new Error("新对话的默认选择不正确");
 }
 
 function parseSkillIds(raw: unknown): string[] {
@@ -330,6 +366,22 @@ function parseSkillIds(raw: unknown): string[] {
     ids.push(id);
   }
   return [...new Set(ids)];
+}
+
+function parseSkillName(value: unknown): string {
+  if (typeof value !== "string") throw new Error("Skill 不正确");
+  const name = value.trim();
+  if (!name || name.length > 200 || /[\u0000-\u001f\u007f]/.test(name)) throw new Error("Skill 不正确");
+  return name;
+}
+
+function parseSkillLocation(value: unknown): string {
+  if (typeof value !== "string") throw new Error("Skill 不正确");
+  const location = value.trim();
+  if (!location || location.length > 4096 || !location.endsWith(".md") || location.includes("\0")) {
+    throw new Error("Skill 不正确");
+  }
+  return location;
 }
 
 function parseAuthType(value: unknown): AuthMethodType {
@@ -407,19 +459,33 @@ function parseImages(raw: unknown): ImageAttachment[] {
   if (raw === undefined || raw === null) return [];
   if (!Array.isArray(raw)) throw new Error("图片附件不正确");
   if (raw.length > maxImageCount) throw new Error("图片附件过多");
-  return raw.map((entry): ImageAttachment => {
-    if (!entry || typeof entry !== "object") throw new Error("图片附件不正确");
+  // 渲染层已将剪贴板图片归一化，但单个附件仍可能损坏或格式不受支持；
+  // 这时跳过该附件而不是让整条消息发送失败。
+  const images: ImageAttachment[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
     const image = entry as Record<string, unknown>;
-    if (
-      image.type !== "image" ||
-      typeof image.data !== "string" ||
-      !image.data ||
-      image.data.length > maxImageBase64Length ||
-      typeof image.mimeType !== "string" ||
-      !imageMimeTypes.includes(image.mimeType)
-    ) {
-      throw new Error("图片附件不正确");
-    }
-    return { type: "image", data: image.data, mimeType: image.mimeType };
-  });
+    if (image.type !== "image" || typeof image.data !== "string" || !image.data) continue;
+    if (image.data.length > maxImageBase64Length) continue;
+    const mimeType = detectImageMimeType(image.data);
+    if (!mimeType) continue;
+    images.push({ type: "image", data: image.data, mimeType });
+  }
+  return images;
+}
+
+/** Clipboard MIME labels can vary; the bytes are authoritative for supported image formats. */
+function detectImageMimeType(data: string): string | null {
+  const bytes = Buffer.from(data.slice(0, 32), "base64");
+  if (bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return "image/png";
+  }
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes.subarray(0, 6).toString("ascii") === "GIF87a" || bytes.subarray(0, 6).toString("ascii") === "GIF89a") {
+    return "image/gif";
+  }
+  if (bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP") {
+    return "image/webp";
+  }
+  return null;
 }

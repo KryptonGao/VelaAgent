@@ -13,6 +13,7 @@ import {
   type ModelAuthEvent,
   type ModelCatalog,
   type ModelSummary,
+  type NewConversationSelection,
   type ProviderSummary,
   type ThinkingLevel,
 } from "@vela/shared";
@@ -26,7 +27,15 @@ export interface ModelSelection {
   provider: string | null;
   modelId: string | null;
   thinkingLevel: ThinkingLevel;
+  newConversationSelection: NewConversationSelection;
   instructions: string;
+}
+
+/** 上一次在对话中使用过的模型与思考强度,供「沿用上次使用」的新对话取用。 */
+interface LastUsedSelection {
+  provider: string | null;
+  modelId: string | null;
+  thinkingLevel: ThinkingLevel;
 }
 
 const maxInstructionLength = 4000;
@@ -66,7 +75,14 @@ export class ModelDirectory {
     provider: null,
     modelId: null,
     thinkingLevel: defaultThinkingLevel,
+    newConversationSelection: "default",
     instructions: "",
+  };
+
+  private lastUsed: LastUsedSelection = {
+    provider: null,
+    modelId: null,
+    thinkingLevel: defaultThinkingLevel,
   };
 
   private readonly authListeners = new Set<(event: ModelAuthEvent) => void>();
@@ -88,7 +104,9 @@ export class ModelDirectory {
       allowModelNetwork: false,
     });
     const directory = new ModelDirectory(dir, runtime);
-    directory.selection = await directory.readSelection();
+    const stored = await directory.readSelection();
+    directory.selection = stored.selection;
+    directory.lastUsed = stored.lastUsed;
     return directory;
   }
 
@@ -149,6 +167,32 @@ export class ModelDirectory {
     return model;
   }
 
+  /** 「沿用上次使用」时,上一次用过的、当前仍然可用的模型。 */
+  availableLastUsed(): Model<Api> | undefined {
+    const { provider, modelId } = this.lastUsed;
+    if (!provider || !modelId) return undefined;
+    const model = this.runtime.getModel(provider, modelId);
+    if (!model || !this.isAvailable(model)) return undefined;
+    return model;
+  }
+
+  lastUsedThinkingLevel(): ThinkingLevel {
+    return this.lastUsed.thinkingLevel;
+  }
+
+  /** 记录最近一次在对话中使用的模型与思考强度,供新对话沿用。 */
+  async rememberLastUsed(provider: string, modelId: string, thinkingLevel: ThinkingLevel): Promise<void> {
+    if (
+      this.lastUsed.provider === provider &&
+      this.lastUsed.modelId === modelId &&
+      this.lastUsed.thinkingLevel === thinkingLevel
+    ) {
+      return;
+    }
+    this.lastUsed = { provider, modelId, thinkingLevel };
+    await this.writeSelection();
+  }
+
   isAvailable(model: { provider: string; id: string }): boolean {
     return this.runtime.getAvailableSnapshot().some((item) => item.provider === model.provider && item.id === model.id);
   }
@@ -179,6 +223,7 @@ export class ModelDirectory {
       provider: this.selection.provider,
       modelId: this.selection.modelId,
       thinkingLevel: this.selection.thinkingLevel,
+      newConversationSelection: this.selection.newConversationSelection,
       instructions: this.selection.instructions,
     };
   }
@@ -186,6 +231,9 @@ export class ModelDirectory {
   /** 写入新建对话的默认值,不改已经打开的会话。 */
   async saveSettings(input: AgentSettings): Promise<AgentSettings> {
     if (!isThinkingLevel(input.thinkingLevel)) throw new Error("不支持这个思考强度");
+    const newConversationSelection = isNewConversationSelection(input.newConversationSelection)
+      ? input.newConversationSelection
+      : "default";
     const instructions = normalizeInstructions(input.instructions);
     const hasProvider = Boolean(input.provider);
     const hasModel = Boolean(input.modelId);
@@ -203,7 +251,7 @@ export class ModelDirectory {
       thinkingLevel = clampLevel(model, input.thinkingLevel);
     }
 
-    this.selection = { provider, modelId, thinkingLevel, instructions };
+    this.selection = { provider, modelId, thinkingLevel, newConversationSelection, instructions };
     await this.writeSelection();
     return this.getSettings();
   }
@@ -373,30 +421,46 @@ export class ModelDirectory {
     await this.runtime.refresh({ allowNetwork: false });
   }
 
-  private async readSelection(): Promise<ModelSelection> {
+  private async readSelection(): Promise<{ selection: ModelSelection; lastUsed: LastUsedSelection }> {
+    const fallback = { selection: this.selection, lastUsed: this.lastUsed };
     try {
       const parsed = JSON.parse(await readFile(this.selectionPath, "utf8")) as unknown;
-      if (!parsed || typeof parsed !== "object") return this.selection;
+      if (!parsed || typeof parsed !== "object") return fallback;
       const record = parsed as Record<string, unknown>;
       const provider = typeof record.provider === "string" ? record.provider : null;
       const modelId = typeof record.modelId === "string" ? record.modelId : null;
       const thinkingLevel = typeof record.thinkingLevel === "string" && isThinkingLevel(record.thinkingLevel)
         ? record.thinkingLevel
         : defaultThinkingLevel;
-      return { provider, modelId, thinkingLevel, instructions: readInstructions(record.instructions) };
+      const newConversationSelection =
+        typeof record.newConversationSelection === "string" && isNewConversationSelection(record.newConversationSelection)
+          ? record.newConversationSelection
+          : "default";
+      return {
+        selection: { provider, modelId, thinkingLevel, newConversationSelection, instructions: readInstructions(record.instructions) },
+        lastUsed: readLastUsed(record.lastUsed),
+      };
     } catch {
-      return { provider: null, modelId: null, thinkingLevel: defaultThinkingLevel, instructions: "" };
+      return fallback;
     }
   }
 
   private async writeSelection(): Promise<void> {
-    const body: Record<string, string> = {
+    const body: Record<string, unknown> = {
       thinkingLevel: this.selection.thinkingLevel,
+      newConversationSelection: this.selection.newConversationSelection,
       instructions: this.selection.instructions,
     };
     if (this.selection.provider && this.selection.modelId) {
       body.provider = this.selection.provider;
       body.modelId = this.selection.modelId;
+    }
+    if (this.lastUsed.provider && this.lastUsed.modelId) {
+      body.lastUsed = {
+        provider: this.lastUsed.provider,
+        modelId: this.lastUsed.modelId,
+        thinkingLevel: this.lastUsed.thinkingLevel,
+      };
     }
     await writePrivateJson(this.selectionPath, body);
   }
@@ -465,6 +529,24 @@ function isMissingFile(error: unknown): boolean {
 
 function isThinkingLevel(value: string): value is ThinkingLevel {
   return (thinkingLevels as readonly string[]).includes(value);
+}
+
+function isNewConversationSelection(value: string): value is NewConversationSelection {
+  return value === "default" || value === "lastUsed";
+}
+
+/** 读取持久化的「上次使用」记录;缺字段或格式不对时按未记录处理。 */
+function readLastUsed(value: unknown): LastUsedSelection {
+  const empty: LastUsedSelection = { provider: null, modelId: null, thinkingLevel: defaultThinkingLevel };
+  if (!value || typeof value !== "object") return empty;
+  const record = value as Record<string, unknown>;
+  const provider = typeof record.provider === "string" ? record.provider : null;
+  const modelId = typeof record.modelId === "string" ? record.modelId : null;
+  if (!provider || !modelId) return empty;
+  const thinkingLevel = typeof record.thinkingLevel === "string" && isThinkingLevel(record.thinkingLevel)
+    ? record.thinkingLevel
+    : defaultThinkingLevel;
+  return { provider, modelId, thinkingLevel };
 }
 
 function readInstructions(value: unknown): string {

@@ -49,8 +49,11 @@ export const IpcChannel = {
   sandboxApprovalReply: "sandbox:approval-reply",
   questionEvent: "session:question-event",
   questionReply: "session:question-reply",
+  sessionAgentMessages: "session:agent-messages",
   appPickAttachments: "app:pick-attachments",
   appHydrateAttachments: "app:hydrate-attachments",
+  appListOpenTargets: "app:list-open-targets",
+  appOpenInTarget: "app:open-in-target",
   appMenuAction: "app:menu-action",
   appSetLocale: "app:set-locale",
   workspaceFileRead: "workspace:file-read",
@@ -62,6 +65,8 @@ export const IpcChannel = {
   openSkillsDir: "skills:open-dir",
   scanExternalSkills: "skills:scan-external",
   migrateSkills: "skills:migrate",
+  setSkillEnabled: "skills:set-enabled",
+  deleteSkill: "skills:delete",
   registerModel: "models:register",
 } as const;
 
@@ -94,6 +99,10 @@ export interface SkillSummary {
   origin: SkillOrigin;
   /** 为真时模型不会自动选用，只能通过 /skill:名称 展开。 */
   disableModelInvocation: boolean;
+  /** 为假时不会被加载，模型和 /skill:名称 都无法使用；可在设置里重新启用。 */
+  enabled: boolean;
+  /** 为真时可以从设置里删除；只有 Vela 用户 Skill 目录内的 Skill 可删。 */
+  canDelete: boolean;
 }
 
 export interface SkillDiagnostic {
@@ -172,11 +181,15 @@ export interface SkillMigrationResult {
   skipped: SkillMigrationSkip[];
 }
 
+/** 新建对话取用设置里的默认模型,还是沿用上一次在对话中使用的模型与思考强度。 */
+export type NewConversationSelection = "default" | "lastUsed";
+
 /** 新建对话使用的模型、思考强度和额外指令。不影响已经打开的对话。 */
 export interface AgentSettings {
   provider: string | null;
   modelId: string | null;
   thinkingLevel: ThinkingLevel;
+  newConversationSelection: NewConversationSelection;
   instructions: string;
 }
 
@@ -430,6 +443,48 @@ export const subagentKinds = ["explore", "general"] as const;
 
 export type SubagentKind = (typeof subagentKinds)[number];
 
+/** agent 树 API 的工具名；root 与子代理共享。 */
+export const agentToolNames = ["spawn_agent", "send_message", "followup_task"] as const;
+
+export function isAgentToolName(name: string): boolean {
+  return (agentToolNames as readonly string[]).includes(name);
+}
+
+export const agentStatuses = ["idle", "running", "completed", "failed", "aborted"] as const;
+
+export type AgentStatus = (typeof agentStatuses)[number];
+
+/** root 是对话主代理；其余是子代理树里的节点。 */
+export type AgentKind = SubagentKind | "root";
+
+/** 控制面维护的一个常驻 agent 的快照；子代理是独立会话，完成后仍可继续收消息。 */
+export interface AgentInfo {
+  /** agent 标识，也是子代理目标寻址的首选 id。 */
+  id: string;
+  /** 父 agent 的 id；root 为 null。 */
+  parentId: string | null;
+  /** 树内路径，如 /root/backend/database。 */
+  path: string;
+  /** 路径最后一段的展示名。 */
+  name: string;
+  kind: AgentKind;
+  status: AgentStatus;
+  /** root 为 0，子代理逐层 +1。 */
+  depth: number;
+  /** 最近一次任务的目标摘要。 */
+  task: string;
+  /** 已经跑过的工具步骤；控制面保留最近若干条。 */
+  steps: ToolStep[];
+  /** 是否可能改动了工作区，供 Git 刷新和 Goal 修订判断。 */
+  mutated: boolean;
+  /** 最近一次回合的最终结论。 */
+  finalText: string | null;
+  /** 最近一次失败原因。 */
+  error: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface ToolStep {
   id: string;
   name: string;
@@ -449,6 +504,9 @@ export interface ToolActivity {
   diff?: string;
   /** task 子代理类型 */
   agent?: SubagentKind;
+  /** 常驻子代理的 id 和路径，供界面把卡片关联到 agent 列表。 */
+  agentId?: string;
+  agentPath?: string;
   /** task 子代理已经跑过的工具步骤 */
   steps?: ToolStep[];
   /** task 是否可能改动了工作区，供 Git 刷新判断 */
@@ -476,6 +534,8 @@ export interface TranscriptMessage {
   text: string;
   thinking: string;
   tools: TranscriptTool[];
+  /** role 为 user 时随消息发出的图片附件。 */
+  images?: ImageAttachment[];
 }
 
 export type AgentStreamEvent =
@@ -487,8 +547,23 @@ export type AgentStreamEvent =
   | { type: "tool_start"; conversationId: string; toolCallId: string; toolName: string; activity: ToolActivity }
   | { type: "tool_output"; conversationId: string; toolCallId: string; activity: ToolActivity }
   | { type: "tool_end"; conversationId: string; toolCallId: string; toolName: string; isError: boolean; activity: ToolActivity }
+  /** 常驻 agent 树的完整快照；每次状态、步骤或结论变化时推送。 */
+  | { type: "agents"; conversationId: string; agents: AgentInfo[] }
+  /** 某个子代理自己的运行流；带 agentId，供右侧 Agent Pane 实时渲染。 */
+  | { type: "agent_event"; conversationId: string; agentId: string; event: AgentRuntimeStreamEvent }
   | { type: "user_message"; conversationId: string; text: string }
   | { type: "error"; conversationId: string; message: string };
+
+/** 子代理会话的实时事件；形状与主对话一致，只是用 agentId 代替 conversationId。 */
+export type AgentRuntimeStreamEvent =
+  | { type: "user_message"; text: string }
+  | { type: "assistant_start" }
+  | { type: "text_delta"; delta: string }
+  | { type: "thinking_delta"; delta: string }
+  | { type: "tool_start"; toolCallId: string; toolName: string; activity: ToolActivity }
+  | { type: "tool_output"; toolCallId: string; activity: ToolActivity }
+  | { type: "tool_end"; toolCallId: string; toolName: string; isError: boolean; activity: ToolActivity }
+  | { type: "error"; message: string };
 
 // ---------- Workspace ----------
 
@@ -626,9 +701,27 @@ export interface PullRequestInfo {
 
 // ---------- Sandbox 权限 ----------
 
-export type SandboxMode = "ask" | "full";
+/**
+ * ask:逐条审批;smart:由当前对话模型判断风险,仅风险操作审批;full:直接放行。
+ */
+export type SandboxMode = "ask" | "smart" | "full";
 
 export type SandboxApprovalKind = "bash" | "edit" | "write" | "mkdir";
+
+/** 交给模型判断的一次操作。workspace 为工作区边界,insideWorkspace 表明是否越界。 */
+export interface SandboxRiskInput {
+  kind: SandboxApprovalKind;
+  command: string | null;
+  path: string | null;
+  cwd: string | null;
+  workspace: string | null;
+  insideWorkspace: boolean;
+}
+
+/** unknown 表示模型不可用、超时或输出无法识别,调用方应按风险操作处理。 */
+export type SandboxRiskVerdict = "safe" | "risky" | "unknown";
+
+export type SandboxRiskEvaluator = (input: SandboxRiskInput) => Promise<SandboxRiskVerdict>;
 
 export interface SandboxApprovalRequest {
   id: string;
@@ -699,6 +792,21 @@ export interface FileAttachmentPayload {
   image: ImageAttachment | null;
 }
 
+// ---------- 用本机 App 打开工作区 ----------
+
+export const openTargetKinds = ["file-manager", "editor", "terminal"] as const;
+
+export type OpenTargetKind = (typeof openTargetKinds)[number];
+
+/** 主进程检测到的、可用于打开工作区目录的本机 App。 */
+export interface OpenTarget {
+  id: string;
+  name: string;
+  kind: OpenTargetKind;
+  /** App 图标 data URL;取不到时为 null,界面回退到通用图标。 */
+  icon: string | null;
+}
+
 export interface VelaApi {
   platform: string;
   setLocale(locale: AppLocale): void;
@@ -719,6 +827,8 @@ export interface VelaApi {
   unarchiveConversation(id: string): Promise<AppState>;
   /** 读取某个对话的完整历史(用于应用重启后恢复界面消息)。 */
   getMessages(conversationId: string): Promise<TranscriptMessage[]>;
+  /** 读取某个常驻子代理自己的消息历史(用于打开右侧 Agent Pane 时回填)。 */
+  getAgentMessages(conversationId: string, agentId: string): Promise<TranscriptMessage[]>;
   onEvent(listener: (event: AgentStreamEvent) => void): () => void;
   getCatalog(): Promise<ModelCatalog>;
   selectModel(provider: string, id: string): Promise<AppState>;
@@ -733,6 +843,10 @@ export interface VelaApi {
   openSkillsDirectory(): Promise<void>;
   scanExternalSkills(): Promise<ExternalSkillScan>;
   migrateSkills(ids: string[]): Promise<SkillMigrationResult>;
+  /** 启用或停用一个 Skill，返回更新后的目录；已打开的对话会在空闲时重新加载。 */
+  setSkillEnabled(name: string, enabled: boolean): Promise<SkillCatalog>;
+  /** 删除 Vela 用户 Skill 目录里的一个 Skill，返回更新后的目录。 */
+  deleteSkill(name: string, location: string): Promise<SkillCatalog>;
   logout(providerId: string): Promise<AppState>;
   login(providerId: string, type: AuthMethodType): Promise<LoginResult>;
   replyLogin(promptId: string, value: string | null): Promise<void>;
@@ -777,6 +891,10 @@ export interface VelaApi {
   onMenuAction(listener: (action: MenuAction) => void): () => void;
   pickAttachments(kind: AttachmentPickKind): Promise<FileAttachmentPayload[]>;
   hydrateAttachments(paths: string[]): Promise<FileAttachmentPayload[]>;
+  /** 列出本机可用于打开工作区的 App;macOS 之外返回空列表。 */
+  listOpenTargets(): Promise<OpenTarget[]>;
+  /** 用指定目标打开目录;targetId 来自 listOpenTargets。 */
+  openInTarget(targetId: string, path: string): Promise<void>;
   /** file 为渲染层的 DOM File 对象(shared 包无 DOM lib,类型放宽为 unknown) */
   pathForFile(file: unknown): string;
 }

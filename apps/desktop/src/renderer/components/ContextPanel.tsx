@@ -10,12 +10,14 @@ import {
   type GoalStatus,
 } from "@vela/shared";
 import type { ProjectApi } from "../hooks/useProject";
+import type { SidebarResize } from "../hooks/useSidebarResize";
 import { ChangesView } from "./ChangesView";
 import { ChevronDownIcon } from "./icons";
 import { SheetPresence } from "./Presence";
 import { FilePreviewView } from "./preview/FilePreviewView";
 import { useFilePreview } from "./preview/FilePreviewContext";
 import { RepoCard } from "./RepoCard";
+import { SidebarResizeHandle } from "./SidebarResizeHandle";
 import { isEnglish, tr } from "../locale";
 
 const categoryLabels: Record<ContextCategory, [string, string]> = {
@@ -33,6 +35,7 @@ function categoryLabel(category: ContextCategory): string {
 
 interface ContextPanelProps {
   collapsed: boolean;
+  resize: SidebarResize;
   state: AppState | null;
   project: ProjectApi;
   onToggle: () => void;
@@ -44,6 +47,7 @@ interface ContextPanelProps {
 
 export function ContextPanel({
   collapsed,
+  resize,
   state,
   project,
   onToggle,
@@ -64,6 +68,7 @@ export function ContextPanel({
       className={`sidebar-right${collapsed ? " collapsed" : ""}${preview?.open ? " preview-mode" : ""}`}
       inert={collapsed ? true : undefined}
     >
+      <SidebarResizeHandle target={preview?.open ? "preview" : "right"} resize={resize} />
       <div className="sidebar-right-header">
         <div className="sidebar-right-header-spacer" />
         <button

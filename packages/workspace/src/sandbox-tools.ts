@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import {
@@ -9,9 +9,7 @@ import {
   defineTool,
   generateDiffString,
   type BashOperations,
-  type EditOperations,
   type ToolDefinition,
-  type WriteOperations,
 } from "@earendil-works/pi-coding-agent";
 import { isPathInside } from "./git-service";
 import type { SandboxPermissionManager } from "./sandbox-permission-manager";
@@ -26,55 +24,72 @@ export interface SandboxToolFactoryInput {
 
 /**
  * 包装 Pi 内置 bash/edit/write 工具:名称与内置一致,经 customTools
- * 注入后同名覆盖。bash 在 ask 模式下逐条审批;文件写入只在越过
- * 工作区边界时审批,工作区内自由读写。
+ * 注入后同名覆盖。每次工具调用只过一次权限门:bash 在 exec 前,
+ * 文件写入在读取/写入任何内容前。ask 模式逐条审批、工作区内文件
+ * 改动放行;smart 模式由模型判断;full 模式直接放行。
  */
 export function createSandboxedToolDefinitions(input: SandboxToolFactoryInput): ToolDefinition[] {
   const boundary = input.workspace ?? input.cwd;
-  const insideBoundary = (target: string): boolean => isPathInside(target, boundary);
 
   const bashOperations: BashOperations = {
     exec: async (command, cwd, options) => {
-      const allowed = await input.permission.request({ kind: "bash", command, cwd });
+      const allowed = await input.permission.request({ kind: "bash", command, cwd, workspace: boundary });
       if (!allowed) throw new Error(`用户拒绝了命令执行:${command}`);
       return createLocalBashOperations().exec(command, cwd, options);
     },
   };
 
-  const guardFileWrite = async (kind: "edit" | "write" | "mkdir", path: string): Promise<void> => {
-    if (insideBoundary(path)) return;
-    const allowed = await input.permission.request({ kind, path, cwd: null });
-    if (!allowed) throw new Error(`用户拒绝了工作区外的文件修改:${path}`);
-  };
-
-  const editOperations: EditOperations = {
-    readFile: (absolutePath) => readFile(absolutePath),
-    access: async (absolutePath) => {
-      await guardFileWrite("edit", absolutePath);
-    },
-    writeFile: async (absolutePath, content) => {
-      await guardFileWrite("edit", absolutePath);
-      await writeFile(absolutePath, content, "utf8");
-    },
-  };
-
-  const writeOperations: WriteOperations = {
-    writeFile: async (absolutePath, content) => {
-      await guardFileWrite("write", absolutePath);
-      await writeFile(absolutePath, content, "utf8");
-    },
-    mkdir: async (dir) => {
-      await guardFileWrite("mkdir", dir);
-      await mkdir(dir, { recursive: true });
-    },
+  const guardFileWrite = async (kind: "edit" | "write", path: string): Promise<void> => {
+    const allowed = await input.permission.request({
+      kind,
+      path,
+      workspace: boundary,
+      insideWorkspace: isPathInside(path, boundary),
+    });
+    if (!allowed) throw new Error(`用户拒绝了文件修改:${path}`);
   };
 
   // defineTool 保留参数推断,同时让具体类型满足 customTools 的宽接口。
   return [
     defineTool(createBashToolDefinition(input.cwd, { operations: bashOperations })),
-    defineTool(createEditToolDefinition(input.cwd, { operations: editOperations })),
-    withWriteDiff(input.cwd, defineTool(createWriteToolDefinition(input.cwd, { operations: writeOperations }))),
+    defineTool(
+      withPermissionGuard(
+        defineTool(createEditToolDefinition(input.cwd)),
+        "edit",
+        input.cwd,
+        guardFileWrite,
+      ),
+    ),
+    defineTool(
+      withPermissionGuard(
+        withWriteDiff(input.cwd, defineTool(createWriteToolDefinition(input.cwd))),
+        "write",
+        input.cwd,
+        guardFileWrite,
+      ),
+    ),
   ];
+}
+
+/**
+ * 在工具真正改动文件前过一次权限门。放在 execute 最外层,保证一次
+ * 调用只判断/审批一次,且 mkdir、读取旧内容等副作用不会抢先发生。
+ */
+function withPermissionGuard(
+  tool: ToolDefinition,
+  kind: "edit" | "write",
+  cwd: string,
+  guard: (kind: "edit" | "write", path: string) => Promise<void>,
+): ToolDefinition {
+  return {
+    ...tool,
+    async execute(toolCallId, params, signal, onUpdate, ctx) {
+      const path = stringParam(params, "path");
+      if (!path) throw new Error("缺少文件路径");
+      await guard(kind, resolveToolPath(path, ctx.cwd || cwd));
+      return tool.execute(toolCallId, params, signal, onUpdate, ctx);
+    },
+  };
 }
 
 const maxWriteDiffChars = 100_000;

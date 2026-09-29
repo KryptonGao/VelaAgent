@@ -2,9 +2,12 @@ import type { ConversationSummary } from "@vela/shared";
 import { useEffect, useMemo, useState } from "react";
 import { modKeyLabel } from "../platform";
 import { tr } from "../locale";
+import type { SidebarResize } from "../hooks/useSidebarResize";
+import { SidebarResizeHandle } from "./SidebarResizeHandle";
 
 interface SidebarProps {
   collapsed: boolean;
+  resize: SidebarResize;
   platform: string;
   conversations: ConversationSummary[];
   activeConversationId: string | null;
@@ -25,6 +28,7 @@ interface ConversationGroup {
 
 export function Sidebar({
   collapsed,
+  resize,
   platform,
   conversations: allConversations,
   activeConversationId,
@@ -69,6 +73,7 @@ export function Sidebar({
 
   return (
     <aside className={`sidebar-left${collapsed ? " collapsed" : ""}`} inert={collapsed ? true : undefined}>
+      <SidebarResizeHandle target="left" resize={resize} />
       <div className="sidebar-left-header">
         <div className="titlebar-drag-row">
           <button

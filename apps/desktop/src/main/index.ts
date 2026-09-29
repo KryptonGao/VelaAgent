@@ -15,12 +15,18 @@ import { writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setApplicationLocale } from "./menu";
+import { registerOpenTargetIpc } from "./open-targets";
 import { ProjectHost } from "./project-host";
 import { SessionHost } from "./session-host";
+import { ensureLoginShellPath } from "./shell-path";
 import { prepareVelaHome, resolveVelaHome } from "./vela-home";
 import appIconPath from "../../resources/icon.png?asset";
 
 app.setName("Vela");
+
+// 与 Electron 启动并行解析登录 shell 的 PATH,避免 GUI 进程只拿到 launchd
+// 的最小 PATH 而找不到 Homebrew 里的 gh、pnpm、node。start() 里再 await。
+const loginShellPathReady = ensureLoginShellPath();
 
 const rootDir = dirname(fileURLToPath(import.meta.url));
 const preloadPath = join(rootDir, "../preload/index.js");
@@ -102,6 +108,7 @@ function createWindow(): BrowserWindow {
 }
 
 async function start(): Promise<void> {
+  await loginShellPathReady;
   const fallbackCwd = resolve(app.getAppPath(), "../..");
   const home = resolveVelaHome();
   await prepareVelaHome(home, app.getPath("userData"));
@@ -130,6 +137,8 @@ async function start(): Promise<void> {
     // 激活会话变化时让工作区跟随,保证输入区与仓库卡片显示的目录即会话目录。
     onActiveCwd: (cwd) => void project?.syncConversationWorkspace(cwd),
   });
+  // 「帮我批准」模式下由当前对话选择的模型判断操作风险。
+  sandbox.setRiskEvaluator((input) => runtime.evaluateSandboxRisk(input));
 
   project = new ProjectHost({
     workspaceManager,
@@ -147,6 +156,7 @@ async function start(): Promise<void> {
     currentCwd: () => workspaceManager.getState().current ?? fallbackCwd,
   });
   host.register();
+  registerOpenTargetIpc();
   createWindow();
 
   // 初始工作区:显式环境变量 > 上次使用的工作区 > 无。
