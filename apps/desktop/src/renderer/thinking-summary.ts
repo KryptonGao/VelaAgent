@@ -19,7 +19,7 @@ export class ThinkingCompletionTracker {
       const active = message.id === activeId && !message.text && message.tools.length === 0;
       current.set(message.id, { active, hasThinking: Boolean(message.thinking.trim()) });
       const before = previous?.messages.get(message.id);
-      if (enabled && previous?.enabled && message.thinking.trim() && !active && (
+      if (enabled && previous?.enabled && !message.historical && message.thinking.trim() && !active && (
         before?.active || (!before?.hasThinking && message.turnStartedAt !== undefined)
       )) completed.push(message);
     }
@@ -73,7 +73,7 @@ export function thinkingDigest(text: string): string {
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
 }
 
-/** 从 localStorage 读取已完成的总结;只信任字符串文本,损坏的内容直接忽略。 */
+/** 从持久化存储读取已完成的总结;只信任字符串文本,损坏的内容直接忽略。 */
 export function parseStoredSummaries(raw: string | null): Record<string, ThinkingSummaryState> {
   if (!raw) return {};
   try {

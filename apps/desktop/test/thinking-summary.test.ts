@@ -40,6 +40,13 @@ describe("automatic thinking completion", () => {
     assert.deepEqual(tracker.observe("chat-a", [thought(), thought("history-b", { text: "old reply" })], false, true), []);
   });
 
+  it("does not regenerate summaries for restored history that now includes persisted turn timings", () => {
+    const tracker = new ThinkingCompletionTracker();
+    tracker.observe("chat-a", [], false, true);
+    const restored = thought("restored", { text: "old reply", turnStartedAt: 1000, turnCompletedAt: 3000, historical: true });
+    assert.deepEqual(tracker.observe("chat-a", [restored], false, true), []);
+  });
+
   it("does not generate while disabled or retroactively when the setting is enabled", () => {
     const tracker = new ThinkingCompletionTracker();
     tracker.observe("chat-a", [thought()], true, false);

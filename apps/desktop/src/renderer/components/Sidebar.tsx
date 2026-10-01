@@ -1,10 +1,13 @@
 import type { ConversationSummary } from "@vela/shared";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
+import { isBooleanRecord, useStoredState } from "../hooks/useStoredState";
 import { modKeyLabel } from "../platform";
 import { tr } from "../locale";
 import type { SidebarResize } from "../hooks/useSidebarResize";
 import { MotionList } from "./BatchMotion";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
+import { groupActiveConversations } from "./conversation-search";
+import { ConversationSearchDialog } from "./ConversationSearchDialog";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -19,12 +22,7 @@ interface SidebarProps {
   onNewChat: () => void;
   onSwitchConversation: (id: string) => void;
   onArchiveConversation: (id: string) => void;
-}
-
-interface ConversationGroup {
-  cwd: string;
-  name: string;
-  conversations: ConversationSummary[];
+  onRenameConversation?: (id: string) => void;
 }
 
 export function Sidebar({
@@ -40,24 +38,19 @@ export function Sidebar({
   onNewChat,
   onSwitchConversation,
   onArchiveConversation,
+  onRenameConversation,
 }: SidebarProps) {
-  // 会话按所属工作区分组;组内和组之间都按最近使用排序。已归档的对话不在侧边栏出现。
-  const groups = useMemo<ConversationGroup[]>(() => {
-    const byWorkspace = new Map<string, ConversationSummary[]>();
-    const conversations = allConversations.filter((conversation) => conversation.archivedAt === null);
-    for (const conversation of [...conversations].sort((a, b) => b.updatedAt - a.updatedAt)) {
-      const list = byWorkspace.get(conversation.cwd) ?? [];
-      list.push(conversation);
-      byWorkspace.set(conversation.cwd, list);
-    }
-    return [...byWorkspace.entries()].map(([cwd, list]) => ({
-      cwd,
-      name: workspaceName(cwd),
-      conversations: list,
-    }));
-  }, [allConversations]);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchId = useId();
+  const untitledLabel = tr("新对话", "New chat");
+  const groups = useMemo(
+    () => groupActiveConversations(allConversations, "", untitledLabel),
+    [allConversations, untitledLabel],
+  );
 
-  const [collapsedWorkspaces, setCollapsedWorkspaces] = useState<Record<string, boolean>>({});
+  const [collapsedWorkspaces, setCollapsedWorkspaces] = useStoredState<Record<string, boolean>>(
+    "vela.collapsedWorkspaces", {}, isBooleanRecord,
+  );
   const activeWorkspace = allConversations.find(
     (item) => item.id === activeConversationId && item.archivedAt === null,
   )?.cwd ?? null;
@@ -91,6 +84,18 @@ export function Sidebar({
           <div className="workspace-dropdown-trigger">
             <span>Vela</span>
           </div>
+          <button
+            className="icon-btn-ghost sidebar-search-trigger"
+            type="button"
+            title={tr("搜索会话", "Search chats")}
+            aria-label={tr("搜索会话", "Search chats")}
+            aria-expanded={searchOpen}
+            aria-haspopup="dialog"
+            aria-controls={searchId}
+            onClick={() => setSearchOpen(true)}
+          >
+            <SearchIcon />
+          </button>
         </div>
       </div>
 
@@ -142,8 +147,17 @@ export function Sidebar({
                           <span className="subchat-streaming-dot" role="img" aria-label={tr("正在回复", "Replying")} title={tr("正在回复", "Replying")} />
                         ) : null}
                       </button>
+                      {onRenameConversation ? <button
+                        className="subchat-action subchat-rename"
+                        type="button"
+                        title={tr("重命名对话", "Rename chat")}
+                        aria-label={`${tr("重命名", "Rename")} “${conversation.title || untitledLabel}”`}
+                        onClick={() => onRenameConversation(conversation.id)}
+                      >
+                        <RenameIcon />
+                      </button> : null}
                       <button
-                        className="subchat-archive"
+                        className="subchat-action subchat-archive"
                         type="button"
                         title={tr("归档对话", "Archive chat")}
                         aria-label={`${tr("归档", "Archive")} “${conversation.title || tr("新对话", "New chat")}”`}
@@ -159,7 +173,7 @@ export function Sidebar({
           );
         }}</MotionList>
         {groups.length === 0 ? (
-          <div className="sidebar-empty-hint">{tr("还没有会话", "No chats yet")}</div>
+          <div className="sidebar-empty-hint" role="status">{tr("还没有会话", "No chats yet")}</div>
         ) : null}
       </div>
 
@@ -180,14 +194,24 @@ export function Sidebar({
           </span>
         </button>
       </div>
+      {searchOpen ? <ConversationSearchDialog
+        id={searchId}
+        conversations={allConversations}
+        activeConversationId={activeConversationId}
+        onSelect={onSwitchConversation}
+        onNewChat={onNewChat}
+        onClose={() => setSearchOpen(false)}
+      /> : null}
     </aside>
   );
 }
 
-function workspaceName(cwd: string): string {
-  const trimmed = cwd.replace(/\/+$/, "");
-  const name = trimmed.split("/").pop() ?? trimmed;
-  return name || cwd;
+function SearchIcon() {
+  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></svg>;
+}
+
+function RenameIcon() {
+  return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6L16 3Z" /><path d="m14 5 5 5" /></svg>;
 }
 
 function SidebarIcon() {

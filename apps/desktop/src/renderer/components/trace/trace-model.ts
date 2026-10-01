@@ -1,6 +1,7 @@
 import type { TraceNode, TraceRequest, TraceSnapshot } from "@vela/shared";
 export interface TraceState extends TraceSnapshot {
   requestVersions: Record<string, number>;
+  resetVersion?: number;
 }
 export const emptyTrace: TraceState = {
   version: 0,
@@ -11,8 +12,10 @@ export const emptyTrace: TraceState = {
 };
 export function mergeTrace(
   current: TraceState,
-  next: TraceSnapshot,
+  next: TraceSnapshot & { reset?: boolean },
 ): TraceState {
+  if (next.version < (current.resetVersion ?? 0)) return current;
+  if (next.reset && next.version >= current.version) current = { ...emptyTrace, resetVersion: next.version };
   const nodes = new Map(current.nodes.map((n) => [n.id, n]));
   for (const node of next.nodes)
     if (!nodes.has(node.id) || nodes.get(node.id)!.version <= node.version)
@@ -29,6 +32,7 @@ export function mergeTrace(
     nodes: [...nodes.values()].sort((a, b) => a.sequence - b.sequence),
     requests: [...requests.values()].sort((a, b) => a.number - b.number),
     requestVersions,
+    resetVersion: current.resetVersion,
     warning: next.version >= current.version ? next.warning : current.warning,
   };
 }

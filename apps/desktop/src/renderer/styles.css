@@ -18,6 +18,7 @@
    */
   --glass-blur: blur(16px) saturate(190%);
   --glass-fillet: 12px;
+  --glass-edge-inset: 6px;
   --transition-smooth: 0.24s cubic-bezier(0.16, 1, 0.3, 1);
   --transition-enter: 0.18s cubic-bezier(0.16, 1, 0.3, 1);
   --motion-ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
@@ -439,7 +440,7 @@ button {
   .quick-action-item,
   .session-group-header,
   .subchat-item,
-  .subchat-archive,
+  .subchat-action,
   .menu-row,
   .branch-item,
   .skill-menu-row,
@@ -566,32 +567,12 @@ code,
 
 /*
  * ---------- 统一玻璃顶栏 ----------
- * 左右侧栏本来就是整块半透明毛玻璃,中间各面板的顶栏现在铺同一套材质:
- * 面板自身透明,顶部 52px 是一层盖在内容之上的玻璃,正文白底从顶栏下沿开始铺,
+ * 左右侧栏与中间面板共用同一套毛玻璃,先模糊窗口底层再叠加主题色:
+ * 玻璃位于白底纸面和内容下方,正文白底从顶部 52px 下沿开始铺,
  * 于是从窗口最左到最右是一条材质连续的玻璃,而不是三个 Panel 各自的 Header。
  */
 
-/*
- * 玻璃补角:内容纸面顶角的内圆角外侧由侧栏材质绕过来填满,
- * 顶栏到侧栏的转角因此是连续曲面,不会露出窗口底色,也不会留硬直角。
- * 侧栏收起时宽度归零、overflow 裁掉,补角跟着消失。
- */
-.sidebar-left::after,
-.sidebar-right::after {
-  content: "";
-  position: absolute;
-  top: var(--header-height);
-  width: var(--glass-fillet);
-  height: var(--glass-fillet);
-  background: var(--bg-sidebar-glass);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  pointer-events: none;
-}
-.sidebar-left::after { right: calc(var(--glass-fillet) * -1); }
-.sidebar-right::after { left: calc(var(--glass-fillet) * -1); }
-
-/* 顶栏玻璃层:盖在面板内容之上,底下一层就是窗口材质,材质与左右侧栏完全一致。 */
+/* 玻璃壳铺满面板,同时承接顶栏与纸面四角;不采样自己的主题色或正文阴影。 */
 .main-chat-view::before,
 .workbench-panel::before,
 .settings-view::before {
@@ -600,8 +581,8 @@ code,
   top: 0;
   left: 0;
   right: 0;
-  height: var(--header-height);
-  z-index: 2;
+  bottom: 0;
+  z-index: 0;
   background: var(--bg-sidebar-glass);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
@@ -623,17 +604,31 @@ code,
   pointer-events: none;
 }
 
-/* 内圆角只在对应的侧栏展开时成立:收起后内容纸面直接贴到窗口边。 */
-.vela-window:not(.left-collapsed) .main-chat-view::after,
-.vela-window:not(.left-collapsed) .settings-view::after {
-  border-top-left-radius: var(--glass-fillet);
+/* 纸面只在整体外缘倒圆角,并排的对话区与工作面板在接缝处保持相连。 */
+.main-chat-view { --paper-left-radius: var(--glass-fillet); --paper-right-radius: var(--glass-fillet); }
+.main-stage-pane:has(> .workbench-panel) > .main-chat-view { --paper-right-radius: 0px; }
+.workbench-panel { --paper-left-radius: 0px; --paper-right-radius: var(--glass-fillet); }
+.settings-view { --paper-left-radius: var(--glass-fillet); --paper-right-radius: var(--glass-fillet); }
+.main-chat-view::after,
+.workbench-panel::after,
+.settings-view::after {
+  border-radius: var(--paper-left-radius) var(--paper-right-radius) var(--paper-right-radius) var(--paper-left-radius);
 }
-.vela-window:not(.right-collapsed) .workbench-panel::after {
-  border-top-right-radius: var(--glass-fillet);
+/* 有实色背景的子区域也跟随纸面圆角,不裁掉输入框向上展开的菜单。 */
+.chat-dock-wrapper,
+.chat-scroll-area,
+.trace-view {
+  border-radius: 0 0 var(--paper-right-radius) var(--paper-left-radius);
 }
-/* 没有工作面板时,对话区自己就是内容区最右的那块纸面。 */
-.vela-window:not(.right-collapsed):not(:has(.workbench-panel)) .main-chat-view::after {
-  border-top-right-radius: var(--glass-fillet);
+.trace-view { overflow: clip; }
+/* 滚动条也裁在纸面内,避免其合成层从输入区底角的透明缺口露出来。 */
+.chat-scroll-area {
+  clip-path: inset(0 round 0 0 var(--paper-right-radius) var(--paper-left-radius));
+}
+.workbench-content,
+.settings-body {
+  border-radius: var(--paper-left-radius) var(--paper-right-radius) var(--paper-right-radius) var(--paper-left-radius);
+  overflow: clip;
 }
 /* 工作面板左缘的竖向分隔线跟着顶栏往上接成一条,不被玻璃层盖住。 */
 .workbench-panel::before {
@@ -757,6 +752,22 @@ code,
   color: var(--text-primary);
 }
 
+.workspace-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.sidebar-search-trigger {
+  width: 28px;
+  height: 28px;
+}
+.sidebar-search-trigger[aria-expanded="true"] {
+  background: var(--bg-sidebar-hover);
+  color: var(--text-primary);
+}
+.sidebar-search-trigger svg { width: 18px; height: 18px; }
+
 .workspace-dropdown-trigger {
   font-size: 15px;
   font-weight: 600;
@@ -794,6 +805,97 @@ code,
   padding-top: 16px;
 }
 
+.conversation-search-dialog {
+  width: min(640px, calc(100vw - 40px));
+  max-height: min(640px, calc(100vh - 64px));
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.2);
+  overflow: auto;
+  -webkit-app-region: no-drag;
+}
+.conversation-search-dialog::backdrop { background: rgba(0, 0, 0, 0.22); }
+.conversation-search-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.conversation-search-header input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px;
+  font: inherit;
+  font-size: 16px;
+  color: var(--text-primary);
+  background: transparent;
+}
+.conversation-search-header input::placeholder { color: var(--text-muted); }
+.conversation-search-header:has(input:focus-visible) { box-shadow: inset 0 -2px 0 var(--accent-blue); }
+.conversation-search-close {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  font-size: 22px;
+  color: var(--text-muted);
+}
+.conversation-search-close:hover { color: var(--text-primary); background: var(--bg-sidebar-hover); }
+.conversation-search-content { padding: 10px 8px; }
+.conversation-search-section-label { padding: 8px 12px; font-size: 12px; color: var(--text-muted); }
+.conversation-search-results { max-height: min(380px, calc(100vh - 270px)); overflow-y: auto; }
+.conversation-search-result,
+.conversation-search-new {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 42px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  text-align: left;
+}
+.conversation-search-result:hover,
+.conversation-search-result.selected,
+.conversation-search-new:hover { background: var(--bg-sidebar-hover); }
+.conversation-search-result-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.conversation-search-workspace {
+  max-width: 32%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.conversation-search-current {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--bg-sidebar-hover);
+}
+.conversation-search-empty { padding: 24px 12px; color: var(--text-muted); font-size: 14px; }
+.conversation-search-new svg { flex: none; color: var(--text-muted); }
+.conversation-search-footer { padding: 10px 20px; border-top: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 12px; }
+.conversation-search-dialog :focus-visible,
+.subchat-rename:focus-visible,
+.chat-title-rename:focus-visible,
+.rename-conversation-dialog :focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+.conversation-search-header input:focus-visible { outline: none; }
+
 .sidebar-section-title {
   font-size: 15px;
   font-weight: 600;
@@ -818,7 +920,7 @@ code,
   min-width: 0;
 }
 /* 收起时宽度为 0 而不是 display: none,键盘仍能 Tab 到归档按钮。 */
-.subchat-archive {
+.subchat-action {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -830,13 +932,13 @@ code,
   color: var(--text-dim);
   cursor: pointer;
 }
-.subchat-row:hover .subchat-archive,
-.subchat-row:focus-within .subchat-archive {
+.subchat-row:hover .subchat-action,
+.subchat-row:focus-within .subchat-action {
   width: 24px;
   margin-left: 2px;
   opacity: 1;
 }
-.subchat-archive:hover { background: var(--bg-sidebar-hover); color: var(--text-primary); }
+.subchat-action:hover { background: var(--bg-sidebar-hover); color: var(--text-primary); }
 
 .subchat-item {
   width: 100%;
@@ -1045,6 +1147,50 @@ code,
 .view-icon-btn {
   -webkit-app-region: no-drag;
 }
+.chat-title-rename {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  -webkit-app-region: no-drag;
+}
+.chat-title-rename svg { flex: none; color: var(--text-muted); }
+.chat-title-rename > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-title-rename:hover { color: var(--accent-blue); }
+
+.rename-conversation-dialog {
+  width: min(420px, calc(100vw - 40px));
+  max-height: calc(100vh - 40px);
+  margin: auto;
+  padding: 24px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  box-shadow: 0 16px 60px rgba(0, 0, 0, 0.24);
+  overflow: auto;
+}
+.rename-conversation-dialog::backdrop { background: rgba(0, 0, 0, 0.35); }
+.rename-conversation-dialog h2 { margin: 0 0 20px; font-size: 18px; font-weight: 600; }
+.rename-conversation-dialog label { display: block; margin-bottom: 8px; font-size: 13px; }
+.rename-conversation-dialog input {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-chat);
+  color: var(--text-primary);
+  font-size: 14px;
+}
+.rename-conversation-hint { margin: 8px 0 0; font-size: 12px; color: var(--text-muted); }
+.rename-conversation-error { margin: 8px 0 0; font-size: 13px; color: var(--danger); }
+.rename-conversation-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; }
+.rename-conversation-actions button { padding: 8px 16px; border-radius: var(--radius-md); background: var(--bg-sidebar-hover); font-size: 13px; }
+.rename-conversation-actions .rename-conversation-save { color: white; background: var(--accent-blue); }
+.rename-conversation-actions button:hover { filter: brightness(0.95); }
+.rename-conversation-actions button:disabled { opacity: 0.5; cursor: default; }
 .chat-header-actions {
   display: flex;
   align-items: center;
@@ -1165,6 +1311,13 @@ code,
   color: var(--text-muted);
 }
 
+/* 动画作用在可继承的颜色上,让原生滚动条淡出时保留宽度与拖动命中区。 */
+@property --chat-scrollbar-color {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+
 .chat-scroll-area {
   flex: 1;
   min-height: 0;
@@ -1179,6 +1332,16 @@ code,
   align-items: center;
   flex-direction: column;
   gap: 22px;
+  --chat-scrollbar-color: transparent;
+  transition: --chat-scrollbar-color 180ms ease;
+}
+.chat-scroll-area.is-scrolling {
+  --chat-scrollbar-color: var(--scrollbar-thumb);
+  transition-duration: 60ms;
+}
+.chat-scroll-area::-webkit-scrollbar-thumb { background: var(--chat-scrollbar-color); }
+@media (prefers-reduced-motion: reduce) {
+  .chat-scroll-area { transition: none; }
 }
 .chat-scroll-area > .user-msg-container,
 .chat-scroll-area > .assistant-block,
@@ -1256,6 +1419,50 @@ code,
   min-width: 0;
   line-height: 1.65;
 }
+.user-message-actions .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.user-message-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-height: 24px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.user-message-actions time { margin-right: 4px; white-space: nowrap; }
+.user-message-action { width: 28px; height: 28px; padding: 0; justify-content: center; }
+.user-message-editor {
+  width: 85%;
+  min-width: 0;
+  padding: 12px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-chat-bubble-user);
+}
+.user-message-editor textarea {
+  display: block;
+  width: 100%;
+  min-height: 80px;
+  padding: 2px;
+  resize: vertical;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  line-height: 1.65;
+}
+.user-message-editor textarea:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 3px; }
+.user-edit-note, .user-edit-error { margin: 10px 0 0; font-size: 12px; line-height: 1.5; }
+.user-edit-note { color: var(--text-muted); }
+.user-edit-error { color: var(--diff-del-fg); }
+.user-edit-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.user-edit-buttons button { padding: 6px 12px; border-radius: var(--radius-md); font-size: 12px; cursor: pointer; }
+.user-edit-cancel { background: transparent; color: var(--text-primary); }
+.user-edit-submit { background: var(--text-primary); color: var(--bg-chat); }
+.user-edit-buttons button:disabled { opacity: .45; cursor: not-allowed; }
+.user-edit-buttons button:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
 .user-attachments {
   display: flex;
   flex-wrap: wrap;
@@ -1263,14 +1470,27 @@ code,
   gap: 6px;
   max-width: 85%;
 }
+/* 缩略图是打开全屏查看的按钮:图片铺满按钮,圆角由按钮裁出。 */
 .user-attachment-thumb {
   display: block;
   width: 120px;
   height: 120px;
   max-width: 100%;
-  object-fit: cover;
+  padding: 0;
+  overflow: hidden;
   border-radius: var(--radius-md);
   background: var(--bg-surface-subtle);
+  cursor: zoom-in;
+}
+.user-attachment-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: opacity 140ms ease;
+}
+.user-attachment-thumb:hover img {
+  opacity: 0.88;
 }
 .user-attachment-thumb:only-child {
   width: 140px;
@@ -6687,12 +6907,23 @@ button.turn-changes-path:hover { color: var(--accent-blue); }
 /* ---------- 界面动效 ---------- */
 
 .main-stage {
+  --stage-left-inset: 0px;
+  --stage-right-inset: 0px;
   position: relative;
   flex: 1;
   min-width: 0;
   min-height: 0;
   display: flex;
+  /* 玻璃底层包住整块纸面;底部与收起侧栏的一侧只留窄边。 */
+  padding: 0 var(--stage-right-inset) var(--glass-edge-inset) var(--stage-left-inset);
+  background:
+    linear-gradient(var(--bg-sidebar-glass), var(--bg-sidebar-glass)) bottom / 100% var(--glass-edge-inset) no-repeat,
+    linear-gradient(var(--bg-sidebar-glass), var(--bg-sidebar-glass)) top left / var(--stage-left-inset) calc(100% - var(--glass-edge-inset)) no-repeat,
+    linear-gradient(var(--bg-sidebar-glass), var(--bg-sidebar-glass)) top right / var(--stage-right-inset) calc(100% - var(--glass-edge-inset)) no-repeat;
 }
+.vela-window.left-collapsed .main-stage { --stage-left-inset: var(--glass-edge-inset); }
+.vela-window.right-collapsed .main-stage,
+.main-stage:has(.settings-view) { --stage-right-inset: var(--glass-edge-inset); }
 .main-stage-pane {
   position: relative;
   flex: 1;
@@ -6736,6 +6967,8 @@ button.turn-changes-path:hover { color: var(--accent-blue); }
     min-width: min(var(--workbench-width, 640px), max(0px, calc(100vw - var(--sidebar-left-width) - 24px)));
     box-shadow: inset 1px 0 0 var(--border-strong), -12px 0 28px rgba(20, 20, 20, 0.1);
   }
+  /* 浮层模式下对话纸面仍延伸到右缘,自身也需要完整的右侧圆角。 */
+  .vela-window:not(.layout-floating) .main-stage-pane > .main-chat-view { --paper-right-radius: var(--glass-fillet); }
   .workbench-panel.is-context-open {
     right: var(--context-panel-overlay-width);
     width: min(var(--workbench-width, 640px), max(0px, calc(100vw - var(--sidebar-left-width) - var(--context-panel-overlay-width) - 24px)));
@@ -7652,7 +7885,7 @@ button.turn-changes-path:hover { color: var(--accent-blue); }
   transition: transform 160ms var(--motion-ease-enter), opacity 160ms var(--motion-ease-enter);
 }
 .subchat-item.active::before { transform: scaleY(1); opacity: 1; }
-.subchat-archive { transition: width 140ms var(--motion-ease-enter), margin-left 140ms var(--motion-ease-enter), opacity 140ms ease, background-color 100ms ease, color 100ms ease; }
+.subchat-action { transition: width 140ms var(--motion-ease-enter), margin-left 140ms var(--motion-ease-enter), opacity 140ms ease, background-color 100ms ease, color 100ms ease; }
 
 .panel-disclosure-content { display: grid; grid-template-rows: 0fr; padding: 0; transition: grid-template-rows 220ms var(--motion-ease-enter); }
 .panel-disclosure.open .panel-disclosure-content { grid-template-rows: 1fr; }
@@ -7707,4 +7940,182 @@ button.turn-changes-path:hover { color: var(--accent-blue); }
   .content-swap-current, .content-swap-outgoing, .motion-list-item, .motion-list-body,
   .tool-card, .tool-run, .tool-compact-item, .tool-compact-group, .diff-content-enter,
   .composer-action-slot > .send-action-blue-btn, .subchat-item::before, .approval-btn { transform: none !important; }
+}
+
+/*
+ * 全屏图片查看器(components/ImageViewer.tsx):从自己发送的缩略图打开,按视口适配展示,
+ * 滚轮定点缩放、拖动平移。逐帧变换由 JS 直接写 transform,这里只定义静态外观与 chrome 的进出场。
+ * 遮罩刻意不跟窗口主题走:浅色主题下也用深色底,图片四周才不会出现刺眼的亮边。
+ */
+.image-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  opacity: 0;
+  background: rgba(12, 14, 18, 0.9);
+  backdrop-filter: blur(18px) saturate(150%);
+  transition: opacity 200ms var(--motion-ease-enter);
+}
+.image-viewer.is-open { opacity: 1; }
+/* 退场期间只负责把画面还给对话,不再接受操作。 */
+.image-viewer.is-leaving { pointer-events: none; }
+.image-viewer:focus-visible { outline: none; }
+
+.image-viewer-stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  /* 拖动时不要触发浏览器自己的滚动、缩放与文本选择。 */
+  touch-action: none;
+  cursor: grab;
+}
+.image-viewer-stage:active { cursor: grabbing; }
+/*
+ * 图片按 left/top 50% 对齐视口中心,再由 JS 写的 transform(translate(-50%,-50%) + 平移 + 缩放)布局。
+ * 不用 grid 居中是因为图片常常比视口大好几倍,超出容器时的对齐行为在不同引擎上并不一致。
+ */
+.image-viewer-image {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: block;
+  max-width: none;
+  max-height: none;
+  opacity: 0;
+  transform-origin: center center;
+  will-change: transform;
+  user-select: none;
+  -webkit-user-drag: none;
+  transition: opacity 180ms ease;
+}
+.image-viewer-image.is-ready { opacity: 1; }
+.image-viewer-error {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 13px;
+}
+
+/* 工具栏整体不进事件,只有按钮本身接收指针,免得拖动图片时被悬浮控件挡住。 */
+.image-viewer-chrome {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+.image-viewer.is-open .image-viewer-chrome { opacity: 1; transition-delay: 90ms; }
+.image-viewer.is-leaving .image-viewer-chrome { opacity: 0; transition: opacity 100ms ease; }
+.image-viewer-chrome > * { pointer-events: auto; }
+
+.image-viewer-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius-pill);
+  color: rgba(255, 255, 255, 0.88);
+  background: rgba(22, 24, 30, 0.62);
+  backdrop-filter: blur(14px);
+  transition: background-color 120ms ease, color 120ms ease, transform 100ms ease;
+}
+.image-viewer-close:hover { background: rgba(42, 45, 55, 0.86); color: #fff; }
+.image-viewer-close:active { transform: scale(0.96); }
+
+.image-viewer-controls {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius-pill);
+  color: rgba(255, 255, 255, 0.88);
+  background: rgba(22, 24, 30, 0.78);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(16px);
+}
+.image-viewer-action,
+.image-viewer-percent {
+  display: grid;
+  place-items: center;
+  height: 30px;
+  border-radius: var(--radius-pill);
+  color: inherit;
+  transition: background-color 120ms ease, color 120ms ease, transform 100ms ease;
+}
+.image-viewer-action { width: 30px; }
+.image-viewer-action:hover:not(:disabled), .image-viewer-percent:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
+.image-viewer-action:active:not(:disabled) { transform: scale(0.94); }
+.image-viewer-action:disabled { opacity: 0.3; cursor: default; }
+.image-viewer-percent {
+  min-width: 58px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+.image-viewer-divider { width: 1px; height: 18px; margin: 0 4px; background: rgba(255, 255, 255, 0.16); }
+.image-viewer-counter { padding: 0 8px 0 4px; color: rgba(255, 255, 255, 0.72); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+.image-viewer-nav {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  /* 用 margin 而不是 transform 抵消高度,把 transform 留给按压缩放。 */
+  margin-top: -20px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-pill);
+  color: rgba(255, 255, 255, 0.88);
+  background: rgba(22, 24, 30, 0.62);
+  backdrop-filter: blur(14px);
+  opacity: 0;
+  transition: opacity 160ms ease, background-color 120ms ease, color 120ms ease, transform 100ms ease;
+}
+.image-viewer.is-open .image-viewer-nav { opacity: 1; transition-delay: 90ms; }
+.image-viewer.is-leaving .image-viewer-nav { opacity: 0; transition: opacity 100ms ease; }
+.image-viewer-nav.is-prev { left: 18px; }
+.image-viewer-nav.is-next { right: 18px; }
+.image-viewer-nav:hover { background: rgba(42, 45, 55, 0.86); color: #fff; }
+.image-viewer-nav:active { transform: scale(0.95); }
+
+.image-viewer-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 76px;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  border-radius: var(--radius-pill);
+  color: rgba(255, 255, 255, 0.62);
+  background: rgba(20, 22, 28, 0.5);
+  font-size: 11.5px;
+  letter-spacing: 0.01em;
+  pointer-events: none;
+  transition: opacity 260ms ease;
+}
+/* 第一次缩放或拖动之后提示就退场,之后不再出现。 */
+.image-viewer-hint.is-hidden { opacity: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .image-viewer, .image-viewer-chrome, .image-viewer-nav, .image-viewer-image, .image-viewer-hint { transition: none; }
+  .image-viewer-close:active, .image-viewer-action:active:not(:disabled), .image-viewer-nav:active { transform: none; }
+}
+
+/* 降低透明度时改成实色底:模糊在这种满屏遮罩上换不来可读性。 */
+@media (prefers-reduced-transparency: reduce) {
+  .image-viewer { background: rgba(10, 11, 14, 0.97); backdrop-filter: none; }
+  .image-viewer-controls, .image-viewer-nav, .image-viewer-close { background: rgba(26, 28, 34, 0.96); backdrop-filter: none; }
 }

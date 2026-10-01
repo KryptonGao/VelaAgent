@@ -1,3 +1,4 @@
+import { TurnCheckpoints, type TurnCheckpoint } from "./turn-checkpoints";
 import { TraceRecorder } from "./trace";
 import type { TraceUpdate } from "@vela/shared";
 import {
@@ -55,10 +56,11 @@ import {
   measureSessionUsage,
   userMessageText,
 } from "./context-usage";
-import { clipTitle, requestConversationTitle } from "./conversation-title";
+import { clipTitle, normalizeManualConversationTitle, requestConversationTitle } from "./conversation-title";
 import { ConversationStore } from "./conversation-store";
 import { legacyAgentTranscript, recoverLegacyAgents, type StoredAgent } from "./agent-history";
 import { createPersistedSession } from "./session-persistence";
+import { copyTurnTimings, readTurnTimings, turnTimingEntryType } from "./turn-timing";
 import {
   createGoalValidation,
   goalCompletionBlocker,
@@ -114,6 +116,7 @@ import { migrateExternalSkills, scanExternalSkills as scanExternalSkillSources }
 import { activityFromCall, activityFromExecution, activityFromOutput } from "./tool-activity";
 import {
   branchLeafForTurn,
+  isVisibleTranscriptMessage,
   countTranscriptActivity,
   transcriptFromMessages,
   transcriptFromProjection,
@@ -159,6 +162,16 @@ export interface AgentRuntimeOptions {
   onActiveCwd?: (cwd: string) => void;
 }
 
+interface RewindMetadata {
+  plans: ProposedPlanItem[];
+  latestProposedPlanId: string | null;
+  executionPlans: ExecutionPlan[];
+  activeExecutionPlanId: string | null;
+  goal: ConversationGoal | null;
+  agents: StoredAgent[];
+  agentLeaves: Record<string, string | null>;
+}
+
 interface Conversation {
   id: string;
   session: AgentSession | null;
@@ -168,6 +181,7 @@ interface Conversation {
   snapshot: SessionSnapshot;
   /** 首条消息最多请求一次会话当前模型生成标题。 */
   titleGenerationStarted: boolean;
+  titleManuallySet: boolean;
   unsubscribe: (() => void) | null;
   createdAt: number;
   updatedAt: number;
@@ -201,6 +215,7 @@ interface Conversation {
   };
   /** 非空表示已归档:侧边栏隐藏、工作区恢复跳过,可在设置里搜索后取消归档。 */
   archivedAt: number | null;
+  activeTurn?: { startedAt: number; leafId: string | null };
   /** 这个对话的 agent 树控制面；会话启动时创建，会话销毁时释放。 */
   control: AgentControl | null;
   storedAgents: StoredAgent[];
@@ -238,6 +253,8 @@ export class AgentRuntime {
   /** 每次停用、启用或删除 Skill 时递增，用于让已打开的会话在下次发言前刷新 Skill。 */
   private skillsRevision = 0;
   private gate: Promise<void> = Promise.resolve();
+  private readonly rewindingWorkspaces = new Set<string>();
+  private readonly overlappingCheckpointRuns = new Set<string>();
 
   constructor(private readonly options: AgentRuntimeOptions) {
     this.currentCwd = options.cwd;
@@ -278,6 +295,8 @@ export class AgentRuntime {
         createdAt: entry.createdAt,
         updatedAt: entry.updatedAt,
         archivedAt: entry.archivedAt,
+        ...(entry.snapshot.turnStartedAt !== undefined ? { turnStartedAt: entry.snapshot.turnStartedAt } : {}),
+        ...(entry.snapshot.turnCompletedAt !== undefined ? { turnCompletedAt: entry.snapshot.turnCompletedAt } : {}),
       }));
   }
 
@@ -336,9 +355,11 @@ export class AgentRuntime {
       const sources = transcriptSourcesFromProjection(manager.buildSessionProjection());
       const leaf = branchLeafForTurn(sources, turnIndex);
       if (!leaf) throw new Error("找不到要分支的回复");
+      const sourceTimings = readTurnTimings(manager.getBranch());
       const branchedFile = manager.createBranchedSession(leaf);
       if (!branchedFile) throw new Error("无法创建分支会话");
       const branched = SessionManager.open(branchedFile, this.sessionDir(), source.snapshot.cwd);
+      copyTurnTimings(sourceTimings, branched);
       const branchedSources = transcriptSourcesFromProjection(branched.buildSessionProjection());
       await this.rememberActiveSelection();
       const entry = this.addEntry(source.snapshot.cwd, {
@@ -374,6 +395,17 @@ export class AgentRuntime {
     });
   }
 
+  /** 改名不激活会话或改变最近使用顺序，运行中的会话也可改名。 */
+  async renameConversation(id: string, rawTitle: unknown): Promise<void> {
+    const title = normalizeManualConversationTitle(rawTitle);
+    await this.ready();
+    const entry = this.conversations.get(id);
+    if (!entry) throw new Error("对话不存在或已结束");
+    entry.titleManuallySet = true;
+    entry.titleGenerationStarted = true;
+    this.patchEntry(entry, { title });
+  }
+
   /** 归档一个对话:侧边栏隐藏、历史保留。归档当前对话时自动切到最近的未归档对话。 */
   async archiveConversation(id: string): Promise<SessionSnapshot> {
     return this.exclusive(async () => {
@@ -382,6 +414,7 @@ export class AgentRuntime {
       if (!entry) throw new Error("对话不存在或已结束");
       entry.archivedAt = Date.now();
       this.persistEntry(entry);
+      this.store.flushSync();
       this.emitStatus(entry);
       if (this.activeId === id) {
         const fallback = [...this.conversations.values()]
@@ -407,14 +440,94 @@ export class AgentRuntime {
       if (!entry) throw new Error("对话不存在或已结束");
       entry.archivedAt = null;
       this.persistEntry(entry);
+      this.store.flushSync();
       this.emitStatus(entry);
       return this.getSnapshot();
     });
   }
 
+  /** Rewind in the same chat. A marker persists the selected branch even before resending. */
+  async rewindConversation(conversationId: string, turnIndex: number): Promise<void> {
+    await this.exclusive(async () => {
+      await this.ready();
+      const entry = this.conversations.get(conversationId);
+      if (!entry?.session || !entry.sessionManager) throw new Error("对话不存在或已结束");
+      for (const other of this.conversations.values()) {
+        if (other.snapshot.cwd !== entry.snapshot.cwd) continue;
+        if (other.driving || other.session?.isStreaming || other.control?.list().some(agent => agent.kind !== "root" && agent.status === "running")) {
+          throw new Error("工作区还有任务运行中，请停止或等待完成后修改消息");
+        }
+      }
+      const manager = entry.sessionManager;
+      const sources = transcriptSourcesFromProjection(manager.buildSessionProjection());
+      const user = sources.filter(source => source.message.role === "user" && isVisibleTranscriptMessage(source.message))[turnIndex];
+      if (!user?.entryId) throw new Error("找不到要修改的消息");
+      const checkpoints = this.checkpoints(entry);
+      const points = await checkpoints.list();
+      const point = points.find(item => item.userEntryId === user.entryId);
+      if (!point) throw new Error("这条历史消息没有文件检查点，无法回退更改");
+      const branch = manager.getBranch();
+      const position = branch.findIndex(item => item.id === user.entryId);
+      const abandoned = new Set(branch.slice(position).map(item => item.id));
+      const selected = points.filter(item => item.userEntryId && abandoned.has(item.userEntryId))
+        .sort((a, b) => branch.findIndex(item => item.id === a.userEntryId) - branch.findIndex(item => item.id === b.userEntryId));
+      // Validate files before touching chat history; conflict failures leave the whole chat intact.
+      this.rewindingWorkspaces.add(entry.snapshot.cwd);
+      try {
+        await checkpoints.restore(selected);
+        const selection = { model: entry.session.model, thinkingLevel: entry.session.thinkingLevel as ThinkingLevel };
+        this.detachEntry(entry);
+        if (point.leaf) manager.branch(point.leaf); else manager.resetLeaf();
+        manager.appendCustomEntry("vela_rewind", { turnIndex });
+        entry.plans = point.metadata.plans;
+        entry.latestProposedPlanId = point.metadata.latestProposedPlanId;
+        entry.executionPlans = point.metadata.executionPlans;
+        entry.activeExecutionPlanId = point.metadata.activeExecutionPlanId;
+        entry.storedAgents = point.metadata.agents;
+        for (const agent of entry.storedAgents) {
+          if (!agent.sessionFile || !existsSync(agent.sessionFile)) continue;
+          const child = SessionManager.open(agent.sessionFile, this.childSessionDir(entry.id), entry.snapshot.cwd);
+          const leaf = point.metadata.agentLeaves[agent.id];
+          if (leaf) child.branch(leaf); else child.resetLeaf();
+          child.appendCustomEntry("vela_rewind", { turnIndex });
+        }
+        entry.agentMutationsSeen = new Set(entry.storedAgents.filter(agent => agent.mutated).map(agent => agent.id));
+        entry.goalValidationEvidence.clear();
+        entry.goalValidationSequence = Math.max(0, ...(point.metadata.goal?.validation?.checks.map(check => check.sequence) ?? [0]));
+        entry.planStream = null;
+        entry.planStreamPlan = null;
+        entry.generation = { stepStartedAt: null, firstTokenAt: null, outputTokens: 0, elapsedMs: 0 };
+        entry.snapshot.goal = point.metadata.goal;
+        this.syncPlanState(entry);
+        const retainedTraceTurns = branch.slice(0, position).filter(item => item.type === "message" && item.message.role === "user" &&
+          isVisibleTranscriptMessage(item.message as AgentMessage) && userMessageText(item.message as AgentMessage) !== goalContinuePrompt).length;
+        this.trace(entry.id).rewindTo(retainedTraceTurns);
+        this.store.update(entry.id, countTranscriptActivity(transcriptSourcesFromProjection(manager.buildSessionProjection())));
+        this.persistEntry(entry);
+        this.store.flushSync();
+        await checkpoints.remove(selected);
+        await this.startInternal(entry, selection);
+        this.emit({ type: "agents", conversationId: entry.id, agents: entry.control?.list() ?? [] });
+      } finally { this.rewindingWorkspaces.delete(entry.snapshot.cwd); }
+    });
+  }
+
+  private checkpoints(entry: Conversation) {
+    return new TurnCheckpoints<RewindMetadata>(join(this.options.agentDir, "checkpoints", entry.id), entry.snapshot.cwd, this.options.agentDir);
+  }
+
+  private async finishLatestCheckpoint(entry: Conversation) {
+    if (entry.control?.list().some(agent => agent.kind !== "root" && agent.status === "running")) return;
+    const checkpoints = this.checkpoints(entry);
+    const branch = entry.sessionManager?.getBranch() ?? [];
+    const points = await checkpoints.list();
+    const point = [...branch].reverse().map(item => points.find(point => point.userEntryId === item.id)).find(Boolean);
+    if (point) await checkpoints.finish(point, point.userEntryId);
+  }
+
   async prompt(conversationId: string, text: string, images?: ImageAttachment[]): Promise<void> {
     const entry = this.requireIdle(conversationId);
-    if (!entry.titleGenerationStarted && entry.snapshot.title === "新对话") {
+    if (!entry.titleManuallySet && !entry.titleGenerationStarted && entry.snapshot.title === "新对话") {
       entry.titleGenerationStarted = true;
       const fallbackTitle = clipTitle(text);
       this.patchEntry(entry, { title: fallbackTitle, updatedAt: Date.now() });
@@ -824,7 +937,8 @@ export class AgentRuntime {
     const entry = this.conversations.get(conversationId);
     const session = entry?.session ?? null;
     if (!session || !entry) return [];
-    return transcriptFromProjection(session.sessionManager.buildSessionProjection(), entry.plans);
+    const manager = session.sessionManager;
+    return transcriptFromProjection(manager.buildSessionProjection(), entry.plans, readTurnTimings(manager.getBranch()));
   }
 
   /** 捕获指定对话当前选定的模型；独立调用，不进入 drive 或修改会话消息。 */
@@ -901,6 +1015,7 @@ export class AgentRuntime {
           tools: defaultToolPolicy.availableTools(stored.mode, activeExecution !== null),
         },
         titleGenerationStarted: stored.title !== "新对话",
+        titleManuallySet: stored.titleManuallySet === true,
         unsubscribe: null,
         createdAt: stored.createdAt,
         updatedAt: stored.updatedAt,
@@ -964,6 +1079,7 @@ export class AgentRuntime {
       });
       if (
         !title ||
+        entry.titleManuallySet ||
         this.conversations.get(entry.id) !== entry ||
         entry.snapshot.title !== fallbackTitle
       ) {
@@ -1002,6 +1118,7 @@ export class AgentRuntime {
       sessionFile: sessionManager.getSessionFile() ?? null,
       snapshot,
       titleGenerationStarted: false,
+      titleManuallySet: false,
       unsubscribe: null,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -1033,11 +1150,11 @@ export class AgentRuntime {
     return entry;
   }
 
-  private async startInternal(entry: Conversation): Promise<SessionSnapshot> {
+  private async startInternal(entry: Conversation, selection?: { model: Model<Api> | undefined; thinkingLevel: ThinkingLevel }): Promise<SessionSnapshot> {
     this.patchEntry(entry, { status: "starting", error: null });
     try {
       const directory = await this.readyDirectory();
-      const { model: chosen, thinkingLevel } = this.conversationSelection(directory);
+      const { model: chosen, thinkingLevel } = selection ?? this.conversationSelection(directory);
       const cwd = entry.snapshot.cwd;
       // 新对话:登记时已建或此处新建;恢复的对话:按文件打开以接续历史。
       const sessionManager = entry.sessionManager
@@ -1439,6 +1556,22 @@ export class AgentRuntime {
   }
 
   private patchEntry(entry: Conversation, patch: Partial<SessionSnapshot> & { updatedAt?: number }): void {
+    if (patch.status === "streaming" && entry.snapshot.status !== "streaming") {
+      const startedAt = Date.now();
+      entry.activeTurn = { startedAt, leafId: entry.sessionManager?.getLeafId() ?? null };
+      patch = { ...patch, turnStartedAt: startedAt, turnCompletedAt: undefined };
+    } else if (patch.status && patch.status !== "streaming" && entry.activeTurn) {
+      const completedAt = Date.now();
+      const { startedAt, leafId } = entry.activeTurn;
+      const manager = entry.sessionManager;
+      const branch = manager?.getBranch() ?? [];
+      const start = leafId ? branch.findIndex(item => item.id === leafId) + 1 : 0;
+      const assistant = branch.slice(start).findLast(item => item.type === "message" &&
+        item.message.role === "assistant" && isVisibleTranscriptMessage(item.message as AgentMessage));
+      if (assistant) manager?.appendCustomEntry(turnTimingEntryType, { assistantEntryId: assistant.id, startedAt, completedAt });
+      entry.activeTurn = undefined;
+      patch = { ...patch, turnCompletedAt: completedAt };
+    }
     entry.snapshot = {
       ...entry.snapshot,
       ...patch,
@@ -1460,6 +1593,7 @@ export class AgentRuntime {
       id: entry.id,
       cwd: entry.snapshot.cwd,
       title: entry.snapshot.title,
+      titleManuallySet: entry.titleManuallySet,
       createdAt: entry.createdAt,
       updatedAt: entry.updatedAt,
       messageCount: this.store.get(entry.id)?.messageCount ?? 0,
@@ -1531,6 +1665,7 @@ export class AgentRuntime {
     const entry = this.conversations.get(conversationId);
     const session = entry?.session;
     if (!entry || !session) throw new Error("对话不存在或已结束");
+    if (this.rewindingWorkspaces.has(entry.snapshot.cwd)) throw new Error("工作区正在回退消息，请稍后再发送");
     if (entry.driving || session.isStreaming) throw new Error("上一个回复还在进行中");
     if (!session.model || !this.directory?.isAvailable(session.model)) {
       throw new Error("先选择一个已登录或已配置密钥的模型");
@@ -1591,6 +1726,10 @@ export class AgentRuntime {
         current = { text: goalContinuePrompt };
       }
     } finally {
+      if (options.hidden) {
+        try { await this.finishLatestCheckpoint(entry); }
+        catch (error) { this.failPrompt(entry, error instanceof Error ? error.message : "无法保存文件检查点"); }
+      }
       entry.driving = false;
       entry.control?.setRootStatus(entry.stopRequested ? "aborted" : "idle");
       if (entry.snapshot.status === "streaming") {
@@ -1611,14 +1750,34 @@ export class AgentRuntime {
       return "error";
     }
     if (entry.stopRequested) return "aborted";
+    this.overlappingCheckpointRuns.delete(entry.id);
+    for (const other of this.conversations.values()) {
+      if (other.id !== entry.id && other.snapshot.cwd === entry.snapshot.cwd && (other.driving || other.session?.isStreaming ||
+        other.control?.list().some(agent => agent.kind !== "root" && agent.status === "running"))) {
+        this.overlappingCheckpointRuns.add(entry.id);
+        this.overlappingCheckpointRuns.add(other.id);
+      }
+    }
     const previousError = readSessionError(session);
+    let checkpoint: TurnCheckpoint<RewindMetadata> | null = null;
     this.patchEntry(entry, {
       status: "streaming",
       error: null,
-      title: options.rename && entry.snapshot.title === "新对话" ? clipTitle(text) : entry.snapshot.title,
+      title: options.rename && !entry.titleManuallySet && entry.snapshot.title === "新对话" ? clipTitle(text) : entry.snapshot.title,
       updatedAt: Date.now(),
     });
     try {
+      if (!isPlanExecutionPrompt(text)) {
+        checkpoint = await this.checkpoints(entry).begin(session.sessionManager.getLeafId(), structuredClone({
+          plans: entry.plans, latestProposedPlanId: entry.latestProposedPlanId,
+          executionPlans: entry.executionPlans, activeExecutionPlanId: entry.activeExecutionPlanId,
+          goal: entry.snapshot.goal, agents: entry.storedAgents,
+          agentLeaves: Object.fromEntries(entry.storedAgents.map(agent => [agent.id,
+            agent.sessionFile && existsSync(agent.sessionFile)
+              ? SessionManager.open(agent.sessionFile, this.childSessionDir(entry.id), entry.snapshot.cwd).getLeafId() : null,
+          ])),
+        }));
+      }
       await session.prompt(
         text,
         images && images.length > 0
@@ -1658,6 +1817,16 @@ export class AgentRuntime {
       this.trace(entry.id).settle("Failed");
       this.failPrompt(entry, failureMessage);
       return "error";
+    } finally {
+      if (checkpoint) {
+        const branch = session.sessionManager.getBranch();
+        const start = checkpoint.leaf ? branch.findIndex(item => item.id === checkpoint!.leaf) + 1 : 0;
+        const user = branch.slice(start).find(item => item.type === "message" && item.message.role === "user" && isVisibleTranscriptMessage(item.message as AgentMessage));
+        if (user) {
+          if (this.overlappingCheckpointRuns.has(entry.id)) checkpoint.unavailableReason = "这轮执行时有其他对话同时更改工作区，无法安全回退";
+          await this.checkpoints(entry).finish(checkpoint, user.id);
+        }
+      }
     }
   }
 
@@ -1775,6 +1944,8 @@ export class AgentRuntime {
     } catch (error) {
       this.failPrompt(entry, error instanceof Error ? error.message : "子代理结论投递失败");
     } finally {
+      try { await this.finishLatestCheckpoint(entry); }
+      catch (error) { this.failPrompt(entry, error instanceof Error ? error.message : "无法保存文件检查点"); }
       entry.driving = false;
       entry.control?.setRootStatus(entry.stopRequested ? "aborted" : "idle");
       if (entry.snapshot.status === "streaming") {

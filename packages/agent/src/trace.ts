@@ -22,7 +22,7 @@ import type {
   TraceUpdate,
   TraceUsage,
 } from "@vela/shared";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
 
 interface StoredNode {
@@ -41,7 +41,8 @@ interface StoredRequest {
 type RecordEntry =
   | { type: "node"; value: StoredNode }
   | { type: "request"; value: StoredRequest }
-  | { type: "context"; value: TraceContextSnapshot };
+  | { type: "context"; value: TraceContextSnapshot }
+  | { type: "reset"; value: { version: number; turn: number; sequence: number } };
 const clone = <T>(value: T): T =>
   value === undefined ? value : (JSON.parse(JSON.stringify(value)) as T);
 const summary = (value: string) => value.replace(/\s+/g, " ").slice(0, 220);
@@ -131,6 +132,11 @@ export class TraceRecorder {
             this.requests.set(record.value.request.id, record.value);
           else if (record.type === "context")
             this.contexts.set(record.value.id, record.value);
+          else if (record.type === "reset") {
+            this.version = record.value.version;
+            this.turn = record.value.turn;
+            this.sequence = record.value.sequence;
+          }
         } catch {
           this.warning = "轨迹文件部分记录无法读取；已保留可恢复内容。";
         }
@@ -754,6 +760,36 @@ export class TraceRecorder {
       }
     }
     this.flush();
+  }
+  /** Remove the abandoned turns from both the live view and persisted trace. */
+  rewindTo(turnIndex: number) {
+    this.flush();
+    for (const [id, stored] of this.nodes) if (stored.node.turn > turnIndex) this.nodes.delete(id);
+    for (const [id, stored] of this.requests) if (stored.request.turn > turnIndex) this.requests.delete(id);
+    const needed = new Set([...this.requests.values()].map(stored => stored.request.contextId));
+    for (const stored of this.nodes.values()) if (stored.contextId) needed.add(stored.contextId);
+    for (const id of this.contexts.keys()) if (!needed.has(id)) this.contexts.delete(id);
+    this.calls.clear();
+    for (const stored of this.nodes.values()) if (stored.node.kind === "tool-call" && stored.node.toolCallId) this.calls.set(stored.node.toolCallId, stored.node.id);
+    this.turn = turnIndex;
+    this.currentRequest = null;
+    this.requestClock.clear();
+    this.toolClock.clear();
+    this.requestPending = false;
+    this.operation = null;
+    this.lastContext = [...this.contexts.keys()].at(-1) ?? null;
+    this.version++;
+    const records: RecordEntry[] = [
+      { type: "reset", value: { version: this.version, turn: this.turn, sequence: this.sequence } },
+      ...[...this.contexts.values()].map(value => ({ type: "context" as const, value })),
+      ...[...this.nodes.values()].map(value => ({ type: "node" as const, value })),
+      ...[...this.requests.values()].map(value => ({ type: "request" as const, value })),
+    ];
+    mkdirSync(dirname(this.file), { recursive: true });
+    writeFileSync(`${this.file}.tmp`, records.map(record => JSON.stringify(record)).join("\n") + "\n");
+    renameSync(`${this.file}.tmp`, this.file);
+    this.needsSeparator = false;
+    this.emit({ type: "trace", conversationId: this.conversationId, ...this.snapshot(), reset: true });
   }
   forkTo(target: TraceRecorder, turnIndex: number) {
     for (const [id, s] of this.nodes)

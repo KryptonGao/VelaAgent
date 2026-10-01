@@ -21,6 +21,7 @@ import { SessionHost } from "./session-host";
 import { ensureLoginShellPath } from "./shell-path";
 import { TerminalHost } from "./terminal-host";
 import { prepareVelaHome, resolveVelaHome } from "./vela-home";
+import { UiStorage } from "./ui-storage";
 import appIconPath from "../../resources/icon.png?asset";
 
 app.setName("Vela");
@@ -114,6 +115,25 @@ async function start(): Promise<void> {
   const fallbackCwd = resolve(app.getAppPath(), "../..");
   const home = resolveVelaHome();
   await prepareVelaHome(home, app.getPath("userData"));
+
+  const uiStorage = new UiStorage(join(home, "ui-state.json"));
+  ipcMain.on(IpcChannel.appUiStorageGet, (event, key: unknown) => {
+    try {
+      event.returnValue = { value: uiStorage.getItem(key) };
+    } catch (error) {
+      console.error("[vela] UI storage read failed", error);
+      event.returnValue = { error: String(error) };
+    }
+  });
+  ipcMain.on(IpcChannel.appUiStorageSet, (event, key: unknown, value: unknown) => {
+    try {
+      uiStorage.setItem(key, value);
+      event.returnValue = {};
+    } catch (error) {
+      console.error("[vela] UI storage write failed", error);
+      event.returnValue = { error: String(error) };
+    }
+  });
 
   const workspaceManager = new WorkspaceManager(join(home, "workspaces.json"));
   const envManager = new ExecutionEnvironmentManager(fallbackCwd, join(home, "worktrees"));

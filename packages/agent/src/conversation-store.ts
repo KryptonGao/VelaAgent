@@ -2,8 +2,8 @@ import type { ConversationGoal, ExecutionPlan, ExecutionPlanItem, InteractionMod
 import { normalizeStoredGoal } from "./goal-validation";
 import { normalizeStoredAgents, type StoredAgent } from "./agent-history";
 import { latestPlan, migrateLegacyPlan, sortPlans, type LegacyPlanRecord } from "./plan";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 export interface StoredConversation {
@@ -11,6 +11,8 @@ export interface StoredConversation {
   id: string;
   cwd: string;
   title: string;
+  /** 旧索引缺省为 false；手动名称不再被自动标题覆盖。 */
+  titleManuallySet?: boolean;
   createdAt: number;
   updatedAt: number;
   messageCount: number;
@@ -48,6 +50,8 @@ const persistDelayMs = 400;
  */
 export class ConversationStore {
   private readonly conversations = new Map<string, StoredConversation>();
+  /** 上次读取/保存的本进程快照，用于只合并实际修改的字段。 */
+  private readonly saved = new Map<string, StoredConversation>();
   private timer: NodeJS.Timeout | null = null;
   private dirty = false;
 
@@ -59,7 +63,10 @@ export class ConversationStore {
       if (!Array.isArray(raw.conversations)) return;
       for (const entry of raw.conversations) {
         const parsed = normalize(entry);
-        if (parsed) this.conversations.set(parsed.id, parsed);
+        if (parsed) {
+          this.conversations.set(parsed.id, parsed);
+          this.saved.set(parsed.id, structuredClone(entry));
+        }
       }
     } catch {
       // 首次启动或文件损坏时从空列表开始。
@@ -92,21 +99,8 @@ export class ConversationStore {
     if (this.timer) return;
     this.timer = setTimeout(() => {
       this.timer = null;
-      void this.persist();
+      this.flushSync();
     }, persistDelayMs);
-  }
-
-  private async persist(): Promise<void> {
-    this.dirty = false;
-    const payload: StorePayload = { version: 2, conversations: [...this.conversations.values()] };
-    const tempPath = `${this.filePath}.tmp`;
-    try {
-      await mkdir(dirname(this.filePath), { recursive: true });
-      await writeFile(tempPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-      await rename(tempPath, this.filePath);
-    } catch {
-      // 磁盘不可写时保留内存状态,下次变更再试。
-    }
   }
 
   /** 进程退出前的同步落盘(before-quit 里没有异步余量)。 */
@@ -116,17 +110,49 @@ export class ConversationStore {
       this.timer = null;
     }
     if (!this.dirty) return;
-    this.dirty = false;
-    const payload: StorePayload = { version: 2, conversations: [...this.conversations.values()] };
     // 同步写也用临时文件 + rename,强制退出时不会留下写了一半的 JSON。
-    const tempPath = `${this.filePath}.tmp`;
+    const tempPath = `${this.filePath}.${process.pid}.tmp`;
     try {
+      // 另一个实例可能已保存归档/标题等字段，不能用未改动的旧快照覆盖它们。
+      const merged = this.readLatest();
+      for (const [id, entry] of this.conversations) {
+        const previous = this.saved.get(id);
+        if (!previous) {
+          merged.set(id, entry);
+          continue;
+        }
+        const changed = Object.fromEntries(Object.entries(entry).filter(([key, value]) =>
+          JSON.stringify(value) !== JSON.stringify(previous[key as keyof StoredConversation]),
+        ));
+        merged.set(id, { ...(merged.get(id) ?? entry), ...changed });
+      }
+      const payload: StorePayload = { version: 2, conversations: [...merged.values()] };
       mkdirSync(dirname(this.filePath), { recursive: true });
       writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
       renameSync(tempPath, this.filePath);
-    } catch {
-      // 忽略退出时的写盘失败。
+      for (const [id, entry] of this.conversations) this.saved.set(id, structuredClone(entry));
+      this.dirty = false;
+    } catch (error) {
+      // 保留 dirty，使退出或下次变更时仍会重试。
+      console.error("[vela] Failed to save conversations", error);
     }
+  }
+
+  private readLatest(): Map<string, StoredConversation> {
+    let raw: string;
+    try { raw = readFileSync(this.filePath, "utf8"); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return new Map();
+      throw error;
+    }
+    const payload = JSON.parse(raw) as Partial<StorePayload>;
+    if (!payload || !Array.isArray(payload.conversations)) throw new Error("Invalid conversation index");
+    const result = new Map<string, StoredConversation>();
+    for (const entry of payload.conversations) {
+      // normalize() 有「重启后暂停 Goal」等恢复语义，写盘合并时必须保留原值。
+      if (entry && typeof entry.id === "string" && typeof entry.cwd === "string") result.set(entry.id, entry);
+    }
+    return result;
   }
 }
 
@@ -165,6 +191,7 @@ function normalize(entry: unknown): StoredConversation | null {
     id: record.id,
     cwd: record.cwd,
     title: typeof record.title === "string" ? record.title : "新对话",
+    titleManuallySet: record.titleManuallySet === true,
     createdAt: numberOr(record.createdAt, Date.now()),
     updatedAt: numberOr(record.updatedAt, Date.now()),
     messageCount: numberOr(record.messageCount, 0),

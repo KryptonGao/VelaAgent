@@ -1,3 +1,4 @@
+import { uiStorage } from "../ui-storage";
 import type { AppLocale } from "@vela/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -23,7 +24,7 @@ const storageKey = "vela.thinkingSummaries.v1";
 
 function readStoredSummaries(): Record<string, ThinkingSummaryState> {
   try {
-    return parseStoredSummaries(localStorage.getItem(storageKey));
+    return parseStoredSummaries(uiStorage.getItem(storageKey));
   } catch {
     return {};
   }
@@ -31,9 +32,9 @@ function readStoredSummaries(): Record<string, ThinkingSummaryState> {
 
 function writeStoredSummaries(records: Record<string, ThinkingSummaryState>) {
   try {
-    localStorage.setItem(storageKey, serializeStoredSummaries(records));
+    uiStorage.setItem(storageKey, serializeStoredSummaries(records));
   } catch {
-    // 写不进去时本次会话仍能显示,下次重开再重新请求。
+    console.error("[vela] Failed to save thinking summaries");
   }
 }
 

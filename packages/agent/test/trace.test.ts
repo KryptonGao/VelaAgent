@@ -526,3 +526,18 @@ describe("SDK agent loop integration", () => {
     assert.equal(trace.requests.length, 1);
   });
 });
+
+it("rewinds trace turns on disk and emits a replacement event", () => {
+  const { r: recorder, file, events: updates } = fixture();
+  recorder.restoreHistory([
+    { type: "message", id: "u1", parentId: null, timestamp: new Date(1000).toISOString(), message: { role: "user", content: "first", timestamp: 1000 } },
+    { type: "message", id: "u2", parentId: "u1", timestamp: new Date(2000).toISOString(), message: { role: "user", content: "second", timestamp: 2000 } },
+  ] as SessionEntry[]);
+  recorder.rewindTo(1);
+  assert.deepEqual(recorder.snapshot().nodes.filter(node => node.kind === "user").map(node => node.summary), ["first"]);
+  assert.equal(updates.at(-1)?.reset, true);
+  const reopened = new TraceRecorder("conv", file, () => {});
+  recorders.push(reopened);
+  assert.equal(reopened.snapshot().version, recorder.snapshot().version);
+  assert.deepEqual(reopened.snapshot().nodes.filter(node => node.kind === "user").map(node => node.summary), ["first"]);
+});

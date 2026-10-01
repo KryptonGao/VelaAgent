@@ -1,3 +1,4 @@
+import { uiStorage } from "../ui-storage";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   clampSidebarWidth,
@@ -31,7 +32,7 @@ export interface SidebarResize {
 function readStoredWidths(leftPanelOpen: boolean, rightPanelOpen: boolean): SidebarWidths {
   let raw: string | null = null;
   try {
-    raw = localStorage.getItem(sidebarWidthsStorageKey);
+    raw = uiStorage.getItem(sidebarWidthsStorageKey);
   } catch {
     // 隐私模式读不到本地存储时用默认宽度。
   }
@@ -93,7 +94,7 @@ export function useSidebarResize(leftPanelOpen = true, rightPanelOpen = true, wo
 
   useEffect(() => {
     try {
-      localStorage.setItem(sidebarWidthsStorageKey, JSON.stringify(widths));
+      uiStorage.setItem(sidebarWidthsStorageKey, JSON.stringify(widths));
     } catch {
       // 存不下时保留本次运行的选择。
     }

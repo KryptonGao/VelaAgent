@@ -1,3 +1,4 @@
+import { uiStorage } from "../ui-storage";
 import { useCallback, useEffect, useState } from "react";
 import {
   defaultDarkTheme,
@@ -42,7 +43,7 @@ export function modelKey(provider: string, id: string): string {
 
 function readStored<T>(key: string, accept: (value: unknown) => value is T, fallback: T): T {
   try {
-    const value = localStorage.getItem(key);
+    const value = uiStorage.getItem(key);
     if (accept(value)) return value;
   } catch {
     // 隐私模式无法读取本地存储时使用默认值。
@@ -52,7 +53,7 @@ function readStored<T>(key: string, accept: (value: unknown) => value is T, fall
 
 function writeStored(key: string, value: string) {
   try {
-    localStorage.setItem(key, value);
+    uiStorage.setItem(key, value);
   } catch {
     // 写不进去时仍保留本次会话的选择。
   }
@@ -60,7 +61,7 @@ function writeStored(key: string, value: string) {
 
 function readStoredJson<T>(key: string, accept: (value: unknown) => value is T, fallback: T): T {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = uiStorage.getItem(key);
     if (raw === null) return fallback;
     const value: unknown = JSON.parse(raw);
     if (accept(value)) return value;

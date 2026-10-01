@@ -1,5 +1,6 @@
 import { app, BrowserWindow, Menu, shell, type MenuItemConstructorOptions } from "electron";
 import { IpcChannel, type AppLocale, type MenuAction } from "@vela/shared";
+import desktopPackage from "../../package.json";
 
 const repoUrl = "https://github.com/KryptonGao/VelaAgent";
 let activeLocale: AppLocale = "zh-CN";
@@ -17,7 +18,7 @@ export function setApplicationLocale(locale: AppLocale): void {
   installApplicationMenu();
   app.setAboutPanelOptions({
     applicationName: "Vela",
-    applicationVersion: app.getVersion(),
+    applicationVersion: desktopPackage.shortVersion ?? app.getVersion(),
     credits: text("在你选定的代码仓库中工作的桌面 AI 编程助手。", "A desktop AI coding assistant that works in the code repository you choose."),
   });
 }

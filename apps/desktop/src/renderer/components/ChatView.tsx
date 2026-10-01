@@ -1,6 +1,6 @@
 import { TraceView } from "./trace/TraceView";
 import type { AppState, InteractionMode } from "@vela/shared";
-import { Fragment, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useAgentWorkspace } from "./AgentPanel";
 import { modKeyLabel } from "../platform";
 import { BranchIcon, CheckIcon, CopyIcon, FolderIcon, PlusIcon, StackIcon } from "./icons";
@@ -28,6 +28,8 @@ import { useFilePreview } from "./preview/FilePreviewContext";
 import { nextStreamFollow, releasesStreamFollow, shouldResumeFollowForMessages } from "./chat-scroll";
 import { changesByFinalMessage, type TurnChanges } from "./turn-changes";
 import { chatLaneDefaultMaxWidth, planChatLane } from "../chat-lane";
+import { UserMessageFrame } from "./UserMessageFrame";
+import { ImageViewer, type ImageViewerRequest } from "./ImageViewer";
 import { isEnglish, localizeError, tr } from "../locale";
 
 interface FollowState {
@@ -96,6 +98,26 @@ function formatElapsedTime(startedAt: number | undefined, completedAt: number | 
   return tr(`${seconds}秒`, `${seconds}s`);
 }
 
+/**
+ * 运行中的轮次在最终回复出现前显示“已处理 xx”。回复完成后这一行会被
+ * CompletedAssistantTurn 的“用时 xx”触发器接替,位置与分界线保持不变。
+ */
+function TurnProgressHeader({ startedAt }: { startedAt: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [startedAt]);
+  const elapsed = formatElapsedTime(startedAt, now);
+  if (!elapsed) return null;
+  return (
+    <span className="time-spent-trigger assistant-turn-trigger">
+      {tr(`已处理 ${elapsed}`, `Worked ${elapsed}`)}
+    </span>
+  );
+}
+
 interface ChatViewProps {
   messages: UiMessage[];
   state: AppState | null;
@@ -103,6 +125,7 @@ interface ChatViewProps {
   platform: string;
   leftCollapsed: boolean;
   onToggleLeft: () => void;
+  onRenameConversation?: (id: string) => void;
   floatingInfo?: boolean;
   environmentCollapsed?: boolean;
   changesActive?: boolean;
@@ -115,6 +138,7 @@ interface ChatViewProps {
   /** 在输入框模型列表中隐藏的模型，key 为 `provider/id`。 */
   hiddenModels?: string[];
   onSend: (text: string, images?: import("@vela/shared").ImageAttachment[]) => Promise<void>;
+  onEdit?: (turnIndex: number, text: string, images?: import("@vela/shared").ImageAttachment[]) => Promise<void>;
   onAbort: () => Promise<void>;
   onMode: (mode: import("@vela/shared").InteractionMode) => void;
   models: ReturnType<typeof useModels>;
@@ -135,6 +159,7 @@ export function ChatView({
   platform,
   leftCollapsed,
   onToggleLeft,
+  onRenameConversation,
   rightCollapsed,
   onToggleRight,
   floatingInfo = false,
@@ -146,6 +171,7 @@ export function ChatView({
   thinkingSummaries,
   hiddenModels = [],
   onSend,
+  onEdit,
   onAbort,
   onMode,
   models,
@@ -157,6 +183,9 @@ export function ChatView({
   onOpenChanges,
 }: ChatViewProps) {
   const [views, setViews] = useState<Record<string, "chat" | "trace">>({});
+  const [imageView, setImageView] = useState<ImageViewerRequest | null>(null);
+  // 换会话时收起全屏查看器:里面是上一条对话的图片。
+  useEffect(() => { setImageView(null); }, [state?.activeConversationId]);
   const viewKey = state?.activeConversationId ?? "empty";
   const view = views[viewKey] ?? "chat";
   const setView = (next: "chat" | "trace") => setViews(current => ({ ...current, [viewKey]: next }));
@@ -183,6 +212,15 @@ export function ChatView({
     const root = scroller?.parentElement;
     if (!scroller || !dock || !root) return;
 
+    let scrollbarHideTimer: number | undefined;
+    const showScrollbar = () => {
+      scroller.classList.add("is-scrolling");
+      window.clearTimeout(scrollbarHideTimer);
+      scrollbarHideTimer = window.setTimeout(() => {
+        scroller.classList.remove("is-scrolling");
+      }, 800);
+    };
+
     const syncClearance = () => {
       const height = dock.getBoundingClientRect().height;
       if (height < 1) return;
@@ -192,6 +230,7 @@ export function ChatView({
     };
 
     const onScroll = () => {
+      showScrollbar();
       const follow = followRef.current;
       if (follow.ignoreScroll) {
         follow.ignoreScroll = false;
@@ -259,6 +298,8 @@ export function ChatView({
     scroller.addEventListener("touchstart", onTouchStart, { passive: true });
     scroller.addEventListener("touchmove", onTouchMove, { passive: true });
     return () => {
+      window.clearTimeout(scrollbarHideTimer);
+      scroller.classList.remove("is-scrolling");
       observer.disconnect();
       contentObserver.disconnect();
       contentMutations.disconnect();
@@ -394,7 +435,15 @@ export function ChatView({
               <SidebarIcon />
             </button>
           ) : null}
-          <span className="chat-active-title" title={title}>{title}</span>
+          {state?.activeConversationId && onRenameConversation ? (
+            <button
+              className="chat-active-title chat-title-rename"
+              type="button"
+              title={tr("重命名对话", "Rename chat")}
+              aria-label={`${tr("重命名对话", "Rename chat")} “${title}”`}
+              onClick={() => onRenameConversation(state.activeConversationId!)}
+            ><span>{title}</span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6L16 3Z" /><path d="m14 5 5 5" /></svg></button>
+          ) : <span className="chat-active-title" title={title}>{title}</span>}
         </div>
         <div className="chat-header-actions">
           {project.workspace?.current ? (
@@ -483,6 +532,10 @@ export function ChatView({
             ));
             const changes = lastAssistant ? turnChanges.get(lastAssistant.id) ?? null : null;
             const branchTurn = turn.user ? userOrdinalById.get(turn.user.id) ?? null : null;
+            // 只有正在运行的本轮才计时;历史中未完成的轮次没有起始时间,不显示这一行。
+            const liveStartedAt = isCurrentTurn && streaming && lastAssistant?.turnCompletedAt === undefined
+              ? lastAssistant?.turnStartedAt ?? [...turn.assistants].reverse().find((message) => message.turnStartedAt !== undefined)?.turnStartedAt
+              : undefined;
 
             return (
               <Fragment key={turn.id}>
@@ -496,6 +549,9 @@ export function ChatView({
                     canManageChanges={Boolean(project.git?.repo)}
                     getQuestion={getQuestion}
                     onReplyQuestion={onReplyQuestion}
+                    onOpenImage={setImageView}
+                    editDisabled={session?.status !== "ready" || subagents.some(agent => agent.status === "running")}
+                    onEdit={onEdit && branchTurn !== null ? text => onEdit(branchTurn, text, turn.user?.images) : undefined}
                   />
                 ) : null}
                 {canCollapse && finalReply && lastAssistant ? (
@@ -518,6 +574,7 @@ export function ChatView({
                   />
                 ) : turn.assistants.length > 0 ? (
                   <div className="assistant-live-turn">
+                    {liveStartedAt !== undefined ? <TurnProgressHeader startedAt={liveStartedAt} /> : null}
                     {toolFold === "position" ? (
                       <article className="assistant-block">
                         <ToolSequence
@@ -595,6 +652,7 @@ export function ChatView({
         onMode={onMode}
       />
       </div>
+      {imageView ? <ImageViewer request={imageView} onClose={() => setImageView(null)} /> : null}
     </main>
     </ThinkingSummaryContext.Provider>
   );
@@ -664,6 +722,9 @@ function Message({
   canManageChanges,
   getQuestion,
   onReplyQuestion,
+  onOpenImage,
+  editDisabled = true,
+  onEdit,
   toolDisplay,
 }: {
   message: UiMessage;
@@ -675,23 +736,45 @@ function Message({
   canManageChanges: boolean;
   getQuestion: QuestionLookup;
   onReplyQuestion: (id: string, answer: string | null) => void;
+  /** 只有用户消息的图片会打开全屏查看器;助手消息沿用同一个组件时不需要传。 */
+  onOpenImage?: (request: ImageViewerRequest) => void;
+  editDisabled?: boolean;
+  onEdit?: (text: string) => Promise<void>;
   toolDisplay?: ToolDisplay;
 }) {
   const enterClass = entering ? " message-enter" : "";
   if (message.role === "user") {
     const images = message.images ?? [];
     return (
-      <div className={`user-msg-container${enterClass}`}>
+      <UserMessageFrame text={message.text} timestamp={message.timestamp} disabled={editDisabled} className={enterClass} onEdit={onEdit}>
         {images.length > 0 ? (
           <div className="user-attachments">
             {images.map((image, index) => (
-              <img
+              <button
                 key={index}
                 className="user-attachment-thumb"
-                src={`data:${image.mimeType};base64,${image.data}`}
-                alt={tr(`图片 ${index + 1}`, `Image ${index + 1}`)}
-                draggable={false}
-              />
+                type="button"
+                aria-label={tr(`全屏查看图片 ${index + 1}`, `View image ${index + 1} full screen`)}
+                title={tr("全屏查看", "View full screen")}
+                onClick={(event) => {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  onOpenImage?.({
+                    images: images.map((item, position) => ({
+                      src: `data:${item.mimeType};base64,${item.data}`,
+                      alt: tr(`图片 ${position + 1}`, `Image ${position + 1}`),
+                    })),
+                    index,
+                    origin: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+                    focusTarget: event.currentTarget,
+                  });
+                }}
+              >
+                <img
+                  src={`data:${image.mimeType};base64,${image.data}`}
+                  alt={tr(`图片 ${index + 1}`, `Image ${index + 1}`)}
+                  draggable={false}
+                />
+              </button>
             ))}
           </div>
         ) : null}
@@ -700,7 +783,7 @@ function Message({
             <UserText text={message.text} />
           </div>
         ) : null}
-      </div>
+      </UserMessageFrame>
     );
   }
 

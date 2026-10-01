@@ -1,3 +1,4 @@
+import { uiStorage } from "./ui-storage";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentInfo } from "@vela/shared";
 import { AgentWorkspaceProvider } from "./components/AgentPanel";
@@ -10,11 +11,13 @@ import { ScreenPresence } from "./components/MotionPresence";
 import { Presence } from "./components/Presence";
 import { SettingsView } from "./components/SettingsView";
 import { Sidebar } from "./components/Sidebar";
+import { RenameConversationDialog } from "./components/RenameConversationDialog";
 import { FilePreviewProvider, type PreviewFileDescriptor } from "./components/preview/FilePreviewContext";
 import type { StartTabAction } from "./components/StartView";
 import { WorkbenchPanel, type WorkbenchTab } from "./components/WorkbenchPanel";
 import { useModels } from "./hooks/useModels";
 import { usePreferences } from "./hooks/usePreferences";
+import { isBoolean, useStoredState } from "./hooks/useStoredState";
 import { useProject } from "./hooks/useProject";
 import { useSession, type UiMessage } from "./hooks/useSession";
 import { useSidebarResize } from "./hooks/useSidebarResize";
@@ -42,7 +45,7 @@ const filesTabId = "files";
 
 function readOnboardingComplete(): boolean {
   try {
-    return localStorage.getItem(onboardingCompleteKey) === "true";
+    return uiStorage.getItem(onboardingCompleteKey) === "true";
   } catch {
     return false;
   }
@@ -50,7 +53,7 @@ function readOnboardingComplete(): boolean {
 
 function readOnboardingStep(): number {
   try {
-    const value = Number(localStorage.getItem(onboardingStepKey));
+    const value = Number(uiStorage.getItem(onboardingStepKey));
     return Number.isInteger(value) && value >= 0 && value <= 6 ? value : 0;
   } catch {
     return 0;
@@ -92,6 +95,11 @@ function findAgentInMessages(messages: UiMessage[], agentId: string): AgentInfo 
 
 export function App() {
   const session = useSession();
+  const [renamingConversation, setRenamingConversation] = useState<{ id: string; title: string } | null>(null);
+  const openRenameConversation = (id: string) => {
+    const conversation = session.conversations.find(item => item.id === id);
+    if (conversation) setRenamingConversation({ id, title: conversation.title });
+  };
   const models = useModels(session.setAppState);
   const project = useProject();
   const preferences = usePreferences();
@@ -105,13 +113,13 @@ export function App() {
     locale: preferences.locale,
   });
   setActiveLocale(preferences.locale);
-  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [leftCollapsed, setLeftCollapsed] = useStoredState("vela.leftCollapsed", false, isBoolean);
   // Keep the conversation as the default focus; open the inspector when a tool
   // preview or workspace-change action needs it.
-  const [rightCollapsed, setRightCollapsed] = useState(true);
+  const [rightCollapsed, setRightCollapsed] = useStoredState("vela.rightCollapsed", true, isBoolean);
   const floatingInfo = preferences.infoLayout === "floating";
   const contextSidebarOpen = !floatingInfo && !rightCollapsed;
-  const [environmentCollapsed, setEnvironmentCollapsed] = useState(false);
+  const [environmentCollapsed, setEnvironmentCollapsed] = useStoredState("vela.environmentCollapsed", false, isBoolean);
   const toggleInfo = useCallback(() => {
     if (floatingInfo) setEnvironmentCollapsed(value => !value);
     else setRightCollapsed(value => !value);
@@ -418,6 +426,7 @@ export function App() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!onboardingComplete) return;
+      if (document.querySelector(".rename-conversation-dialog[open], .conversation-search-dialog[open]")) return;
       if (event.key === "Escape") {
         // 对话框和输入框各自处理 Esc,只有停在设置页本身时才关闭设置。
         if (event.isComposing || document.querySelector(".sheet-presence")) return;
@@ -493,7 +502,7 @@ export function App() {
                 onStepChange={(step) => {
                   setOnboardingStep(step);
                   try {
-                    localStorage.setItem(onboardingStepKey, String(step));
+                    uiStorage.setItem(onboardingStepKey, String(step));
                   } catch {
                     // Keep onboarding usable when local storage is unavailable.
                   }
@@ -502,8 +511,8 @@ export function App() {
                   setOnboardingComplete(true);
                   setSettingsOpen(false);
                   try {
-                    localStorage.setItem(onboardingCompleteKey, "true");
-                    localStorage.removeItem(onboardingStepKey);
+                    uiStorage.setItem(onboardingCompleteKey, "true");
+                    uiStorage.removeItem(onboardingStepKey);
                   } catch {
                     // Completion applies for this run even if storage is unavailable.
                   }
@@ -532,6 +541,7 @@ export function App() {
                   void session.switchTo(id);
                 }}
                 onArchiveConversation={(id) => void session.archive(id)}
+                onRenameConversation={openRenameConversation}
               />
               <div className="main-stage">
                 <FilePreviewProvider
@@ -562,6 +572,7 @@ export function App() {
                           platform={platform}
                           leftCollapsed={leftCollapsed}
                           onToggleLeft={() => setLeftCollapsed((value) => !value)}
+                          onRenameConversation={openRenameConversation}
                           rightCollapsed={floatingInfo ? environmentCollapsed : rightCollapsed}
                           onToggleRight={toggleInfo}
                           floatingInfo={floatingInfo}
@@ -573,6 +584,7 @@ export function App() {
                           thinkingSummaries={thinkingSummaries}
                           hiddenModels={preferences.hiddenModels}
                           onSend={session.send}
+                          onEdit={session.edit}
                           onAbort={session.abort}
                           onMode={session.setMode}
                           models={models}
@@ -647,6 +659,12 @@ export function App() {
             </div>
           </ScreenPresence>
         </div>
+        {renamingConversation ? <RenameConversationDialog
+          key={renamingConversation.id}
+          conversation={renamingConversation}
+          onSave={session.rename}
+          onClose={() => setRenamingConversation(null)}
+        /> : null}
       </AppLocaleProvider>
     </FileIconThemeProvider>
   );

@@ -1,6 +1,15 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { openCodeSessionHeaders } from "./provider-headers";
+import { conversationTitleMaxLength } from "@vela/shared";
+
+export function normalizeManualConversationTitle(value: unknown): string {
+  if (typeof value !== "string") throw new Error("对话名称必须是文本");
+  const title = value.replace(/\s+/g, " ").trim();
+  if (!title) throw new Error("对话名称不能为空");
+  if (title.length > conversationTitleMaxLength) throw new Error(`对话名称不能超过 ${conversationTitleMaxLength} 个字符`);
+  return title;
+}
 
 /** 首条消息过长时只截前一段，避免标题请求带上整篇提示词。 */
 const maxTitleSourceLength = 4000;

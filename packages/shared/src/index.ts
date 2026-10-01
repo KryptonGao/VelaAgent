@@ -1,5 +1,7 @@
 export * from "./trace";
 import type { TraceSnapshot, TraceDetails, TraceUpdate } from "./trace";
+export const conversationTitleMaxLength = 120;
+
 export const IpcChannel = {
   getState: "session:get-state",
   prompt: "session:prompt",
@@ -7,8 +9,10 @@ export const IpcChannel = {
   sessionCreate: "session:create",
   sessionSwitch: "session:switch",
   sessionArchive: "session:archive",
+  sessionRename: "session:rename",
   sessionUnarchive: "session:unarchive",
   sessionBranch: "session:branch",
+  sessionRewind: "session:rewind",
   sessionMessages: "session:messages",
   sessionSummarizeThinking: "session:summarize-thinking",
   sessionTrace: "session:trace",
@@ -62,6 +66,8 @@ export const IpcChannel = {
   appOpenInTarget: "app:open-in-target",
   appMenuAction: "app:menu-action",
   appSetLocale: "app:set-locale",
+  appUiStorageGet: "app:ui-storage-get",
+  appUiStorageSet: "app:ui-storage-set",
   workspaceFileRead: "workspace:file-read",
   workspaceFileList: "workspace:file-list",
   workspaceSearch: "workspace:code-search",
@@ -443,6 +449,8 @@ export interface SessionSnapshot {
   executionPlan: ExecutionPlan | null;
   goal: ConversationGoal | null;
   error: string | null;
+  turnStartedAt?: number;
+  turnCompletedAt?: number;
 }
 
 /** 侧边栏会话列表里的一条对话,绑定创建时的工作区目录。 */
@@ -455,6 +463,8 @@ export interface ConversationSummary {
   updatedAt: number;
   /** 非空表示已归档(不显示在侧边栏),值为归档时间。 */
   archivedAt: number | null;
+  turnStartedAt?: number;
+  turnCompletedAt?: number;
 }
 
 /** 上下文占用的分段，顺序与右侧栏色条一致。 */
@@ -606,6 +616,9 @@ export interface TranscriptMessage {
   planIds?: string[];
   /** 这条消息写入会话文件的时间(毫秒);没有持久化条目时为 null。 */
   timestamp: number | null;
+  /** 主进程记录并持久化的整轮处理时间。 */
+  turnStartedAt?: number;
+  turnCompletedAt?: number;
 }
 
 export type AgentStreamEvent =
@@ -906,6 +919,12 @@ export interface OpenTarget {
 
 export interface VelaApi {
   platform: string;
+  /** Present in the desktop app; browser-only previews use localStorage. */
+  uiStorage?: {
+    getItem(key: string): string | null | undefined;
+    setItem(key: string, value: string): void;
+    removeItem(key: string): void;
+  };
   setLocale(locale: AppLocale): void;
   getState(): Promise<AppState>;
   prompt(text: string, images?: ImageAttachment[], conversationId?: string): Promise<AppState>;
@@ -918,10 +937,13 @@ export interface VelaApi {
   /** 新建一个对话并切换过去;原对话保留在侧边栏列表里。 */
   createConversation(): Promise<AppState>;
   switchConversation(id: string): Promise<AppState>;
+  /** 手动名称持久化，并优先于自动标题。 */
+  renameConversation(id: string, title: string): Promise<AppState>;
   /** 归档一个对话;侧边栏不再显示,历史保留,可在设置的归档列表里搜索恢复。 */
   archiveConversation(id: string): Promise<AppState>;
   /** 从某一轮回复处分支:复制该轮及之前的历史到新对话并切换过去。 */
   branchConversation(conversationId: string, turnIndex: number): Promise<AppState>;
+  rewindConversation(conversationId: string, turnIndex: number): Promise<{ state: AppState; messages: TranscriptMessage[] }>;
   /** 取消归档,对话回到侧边栏。 */
   unarchiveConversation(id: string): Promise<AppState>;
   /** 读取某个对话的完整历史(用于应用重启后恢复界面消息)。 */

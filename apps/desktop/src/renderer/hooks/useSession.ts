@@ -32,6 +32,8 @@ export interface UiMessage {
   turnCompletedAt?: number;
   /** 这条消息写入会话文件的时间;实时消息在完成时补上。 */
   timestamp?: number;
+  /** 历史恢复的消息不能被当成新完成的思考再次自动总结。 */
+  historical?: boolean;
 }
 
 /** 每个对话独立保存界面上的消息,切换对话时互不影响。 */
@@ -116,28 +118,31 @@ export function useSession() {
     let receivedStateEvent = false;
     const acceptState = (next: AppState) => {
       const id = next.activeConversationId;
-      if (id) {
-        if (next.agents) setAgents((current) => ({ ...current, [id]: sanitizeAgents(next.agents!) }));
-        const status = next.session.status;
-        const previous = statusesRef.current[id];
+      if (id && next.agents) setAgents((current) => ({ ...current, [id]: sanitizeAgents(next.agents!) }));
+      // 后台对话也需要记录完成时间，否则切回时会把离开的时间算进用时。
+      for (const conversation of next.conversations) {
+        const timing = conversation.id === id ? next.session : conversation;
+        const conversationId = conversation.id;
+        const status = timing.status;
+        const previous = statusesRef.current[conversationId];
         if (status === "streaming" && previous !== "streaming") {
-          const startedAt = Date.now();
-          turnStartedAtRef.current[id] = startedAt;
-          completionBlockedRef.current[id] = false;
-          setBuckets((current) => updateLastAssistant(current, id, { startedAt }));
+          const startedAt = timing.turnStartedAt ?? Date.now();
+          turnStartedAtRef.current[conversationId] = startedAt;
+          completionBlockedRef.current[conversationId] = false;
+          setBuckets((current) => updateLastAssistant(current, conversationId, { startedAt }));
         } else if (previous === "streaming" && status !== "streaming") {
-          if (status === "ready" && !completionBlockedRef.current[id]) {
-            const completedAt = Date.now();
-            const startedAt = turnStartedAtRef.current[id] ?? completedAt;
-            setBuckets((current) => updateLastAssistant(current, id, { startedAt, completedAt }));
+          if (status === "ready" && !completionBlockedRef.current[conversationId]) {
+            const completedAt = timing.turnCompletedAt ?? Date.now();
+            const startedAt = timing.turnStartedAt ?? turnStartedAtRef.current[conversationId] ?? completedAt;
+            setBuckets((current) => updateLastAssistant(current, conversationId, { startedAt, completedAt }));
           } else if (status === "ready") {
             // 中止或失败也要留下回复时间,操作行右侧才有值可显示。
-            setBuckets((current) => updateLastAssistant(current, id, { timestamp: Date.now() }));
+            setBuckets((current) => updateLastAssistant(current, conversationId, { timestamp: timing.turnCompletedAt ?? Date.now() }));
           }
-          delete turnStartedAtRef.current[id];
-          delete completionBlockedRef.current[id];
+          delete turnStartedAtRef.current[conversationId];
+          delete completionBlockedRef.current[conversationId];
         }
-        statusesRef.current[id] = status;
+        statusesRef.current[conversationId] = status;
       }
       setState(next);
     };
@@ -227,7 +232,7 @@ export function useSession() {
       ...current,
       [id]: [
         ...(current[id] ?? []),
-        { id: crypto.randomUUID(), role: "user", text, images: attachments, thinking: "", tools: [] },
+        { id: crypto.randomUUID(), role: "user", text, images: attachments, thinking: "", tools: [], timestamp: Date.now() },
         { id: crypto.randomUUID(), role: "assistant", text: "", thinking: "", tools: [] },
       ],
     }));
@@ -315,6 +320,13 @@ export function useSession() {
   }, [loadTranscript]);
 
   /** 归档一个对话;若归档的是当前对话,主进程会自动切到最近的未归档对话。 */
+  const rename = useCallback(async (id: string, title: string) => {
+    const api = window.vela;
+    if (!api) throw new Error("会话服务不可用");
+    // 让编辑器保留输入并显示失败，成功后由同一状态更新列表和聊天头部。
+    setState(await api.renameConversation(id, title));
+  }, []);
+
   const archive = useCallback(async (id: string) => {
     const api = window.vela;
     if (!api) return;
@@ -354,6 +366,36 @@ export function useSession() {
       setErrors((current) => ({ ...current, [id]: message }));
     }
   }, [loadTranscript]);
+
+  const edit = useCallback(async (turnIndex: number, text: string, images?: ImageAttachment[]) => {
+    const api = window.vela;
+    const id = activeIdRef.current;
+    if (!api || !id) throw new Error(tr("对话不存在或已结束", "Chat not found or already ended."));
+    if (!text.trim() && !images?.length) throw new Error(tr("消息不能为空", "Message cannot be empty."));
+    if (text.length > 100_000) throw new Error(tr("消息过长", "Message is too long."));
+    setErrors(current => ({ ...current, [id]: "" }));
+    const result = await api.rewindConversation(id, turnIndex);
+    setState(result.state);
+    const history = result.messages.map(toUiMessage);
+    completionBlockedRef.current[id] = false;
+    delete turnStartedAtRef.current[id];
+    delete statusesRef.current[id];
+    setAgentBuckets(current => ({ ...current, [id]: {} }));
+    setPlanDrafts(current => ({ ...current, [id]: null }));
+    setPlanFocus(null);
+    setBuckets(current => ({ ...current, [id]: [
+      ...history,
+      { id: crypto.randomUUID(), role: "user", text, images, thinking: "", tools: [], timestamp: Date.now() },
+      { id: crypto.randomUUID(), role: "assistant", text: "", thinking: "", tools: [] },
+    ] }));
+    // The editor closes after the rewind succeeds. Stream events fill the new assistant block.
+    void api.prompt(text, images, id).then(setState, error => {
+      const message = error instanceof Error ? localizeError(error.message) : tr("发送失败", "Failed to send message");
+      completionBlockedRef.current[id] = true;
+      setErrors(current => ({ ...current, [id]: message }));
+      setBuckets(current => appendAssistantError(current, id, message));
+    });
+  }, []);
 
   const sendError = activeConversationId ? errors[activeConversationId] || null : null;
   const messages = useMemo(() => {
@@ -443,6 +485,7 @@ export function useSession() {
     getAgentMessages,
     ensureAgentMessages,
     send,
+    edit,
     abort,
     setMode,
     executePlan,
@@ -450,13 +493,14 @@ export function useSession() {
     newChat,
     switchTo,
     archive,
+    rename,
     unarchive,
     branch,
     setAppState: setState,
   };
 }
 
-function toUiMessage(message: TranscriptMessage): UiMessage {
+export function toUiMessage(message: TranscriptMessage): UiMessage {
   return {
     id: message.id,
     role: message.role,
@@ -466,6 +510,9 @@ function toUiMessage(message: TranscriptMessage): UiMessage {
     images: message.images ? message.images.map((image) => ({ ...image })) : undefined,
     planIds: message.planIds ? [...message.planIds] : undefined,
     timestamp: message.timestamp ?? undefined,
+    turnStartedAt: message.turnStartedAt,
+    turnCompletedAt: message.turnCompletedAt,
+    historical: true,
   };
 }
 
@@ -537,7 +584,7 @@ function applyToMessages(messages: UiMessage[], event: StreamUpdate, startedAt?:
   if (event.type === "user_message") {
     return [
       ...messages,
-      { id: crypto.randomUUID(), role: "user", text: event.text, thinking: "", tools: [] },
+      { id: crypto.randomUUID(), role: "user", text: event.text, thinking: "", tools: [], timestamp: Date.now() },
       { id: crypto.randomUUID(), role: "assistant", text: "", thinking: "", tools: [], turnStartedAt: startedAt },
     ];
   }

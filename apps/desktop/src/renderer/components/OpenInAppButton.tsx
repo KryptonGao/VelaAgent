@@ -1,3 +1,4 @@
+import { uiStorage } from "../ui-storage";
 import type { OpenTarget } from "@vela/shared";
 import { useEffect, useState } from "react";
 import { useDismissable } from "../hooks/useDismissable";
@@ -8,7 +9,7 @@ const openTargetKey = "vela.openTarget";
 
 function readStoredTarget(): string | null {
   try {
-    return localStorage.getItem(openTargetKey);
+    return uiStorage.getItem(openTargetKey);
   } catch {
     return null;
   }
@@ -16,7 +17,7 @@ function readStoredTarget(): string | null {
 
 function writeStoredTarget(id: string): void {
   try {
-    localStorage.setItem(openTargetKey, id);
+    uiStorage.setItem(openTargetKey, id);
   } catch {
     // 写不进去时仍保留本次会话的选择。
   }

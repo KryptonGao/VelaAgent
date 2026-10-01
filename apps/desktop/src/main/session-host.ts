@@ -117,6 +117,10 @@ export class SessionHost {
       await this.runtime.switchConversation(parseConversationId(rawId, "对话"));
       return this.currentState();
     });
+    ipcMain.handle(IpcChannel.sessionRename, async (_event, rawId: unknown, rawTitle: unknown) => {
+      await this.runtime.renameConversation(parseConversationId(rawId, "对话"), rawTitle);
+      return this.currentState();
+    });
     ipcMain.handle(IpcChannel.sessionArchive, async (_event, rawId: unknown) => {
       await this.runtime.archiveConversation(parseConversationId(rawId, "对话"));
       return this.currentState();
@@ -128,6 +132,12 @@ export class SessionHost {
     ipcMain.handle(IpcChannel.sessionBranch, async (_event, rawId: unknown, rawTurn: unknown) => {
       await this.runtime.branchConversation(parseConversationId(rawId, "对话"), parseTurnIndex(rawTurn));
       return this.currentState();
+    });
+    ipcMain.handle(IpcChannel.sessionRewind, async (_event, rawId: unknown, rawTurn: unknown) => {
+      const id = parseConversationId(rawId, "对话");
+      await this.runtime.rewindConversation(id, parseTurnIndex(rawTurn));
+      this.hooks.onAgentMutation?.();
+      return { state: this.currentState(), messages: this.runtime.getMessages(id) };
     });
     ipcMain.handle(IpcChannel.sessionTrace, (_event, rawId: unknown) => this.runtime.getTrace(parseConversationId(rawId, "对话")));
     ipcMain.handle(IpcChannel.sessionTraceDetails, (_event, rawId: unknown, rawNode: unknown) => this.runtime.getTraceDetails(parseConversationId(rawId, "对话"), parseId(rawNode, "轨迹节点")));

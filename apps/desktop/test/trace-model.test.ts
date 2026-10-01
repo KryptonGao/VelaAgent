@@ -488,3 +488,12 @@ describe("trace code segmentation", () => {
     ]);
   });
 });
+
+it("replaces abandoned nodes and requests when a rewind reset arrives", () => {
+  const previous = mergeTrace(emptyTrace, { version: 2, nodes: [node("old", 1), node("abandoned", 2)], requests: [request("r1"), request("r2")], warning: null });
+  const rewound = mergeTrace(previous, { version: 3, reset: true, nodes: [node("old", 1)], requests: [request("r1")], warning: null });
+  assert.deepEqual(rewound.nodes.map(item => item.id), ["old"]);
+  assert.deepEqual(rewound.requests.map(item => item.id), ["r1"]);
+  assert.equal(rewound.version, 3);
+  assert.deepEqual(mergeTrace(rewound, previous), rewound);
+});

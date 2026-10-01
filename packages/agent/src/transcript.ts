@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { userMessageText } from "./context-usage";
 import { isPlanExecutionPrompt, extractProposedPlans, normalizePlanMarkdown, sortPlans } from "./plan";
 import { activityFromCall, activityFromExecution } from "./tool-activity";
+import type { TurnTiming } from "./turn-timing";
 
 /** 一条界面消息,以及它在 Pi 会话文件里的来源条目和时间。 */
 export interface TranscriptSource {
@@ -49,8 +50,9 @@ export function transcriptSourcesFromProjection(projection: SessionProjection): 
 export function transcriptFromProjection(
   projection: SessionProjection,
   plans: readonly ProposedPlanItem[] = [],
+  timings: ReadonlyMap<string, TurnTiming> = new Map(),
 ): TranscriptMessage[] {
-  return transcriptFromSources(transcriptSourcesFromProjection(projection), plans);
+  return transcriptFromSources(transcriptSourcesFromProjection(projection), plans, timings);
 }
 
 /** 实时会话消息按消息顺序重建；磁盘历史使用 transcriptFromProjection。 */
@@ -105,7 +107,7 @@ export function branchLeafForTurn(sources: TranscriptSource[], turnIndex: number
   return leaf;
 }
 
-function transcriptFromSources(sources: TranscriptSource[], plans: readonly ProposedPlanItem[]): TranscriptMessage[] {
+function transcriptFromSources(sources: TranscriptSource[], plans: readonly ProposedPlanItem[], timings: ReadonlyMap<string, TurnTiming> = new Map()): TranscriptMessage[] {
   const result: TranscriptMessage[] = [];
   const argsByCall = new Map<string, unknown>();
   // plan 正文已从 assistant 文本里剥离，这里按 markdown 内容把它对应回 revision id。
@@ -160,6 +162,7 @@ function transcriptFromSources(sources: TranscriptSource[], plans: readonly Prop
         .map(claimPlanId)
         .filter((id): id is string => Boolean(id));
       if (!text && !thinking && tools.length === 0 && planIds.length === 0) continue;
+      const timing = source.entryId ? timings.get(source.entryId) : undefined;
       result.push({
         id: randomUUID(),
         role: "assistant",
@@ -168,6 +171,7 @@ function transcriptFromSources(sources: TranscriptSource[], plans: readonly Prop
         tools,
         ...(planIds.length > 0 ? { planIds } : {}),
         timestamp: source.timestamp,
+        ...(timing ? { turnStartedAt: timing.startedAt, turnCompletedAt: timing.completedAt } : {}),
       });
       continue;
     }

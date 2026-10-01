@@ -78,6 +78,8 @@ export interface TraceSnapshot {
   warning: string | null;
 }
 export interface TraceUpdate extends TraceSnapshot {
+  /** Complete replacement after a conversation rewind. */
+  reset?: boolean;
   type: "trace";
   conversationId: string;
 }

@@ -41,6 +41,11 @@ import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from "ele
 
 const api: VelaApi = {
   platform: process.platform,
+  uiStorage: {
+    getItem: (key) => storageRequest(IpcChannel.appUiStorageGet, key).value,
+    setItem: (key, value) => { storageRequest(IpcChannel.appUiStorageSet, key, value); },
+    removeItem: (key) => { storageRequest(IpcChannel.appUiStorageSet, key, null); },
+  },
   setLocale: (locale: AppLocale) => ipcRenderer.send(IpcChannel.appSetLocale, locale),
   getState: () => ipcRenderer.invoke(IpcChannel.getState) as Promise<AppState>,
   prompt: (text, images, conversationId) =>
@@ -60,12 +65,16 @@ const api: VelaApi = {
   createConversation: () => ipcRenderer.invoke(IpcChannel.sessionCreate) as Promise<AppState>,
   switchConversation: (id: string) =>
     ipcRenderer.invoke(IpcChannel.sessionSwitch, id) as Promise<AppState>,
+  renameConversation: (id: string, title: string) =>
+    ipcRenderer.invoke(IpcChannel.sessionRename, id, title) as Promise<AppState>,
   archiveConversation: (id: string) =>
     ipcRenderer.invoke(IpcChannel.sessionArchive, id) as Promise<AppState>,
   unarchiveConversation: (id: string) =>
     ipcRenderer.invoke(IpcChannel.sessionUnarchive, id) as Promise<AppState>,
   branchConversation: (conversationId: string, turnIndex: number) =>
     ipcRenderer.invoke(IpcChannel.sessionBranch, conversationId, turnIndex) as Promise<AppState>,
+  rewindConversation: (conversationId, turnIndex) =>
+    ipcRenderer.invoke(IpcChannel.sessionRewind, conversationId, turnIndex) as Promise<{ state: AppState; messages: TranscriptMessage[] }>,
   getTrace: (conversationId) => ipcRenderer.invoke(IpcChannel.sessionTrace, conversationId),
   getTraceDetails: (conversationId, nodeId) => ipcRenderer.invoke(IpcChannel.sessionTraceDetails, conversationId, nodeId),
   getMessages: (conversationId: string) =>
@@ -239,6 +248,13 @@ const api: VelaApi = {
 
 if (process.contextIsolated) {
   contextBridge.exposeInMainWorld("vela", api);
+}
+
+// A synchronous acknowledgement ensures a completed save survives an immediate quit.
+function storageRequest(channel: string, ...args: unknown[]): { value?: string | null } {
+  const result = ipcRenderer.sendSync(channel, ...args) as { value?: string | null; error?: string };
+  if (result.error) throw new Error(result.error);
+  return result;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -7,21 +7,26 @@
     <script>
       try {
         var root = document.documentElement;
-        var appearance = localStorage.getItem("vela.appearance");
+        function readPreference(key) {
+          var storage = window.vela && window.vela.uiStorage;
+          var saved = storage ? storage.getItem(key) : undefined;
+          return saved !== undefined ? saved : localStorage.getItem(key);
+        }
+        var appearance = readPreference("vela.appearance");
         var scheme =
           appearance === "light" || appearance === "dark"
             ? appearance
             : window.matchMedia("(prefers-color-scheme: dark)").matches
               ? "dark"
               : "light";
-        var light = localStorage.getItem("vela.theme.light");
-        var dark = localStorage.getItem("vela.theme.dark");
+        var light = readPreference("vela.theme.light");
+        var dark = readPreference("vela.theme.dark");
         root.dataset.scheme = scheme;
         root.dataset.theme =
           scheme === "dark"
             ? ["midnight", "graphite", "ember"].indexOf(dark) >= 0 ? dark : "midnight"
             : ["daylight", "paper", "celadon"].indexOf(light) >= 0 ? light : "daylight";
-        if (localStorage.getItem("vela.locale") === "en") root.lang = "en";
+        if (readPreference("vela.locale") === "en") root.lang = "en";
         // macOS 的 vibrancy 要求整页底色透明,首帧前就标上平台,避免闪一下不透明底。
         root.className = "platform-" + ((window.vela && window.vela.platform) || "darwin");
       } catch (e) {}
