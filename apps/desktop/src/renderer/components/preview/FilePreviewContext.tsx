@@ -4,6 +4,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -17,6 +18,14 @@ export interface PreviewTab {
   dir: string;
   /** 请求跳转的行号(代码搜索/引用跳转),消费后置回 null */
   jumpLine: number | null;
+}
+
+/** 宿主工作面板使用的文件标签身份；path 与规范化后的 id 一致。 */
+export interface PreviewFileDescriptor {
+  id: string;
+  path: string;
+  name: string;
+  dir: string;
 }
 
 export interface FilePreviewContextValue {
@@ -55,6 +64,19 @@ export function isAbsolutePathLike(path: string): boolean {
   return path.startsWith("/") || /^[a-zA-Z]:\//.test(path);
 }
 
+/** 两次读取结果一致时沿用旧对象身份,让 React 跳过重渲染,避免无关的 git 事件引起预览闪动。 */
+function sameFileContent(current: WorkspaceFileContent | null, next: WorkspaceFileContent): boolean {
+  return (
+    current !== null &&
+    current.path === next.path &&
+    current.absolutePath === next.absolutePath &&
+    current.kind === next.kind &&
+    current.content === next.content &&
+    current.size === next.size &&
+    current.truncated === next.truncated
+  );
+}
+
 function splitTabPath(path: string): { id: string; name: string; dir: string } {
   const segments = path.split("/").filter(Boolean);
   const name = segments.pop() ?? path;
@@ -80,15 +102,22 @@ export function normalizeTabPath(
 }
 
 /**
- * 侧栏文件预览的多标签状态:标签、内容缓存、工作区文件列表与代码搜索。
- * 打开文件会请求展开右侧栏;git 变更时自动重读激活文件。
+ * 文件预览的多标签状态:标签、内容缓存、工作区文件列表与代码搜索。
+ * 打开文件会通知宿主激活对应标签;git 变更时自动重读激活文件。
  */
 export function FilePreviewProvider({
   children,
-  onExpand,
+  onOpenFile,
+  onCloseFileTab,
+  onCloseAllFileTabs,
 }: {
   children: ReactNode;
-  onExpand?: () => void;
+  /** 文件打开或重新激活时通知宿主，并提供规范化路径身份。 */
+  onOpenFile?: (file: PreviewFileDescriptor) => void;
+  /** 关闭单个文件标签时同步通知宿主。 */
+  onCloseFileTab?: (id: string) => void;
+  /** 关闭预览或工作区切换清空文件标签时同步通知宿主。 */
+  onCloseAllFileTabs?: (ids: string[]) => void;
 }) {
   const [tabs, setTabs] = useState<PreviewTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
@@ -97,18 +126,27 @@ export function FilePreviewProvider({
   const [contentLoading, setContentLoading] = useState(false);
   const [contentError, setContentError] = useState<string | null>(null);
   const [activeContent, setActiveContent] = useState<WorkspaceFileContent | null>(null);
+  /** activeContent 归属的标签;与 activeTabId 不同时对外不可见,避免切换标签闪出上一个文件。 */
+  const [contentTabId, setContentTabId] = useState<string | null>(null);
 
   const contentCache = useRef(new Map<string, WorkspaceFileContent>());
+  const contentTabIdRef = useRef<string | null>(contentTabId);
+  contentTabIdRef.current = contentTabId;
   const scrollPositions = useRef(new Map<string, number>());
   const fileListRequested = useRef(false);
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
+  const onOpenFileRef = useRef(onOpenFile);
+  onOpenFileRef.current = onOpenFile;
+  const onCloseFileTabRef = useRef(onCloseFileTab);
+  onCloseFileTabRef.current = onCloseFileTab;
+  const onCloseAllFileTabsRef = useRef(onCloseAllFileTabs);
+  onCloseAllFileTabsRef.current = onCloseAllFileTabs;
 
   const openFile = useCallback(
     (path: string, options?: { line?: number }) => {
       if (!path) return;
       const normalized = normalizeTabPath(path, fileList?.root ?? null);
-      onExpand?.();
       setTabs((current) => {
         const existing = current.find((tab) => tab.id === normalized.id);
         if (!existing) {
@@ -123,11 +161,19 @@ export function FilePreviewProvider({
       });
       setActiveTabId(normalized.id);
       setContentError(null);
+      onOpenFileRef.current?.({
+        id: normalized.id,
+        path: normalized.id,
+        name: normalized.name,
+        dir: normalized.dir,
+      });
     },
-    [onExpand, fileList],
+    [fileList],
   );
 
   const closeTab = useCallback((id: string) => {
+    if (!tabsRef.current.some((tab) => tab.id === id)) return;
+    onCloseFileTabRef.current?.(id);
     setTabs((current) => {
       const index = current.findIndex((tab) => tab.id === id);
       if (index < 0) return current;
@@ -148,6 +194,8 @@ export function FilePreviewProvider({
   }, []);
 
   const closePreview = useCallback(() => {
+    const ids = tabsRef.current.map((tab) => tab.id);
+    onCloseAllFileTabsRef.current?.(ids);
     setTabs([]);
     setActiveTabId(null);
     contentCache.current.clear();
@@ -192,20 +240,29 @@ export function FilePreviewProvider({
     return api.searchWorkspaceCode(query);
   }, []);
 
-  // 激活标签内容:优先用缓存,否则经 IPC 读取。
-  useEffect(() => {
-    const api = window.vela;
-    if (!api || !activeTabId) {
+  // 激活标签内容:命中缓存时在绘制前同步换上,切换回读过的标签不会闪一帧「读取中」。
+  useLayoutEffect(() => {
+    if (!activeTabId) {
       setActiveContent(null);
+      setContentTabId(null);
       setContentError(null);
+      setContentLoading(false);
       return;
     }
     const cached = contentCache.current.get(activeTabId);
-    if (cached) {
-      setActiveContent(cached);
-      setContentError(null);
-      return;
-    }
+    if (!cached) return;
+    setActiveContent(cached);
+    setContentTabId(activeTabId);
+    setContentError(null);
+    setContentLoading(false);
+  }, [activeTabId, revision]);
+
+  // 缓存未命中时经 IPC 读取。重读(git 变更、手动刷新)期间保留旧内容继续显示,读完原地替换,
+  // 避免预览整块换成「读取中」导致滚动位置被浏览器夹回顶部。
+  useEffect(() => {
+    const api = window.vela;
+    if (!api || !activeTabId) return;
+    if (contentCache.current.has(activeTabId)) return;
     let active = true;
     setContentLoading(true);
     setContentError(null);
@@ -214,10 +271,16 @@ export function FilePreviewProvider({
       .then((content) => {
         if (!active) return;
         contentCache.current.set(activeTabId, content);
-        setActiveContent(content);
+        // 内容没变就沿用旧对象,React 直接跳过重渲染,预览不会因为无关的 git 事件闪动。
+        setActiveContent((current) => (sameFileContent(current, content) ? current : content));
+        setContentTabId(activeTabId);
       })
       .catch((error) => {
-        if (active) setContentError(error instanceof Error ? error.message : "读取失败");
+        if (!active) return;
+        setContentError(error instanceof Error ? error.message : "读取失败");
+        // 同一标签重读失败保留旧内容;新标签失败清掉内容归属,让错误信息显示出来。
+        setActiveContent((current) => (contentTabIdRef.current === activeTabId ? current : null));
+        setContentTabId(activeTabId);
       })
       .finally(() => {
         if (active) setContentLoading(false);
@@ -238,6 +301,8 @@ export function FilePreviewProvider({
       refreshFileList();
     });
     const offWorkspace = api.onWorkspaceEvent(() => {
+      const ids = tabsRef.current.map((tab) => tab.id);
+      onCloseAllFileTabsRef.current?.(ids);
       contentCache.current.clear();
       scrollPositions.current.clear();
       fileListRequested.current = false;
@@ -285,13 +350,18 @@ export function FilePreviewProvider({
     [fileSet, fileList, basenameIndex],
   );
 
+  // 内容与加载态都按标签归属过滤:切到新标签时不会闪出上一个文件的内容或空状态。
+  const visibleContent = activeTabId != null && contentTabId === activeTabId ? activeContent : null;
+  const visibleLoading =
+    activeTabId != null && visibleContent == null && (contentTabId !== activeTabId || contentLoading);
+
   const value = useMemo<FilePreviewContextValue>(
     () => ({
       open: tabs.length > 0,
       tabs,
       activeTab: tabs.find((tab) => tab.id === activeTabId) ?? null,
-      activeContent,
-      contentLoading,
+      activeContent: visibleContent,
+      contentLoading: visibleLoading,
       contentError,
       revision,
       fileList,
@@ -311,8 +381,8 @@ export function FilePreviewProvider({
     [
       tabs,
       activeTabId,
-      activeContent,
-      contentLoading,
+      visibleContent,
+      visibleLoading,
       contentError,
       revision,
       fileList,

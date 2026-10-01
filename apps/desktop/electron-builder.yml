@@ -17,6 +17,8 @@ npmRebuild: false
 asarUnpack:
   - "**/*.node"
   - "**/*.wasm"
+  # node-pty 需要真实的 spawn-helper 可执行文件,不能留在 asar 内
+  - "**/node_modules/node-pty/**"
 mac:
   category: public.app-category.developer-tools
   icon: resources/icon.png

@@ -20,6 +20,7 @@ import { settingsCopy } from "./settings-copy";
 import { onboardingCopy } from "./onboarding-copy";
 import { LoginDialog } from "./ModelControls";
 import { SheetPresence } from "./Presence";
+import { ContentSwap } from "./BatchMotion";
 import velaLogoUrl from "../../../resources/icon.png";
 
 type ModelsApi = ReturnType<typeof useModels>;
@@ -53,6 +54,7 @@ export function OnboardingView({ preferences, models, initialStep, onStepChange,
   const settings = settingsCopy(locale);
   const settingsCopyAgent = settings.agent;
   const appearanceCopy = settings.appearance;
+  const [direction, setDirection] = useState(1);
   const [step, setStep] = useState(() => clampStep(initialStep));
   const [scan, setScan] = useState<ExternalSkillScan | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
@@ -161,6 +163,7 @@ export function OnboardingView({ preferences, models, initialStep, onStepChange,
 
   function goTo(next: number): void {
     const safe = clampStep(next);
+    setDirection(safe >= step ? 1 : -1);
     setStep(safe);
     onStepChange(safe);
     setSaveError(null);
@@ -339,7 +342,7 @@ export function OnboardingView({ preferences, models, initialStep, onStepChange,
           <div className="onboarding-header-title"><img className="onboarding-brand-mark small" src={velaLogoUrl} alt="" aria-hidden="true" />{copy.appTitle}</div>
           <span className="onboarding-saved-badge">{copy.savedOnDevice}</span>
         </header>
-        <div className="onboarding-content" key={step}>
+        <ContentSwap className="onboarding-content onboarding-step-swap" motionKey={step} direction={direction}>
           {step === 0 ? (
             <section className="onboarding-screen onboarding-welcome" aria-labelledby="onboarding-welcome-title">
               <div className="onboarding-welcome-content">
@@ -628,7 +631,7 @@ export function OnboardingView({ preferences, models, initialStep, onStepChange,
               <button className="onboarding-primary" type="button" onClick={finish}>{copy.enterApp}<ArrowIcon /></button>
             </section>
           ) : null}
-        </div>
+        </ContentSwap>
 
         {step > 0 && step < 6 ? (
           <footer className="onboarding-footer">

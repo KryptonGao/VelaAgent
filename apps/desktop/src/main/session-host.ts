@@ -1,4 +1,4 @@
-import { AgentRuntime, type RuntimeEvent } from "@vela/agent";
+import { AgentRuntime, parseThinkingSummaryInput, type RuntimeEvent } from "@vela/agent";
 import {
   IpcChannel,
   customModelApis,
@@ -16,6 +16,7 @@ import {
   isInteractionMode,
   type ModelAuthEvent,
   type NewConversationSelection,
+  type PlanExecutionContextStrategy,
   type PromptInput,
   type ThinkingLevel,
 } from "@vela/shared";
@@ -88,10 +89,10 @@ export class SessionHost {
       }
       return this.currentState();
     });
-    ipcMain.handle(IpcChannel.sessionExecutePlan, async (_event, rawId: unknown) => {
+    ipcMain.handle(IpcChannel.sessionExecutePlan, async (_event, rawId: unknown, rawStrategy: unknown) => {
       const conversationId = resolveConversationId(this.runtime.activeConversationId, rawId);
       try {
-        await this.runtime.executePlan(conversationId);
+        await this.runtime.executePlan(conversationId, parsePlanExecutionStrategy(rawStrategy));
       } catch (error) {
         const message = error instanceof Error ? error.message : "无法执行计划";
         this.broadcast({ type: "error", conversationId, message });
@@ -124,8 +125,17 @@ export class SessionHost {
       await this.runtime.unarchiveConversation(parseConversationId(rawId, "对话"));
       return this.currentState();
     });
+    ipcMain.handle(IpcChannel.sessionBranch, async (_event, rawId: unknown, rawTurn: unknown) => {
+      await this.runtime.branchConversation(parseConversationId(rawId, "对话"), parseTurnIndex(rawTurn));
+      return this.currentState();
+    });
+    ipcMain.handle(IpcChannel.sessionTrace, (_event, rawId: unknown) => this.runtime.getTrace(parseConversationId(rawId, "对话")));
+    ipcMain.handle(IpcChannel.sessionTraceDetails, (_event, rawId: unknown, rawNode: unknown) => this.runtime.getTraceDetails(parseConversationId(rawId, "对话"), parseId(rawNode, "轨迹节点")));
     ipcMain.handle(IpcChannel.sessionMessages, (_event, rawId: unknown) => {
       return this.runtime.getMessages(parseConversationId(rawId, "对话"));
+    });
+    ipcMain.handle(IpcChannel.sessionSummarizeThinking, (_event, raw: unknown) => {
+      return this.runtime.summarizeThinking(parseThinkingSummaryInput(raw));
     });
     ipcMain.handle(IpcChannel.sessionAgentMessages, (_event, rawConversation: unknown, rawAgent: unknown) => {
       return this.runtime.getAgentMessages(
@@ -205,6 +215,7 @@ export class SessionHost {
       context: this.runtime.getUsage(activeId),
       conversations: this.runtime.listConversations(),
       activeConversationId: activeId,
+      agents: this.runtime.getAgents(activeId),
     };
   }
 
@@ -314,6 +325,12 @@ function parseInteractionMode(value: unknown): InteractionMode {
   return value;
 }
 
+function parsePlanExecutionStrategy(value: unknown): PlanExecutionContextStrategy {
+  if (value === undefined || value === null || value === "") return "continue";
+  if (value === "continue" || value === "fresh") return value;
+  throw new Error("不支持的计划执行方式");
+}
+
 function parseThinkingLevel(value: unknown): ThinkingLevel {
   if (typeof value !== "string" || !(thinkingLevels as readonly string[]).includes(value)) {
     throw new Error("不支持这个思考强度");
@@ -402,6 +419,13 @@ function parseQuestionAnswer(value: unknown): string | null {
   const answer = value.trim();
   if (!answer || answer.length > 4000) throw new Error("回答不正确");
   return answer;
+}
+
+function parseTurnIndex(value: unknown): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 100_000) {
+    throw new Error("回复位置不正确");
+  }
+  return value;
 }
 
 function parseCustomModel(raw: unknown): CustomModelInput {

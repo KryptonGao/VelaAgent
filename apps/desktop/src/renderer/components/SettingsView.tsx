@@ -18,7 +18,7 @@ import {
 } from "@vela/shared";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { useModels } from "../hooks/useModels";
-import type { Appearance, AppLocale, FileIconTheme, PreferencesApi, ToolDisplay, ToolFold } from "../hooks/usePreferences";
+import type { Appearance, AppLocale, FileIconTheme, InfoLayout, PreferencesApi, ThinkingSummaryStyle, ToolDisplay, ToolFold } from "../hooks/usePreferences";
 import type { ProjectApi } from "../hooks/useProject";
 import { modKeyLabel } from "../platform";
 import { darkThemes, lightThemes, type ColorScheme, type DarkTheme, type LightTheme, type ThemeId } from "../themes";
@@ -986,6 +986,8 @@ function AppearanceSection({
   mod: string;
 }) {
   const {
+    infoLayout,
+    setInfoLayout,
     appearance,
     locale,
     theme,
@@ -993,11 +995,15 @@ function AppearanceSection({
     darkTheme,
     toolDisplay,
     toolFold,
+    thinkingSummary,
+    thinkingSummaryStyle,
     fileIconTheme,
     setAppearance,
     setLocale,
     setToolDisplay,
     setToolFold,
+    setThinkingSummary,
+    setThinkingSummaryStyle,
     setFileIconTheme,
   } = preferences;
   const text = copy.appearance;
@@ -1024,9 +1030,18 @@ function AppearanceSection({
     { id: "message", label: text.toolFoldMessage },
     { id: "position", label: text.toolFoldPosition },
   ];
+  const infoLayoutOptions: { id: InfoLayout; label: string }[] = [
+    { id: "sidebar", label: text.infoLayoutSidebar },
+    { id: "floating", label: text.infoLayoutFloating },
+  ];
+  const thinkingSummaryStyleOptions: { id: ThinkingSummaryStyle; label: string }[] = [
+    { id: "inline", label: text.thinkingSummaryStyleInline },
+    { id: "headline", label: text.thinkingSummaryStyleHeadline },
+    { id: "prose", label: text.thinkingSummaryStyleProse },
+  ];
   const fileIconThemeOptions: { id: FileIconTheme; label: string }[] = [
-    { id: "devicon", label: text.devicon },
     { id: "material", label: text.materialIconTheme },
+    { id: "devicon", label: text.devicon },
   ];
   const shortcuts = [
     { label: text.items.sidebar, keys: [`${mod}B`] },
@@ -1075,6 +1090,9 @@ function AppearanceSection({
           onChange={setLocale}
         />
       </SettingsBlock>
+      <SettingsBlock title={text.infoLayout} hint={text.infoLayoutHint}>
+        <Segmented label={text.infoLayout} value={infoLayout} options={infoLayoutOptions} onChange={setInfoLayout} />
+      </SettingsBlock>
       <SettingsBlock title={text.toolDisplay} hint={text.toolDisplayHint}>
         <Segmented
           label={text.toolDisplay}
@@ -1089,6 +1107,25 @@ function AppearanceSection({
           value={toolFold}
           options={toolFoldOptions}
           onChange={setToolFold}
+        />
+      </SettingsBlock>
+      <SettingsBlock title={text.thinkingSummary} hint={text.thinkingSummaryHint}>
+        <Segmented
+          label={text.thinkingSummary}
+          value={thinkingSummary ? "on" : "off"}
+          options={[
+            { id: "off", label: text.thinkingSummaryOff },
+            { id: "on", label: text.thinkingSummaryOn },
+          ]}
+          onChange={(value) => setThinkingSummary(value === "on")}
+        />
+      </SettingsBlock>
+      <SettingsBlock title={text.thinkingSummaryStyle} hint={text.thinkingSummaryStyleHint}>
+        <Segmented
+          label={text.thinkingSummaryStyle}
+          value={thinkingSummaryStyle}
+          options={thinkingSummaryStyleOptions}
+          onChange={setThinkingSummaryStyle}
         />
       </SettingsBlock>
       <SettingsBlock title={text.fileIconTheme} hint={text.fileIconThemeHint}>

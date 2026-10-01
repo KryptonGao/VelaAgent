@@ -1,4 +1,5 @@
 import type { ContextUsage } from "@vela/shared";
+import { ContextUsageTrigger } from "../ContextUsagePopover";
 import { composerStats } from "./composer-stats";
 import { tr } from "../../locale";
 
@@ -6,9 +7,9 @@ import { tr } from "../../locale";
  * 输入框下方的会话统计条：轮数/步数/速度、累计 token 与缓存命中率、上下文占用环。
  * 没有数据的分组整个不渲染，全部缺失时整条隐藏。
  */
-export function ComposerStatsRow({ usage }: { usage: ContextUsage | undefined | null }) {
+export function ComposerStatsRow({ usage, contextPopover = false }: { usage: ContextUsage | undefined | null; contextPopover?: boolean }) {
   const stats = composerStats(usage);
-  const hasGroup = Boolean(stats.activity || stats.tokens || stats.percentLabel);
+  const hasGroup = Boolean(stats.activity || stats.tokens || stats.percentLabel || contextPopover);
   if (!hasGroup) return null;
 
   return (
@@ -25,7 +26,12 @@ export function ComposerStatsRow({ usage }: { usage: ContextUsage | undefined | 
           <span className="composer-stat-text">{stats.tokens}</span>
         </span>
       ) : null}
-      {stats.percentLabel ? (
+      {contextPopover ? (
+        <ContextUsageTrigger usage={usage} high={(stats.percent ?? 0) >= 80}>
+          <ContextRing percent={stats.percent ?? 0} />
+          <span className="composer-stat-text">{stats.percentLabel ?? (usage?.tokens ? "—" : "0%")}</span>
+        </ContextUsageTrigger>
+      ) : stats.percentLabel ? (
         <span
           className={`composer-stat composer-stat-context${(stats.percent ?? 0) >= 80 ? " high" : ""}`}
           title={`${tr("上下文占用", "Context used")} ${stats.percentLabel}`}

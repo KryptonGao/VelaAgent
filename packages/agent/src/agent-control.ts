@@ -8,6 +8,7 @@ import {
 import type { AgentInfo, AgentStatus, SubagentKind } from "@vela/shared";
 import { randomUUID } from "node:crypto";
 import { Type } from "typebox";
+import { normalizeStoredAgents, type StoredAgent } from "./agent-history";
 import {
   clipText,
   followupTaskToolName,
@@ -18,7 +19,6 @@ import {
   spawnAgentToolName,
   stepSummary,
   subagentOutputCap,
-  subagentTurnLimit,
 } from "./subagent";
 
 /** 子代理最多嵌套几层：/root 之外还能再挂 3 层。 */
@@ -36,6 +36,8 @@ const mutatingToolNames = new Set(["bash", "edit", "write"]);
 export type ContextFork = "none" | "all" | number;
 
 export interface AgentSessionRequest {
+  /** 恢复子会话时沿用已有消息，不再 fork 父上下文。 */
+  sessionFile?: string | null;
   parentId: string;
   parentPath: string;
   parentSession: AgentSession;
@@ -70,6 +72,7 @@ export interface AgentControlOptions {
   conversationId: string;
   host: AgentControlHost;
   onChange?: (agents: AgentInfo[]) => void;
+  restoredAgents?: StoredAgent[];
 }
 
 interface AgentTaskOutcome {
@@ -100,11 +103,10 @@ interface ManagedAgent {
   running: boolean;
   aborted: boolean;
   disposed: boolean;
-  turnCount: number;
-  turnLimited: boolean;
   /** abortAll 递增；旧代际的排队任务不再执行。 */
   generation: number;
   fork: ContextFork;
+  sessionFile: string | null;
 }
 
 /**
@@ -117,7 +119,16 @@ export class AgentControl {
   private readonly semaphore = new Semaphore(maxConcurrentAgents);
   private spawnSequence = 0;
 
-  constructor(private readonly options: AgentControlOptions) {}
+  constructor(private readonly options: AgentControlOptions) {
+    for (const stored of normalizeStoredAgents(options.restoredAgents)) {
+      const { sessionFile, ...info } = stored;
+      this.agents.set(info.id, {
+        info, sessionFile, session: null, sessionPromise: null, unsubscribe: null,
+        queue: [], processing: false, running: false, aborted: false,
+        disposed: false, generation: 0, fork: "none",
+      });
+    }
+  }
 
   /** 登记对话主会话为树根；root 的回合由运行时驱动，控制面只维护它的节点。 */
   registerRoot(session: AgentSession): AgentInfo {
@@ -148,10 +159,9 @@ export class AgentControl {
       running: false,
       aborted: false,
       disposed: false,
-      turnCount: 0,
-      turnLimited: false,
       generation: 0,
       fork: "none",
+      sessionFile: null,
     });
     this.emit();
     return cloneAgent(info);
@@ -160,6 +170,11 @@ export class AgentControl {
   /** 当前整棵树的快照；界面增量更新和测试都用它。 */
   list(): AgentInfo[] {
     return this.snapshot();
+  }
+
+  storedAgents(): StoredAgent[] {
+    return [...this.agents.values()].filter((agent) => agent.info.kind !== "root")
+      .map((agent) => ({ ...cloneAgent(agent.info), sessionFile: agent.sessionFile }));
   }
 
   /** 按 agentId 取会话，用于读取该子代理自己的消息历史。root 也可取。 */
@@ -319,10 +334,9 @@ export class AgentControl {
       running: false,
       aborted: false,
       disposed: false,
-      turnCount: 0,
-      turnLimited: false,
       generation: 0,
       fork: input.fork ?? "none",
+      sessionFile: null,
     };
     this.agents.set(info.id, agent);
     this.emit();
@@ -544,13 +558,16 @@ export class AgentControl {
       path: agent.info.path,
       forkMessages: selectForkMessages(parentSession.messages, agent.fork),
       customTools: this.createAgentTools(agent.info.id),
+      sessionFile: agent.sessionFile,
     });
     if (agent.disposed) {
       session.dispose();
       throw new Error("子代理已结束。");
     }
     agent.session = session;
+    agent.sessionFile = session.sessionManager?.getSessionFile() ?? null;
     agent.unsubscribe = session.subscribe((event) => this.handleSessionEvent(agent, event));
+    this.emit();
     return session;
   }
 
@@ -560,14 +577,6 @@ export class AgentControl {
       agentId: agent.info.id,
       event,
     });
-    if (event.type === "turn_end") {
-      agent.turnCount += 1;
-      if (agent.turnCount >= subagentTurnLimit && !agent.turnLimited) {
-        agent.turnLimited = true;
-        void agent.session?.abort();
-      }
-      return;
-    }
     if (event.type === "tool_execution_start") {
       rememberStep(agent.info.steps, {
         id: event.toolCallId,
@@ -600,8 +609,6 @@ export class AgentControl {
   ): Promise<AgentTaskOutcome> {
     agent.running = true;
     agent.aborted = false;
-    agent.turnCount = 0;
-    agent.turnLimited = false;
     agent.info.status = "running";
     agent.info.task = oneLine(task.text, 160);
     agent.info.error = null;
@@ -613,13 +620,13 @@ export class AgentControl {
     try {
       await session.prompt(task.text, { expandPromptTemplates: false });
     } catch (error) {
-      if (!agent.turnLimited && !agent.aborted) {
+      if (!agent.aborted) {
         failure = error instanceof Error ? error.message : "子代理执行失败";
       }
     }
     const text = lastAssistantText(session.messages);
     const sessionError =
-      !failure && !agent.turnLimited && !agent.aborted
+      !failure && !agent.aborted
         ? session.agent.state.errorMessage?.trim() ?? ""
         : "";
     const errorText = failure || sessionError;
@@ -641,7 +648,6 @@ export class AgentControl {
       path: agent.info.path,
       text,
       failure: errorText,
-      turnLimited: agent.turnLimited,
       stopped: agent.aborted,
     });
     return { status, text: report.text, error: errorText || null };

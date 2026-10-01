@@ -1,5 +1,5 @@
 import type { WorkspaceSearchResult } from "@vela/shared";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { FileTypeIcon } from "../FileTypeIcon";
 import { useFilePreview } from "./FilePreviewContext";
 import { ancestorsOf, buildFileTree, filterFilePaths, type FileTreeNode } from "./tree";
@@ -180,7 +180,7 @@ export function ExplorerPane() {
   );
 }
 
-function FileTree({
+export function FileTree({
   nodes,
   expanded,
   activePath,
@@ -208,10 +208,10 @@ function FileTree({
               onClick={() => onToggleDir(node.path)}
               title={node.path}
             >
-              <span className="explorer-caret" aria-hidden="true">{expanded.has(node.path) ? "▾" : "›"}</span>
+              <span className={`explorer-caret${expanded.has(node.path) ? " is-expanded" : ""}`} aria-hidden="true">›</span>
               <span className="explorer-name">{node.name}</span>
             </button>
-            {expanded.has(node.path) && node.children ? (
+            {node.children ? <TreeBranch open={expanded.has(node.path)}>
               <FileTree
                 nodes={node.children}
                 expanded={expanded}
@@ -220,7 +220,7 @@ function FileTree({
                 onOpenFile={onOpenFile}
                 depth={depth + 1}
               />
-            ) : null}
+            </TreeBranch> : null}
           </div>
         ) : (
           <button
@@ -239,6 +239,15 @@ function FileTree({
       )}
     </>
   );
+}
+
+/** Mount lazily, then retain nested state while the grid reverses a collapse. */
+function TreeBranch({ open, children }: { open: boolean; children: ReactNode }) {
+  const [revealed, setRevealed] = useState(open);
+  if (open && !revealed) setRevealed(true);
+  return <div className={`explorer-branch${open ? " is-open" : ""}`} inert={!open} aria-hidden={!open}>
+    <div className="explorer-branch-inner">{revealed ? children : null}</div>
+  </div>;
 }
 
 function ResultPath({ path }: { path: string }) {

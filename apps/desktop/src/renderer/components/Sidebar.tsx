@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { modKeyLabel } from "../platform";
 import { tr } from "../locale";
 import type { SidebarResize } from "../hooks/useSidebarResize";
+import { MotionList } from "./BatchMotion";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
 
 interface SidebarProps {
@@ -104,7 +105,7 @@ export function Sidebar({
 
       <div className="sidebar-scroll-area">
         <div className="sidebar-section-title">{tr("会话", "Chats")}</div>
-        {groups.map((group) => {
+        <MotionList className="session-groups" items={groups} keyOf={(group) => group.cwd}>{(group) => {
           const isCollapsed = Boolean(collapsedWorkspaces[group.cwd]);
           return (
             <div className={`session-group${isCollapsed ? " collapsed" : ""}`} key={group.cwd}>
@@ -124,8 +125,8 @@ export function Sidebar({
                 <span className="session-group-count">{group.conversations.length}</span>
               </button>
               {isCollapsed ? null : (
-                <div className="subchat-list">
-                  {group.conversations.map((conversation) => (
+                <MotionList className="subchat-list" items={group.conversations} keyOf={(conversation) => conversation.id}>
+                  {(conversation) => (
                     <div className="subchat-row" key={conversation.id}>
                       <button
                         className={`subchat-item${conversation.id === activeConversationId ? " active" : ""}`}
@@ -151,12 +152,12 @@ export function Sidebar({
                         <ArchiveIcon />
                       </button>
                     </div>
-                  ))}
-                </div>
+                  )}
+                </MotionList>
               )}
             </div>
           );
-        })}
+        }}</MotionList>
         {groups.length === 0 ? (
           <div className="sidebar-empty-hint">{tr("还没有会话", "No chats yet")}</div>
         ) : null}

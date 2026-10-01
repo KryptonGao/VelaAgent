@@ -1,26 +1,34 @@
+import { TraceView } from "./trace/TraceView";
 import type { AppState, InteractionMode } from "@vela/shared";
 import { Fragment, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useAgentWorkspace } from "./AgentPanel";
 import { modKeyLabel } from "../platform";
-import { FolderIcon, StackIcon } from "./icons";
+import { BranchIcon, CheckIcon, CopyIcon, FolderIcon, PlusIcon, StackIcon } from "./icons";
 import { trackEnteredMessages, type EnterTrack } from "./message-motion";
 import type { useModels } from "../hooks/useModels";
 import type { ProjectApi } from "../hooks/useProject";
 import type { ToolDisplay, ToolFold } from "../hooks/usePreferences";
 import type { UiMessage } from "../hooks/useSession";
+import { RepoCard } from "./RepoCard";
 import { Composer } from "./Composer";
+import { useContentArrival } from "./BatchMotion";
 import { Markdown } from "./Markdown";
 import { OpenInAppButton } from "./OpenInAppButton";
 import { Thinking } from "./Thinking";
+import { ThinkingSummaryContext } from "./ThinkingSummaryContext";
+import type { ThinkingSummariesApi } from "../hooks/useThinkingSummaries";
 import { ToolCard, ToolList, CompactToolGroup, CompactToolLine, ToolRunGroup, type QuestionLookup } from "./ToolCard";
 import { toolCompactKind } from "./tool-compact";
 import { buildTurnItems, groupProcessItems, type ProcessNode } from "./tool-sequence";
+import { PlanPreviewList } from "./PlanPanel";
+import { collectPlanIds } from "../plan-draft";
 import { SkillToken } from "./composer/SkillMenu";
 import { parseSkillPrompt } from "./composer/skill-picker";
 import { useFilePreview } from "./preview/FilePreviewContext";
 import { nextStreamFollow, releasesStreamFollow, shouldResumeFollowForMessages } from "./chat-scroll";
 import { changesByFinalMessage, type TurnChanges } from "./turn-changes";
-import { localizeError, tr } from "../locale";
+import { chatLaneDefaultMaxWidth, planChatLane } from "../chat-lane";
+import { isEnglish, localizeError, tr } from "../locale";
 
 interface FollowState {
   pinned: boolean;
@@ -95,11 +103,15 @@ interface ChatViewProps {
   platform: string;
   leftCollapsed: boolean;
   onToggleLeft: () => void;
+  floatingInfo?: boolean;
+  environmentCollapsed?: boolean;
+  changesActive?: boolean;
   rightCollapsed: boolean;
   onToggleRight: () => void;
   project: ProjectApi;
   toolDisplay?: ToolDisplay;
   toolFold?: ToolFold;
+  thinkingSummaries?: ThinkingSummariesApi;
   /** 在输入框模型列表中隐藏的模型，key 为 `provider/id`。 */
   hiddenModels?: string[];
   onSend: (text: string, images?: import("@vela/shared").ImageAttachment[]) => Promise<void>;
@@ -108,6 +120,11 @@ interface ChatViewProps {
   models: ReturnType<typeof useModels>;
   getQuestion: QuestionLookup;
   onReplyQuestion: (id: string, answer: string | null) => void;
+  /** 从某一轮回复处分支出新对话;参数是可见用户消息的序号。 */
+  onBranch: (turnIndex: number) => void;
+  /** 顶栏的「新建标签页」入口:工作面板没开、或右侧栏收起时才显示,避免和标签栏的 + 重复。 */
+  showNewTab: boolean;
+  onNewTab: () => void;
   onOpenChanges: () => void;
 }
 
@@ -120,9 +137,13 @@ export function ChatView({
   onToggleLeft,
   rightCollapsed,
   onToggleRight,
+  floatingInfo = false,
+  environmentCollapsed = false,
+  changesActive = false,
   project,
   toolDisplay = "card",
   toolFold = "message",
+  thinkingSummaries,
   hiddenModels = [],
   onSend,
   onAbort,
@@ -130,8 +151,16 @@ export function ChatView({
   models,
   getQuestion,
   onReplyQuestion,
+  onBranch,
+  showNewTab,
+  onNewTab,
   onOpenChanges,
 }: ChatViewProps) {
+  const [views, setViews] = useState<Record<string, "chat" | "trace">>({});
+  const viewKey = state?.activeConversationId ?? "empty";
+  const view = views[viewKey] ?? "chat";
+  const setView = (next: "chat" | "trace") => setViews(current => ({ ...current, [viewKey]: next }));
+  const pendingInteraction = Boolean(project.approval) || messages.some(message => message.tools.some(tool => getQuestion(tool.id)));
   const session = state?.session;
   const streaming = session?.status === "streaming";
   const activeAssistantId = streaming
@@ -262,6 +291,56 @@ export function ChatView({
     if (follow.pinned) scrollFollowToEnd(scroller, follow);
   }, [messages, state?.activeConversationId]);
 
+  const messageSurfaceKey = JSON.stringify([project.workspace?.current ?? null, state?.activeConversationId ?? null]);
+  const messageSurfaceRef = useContentArrival(messageSurfaceKey, 180, 6);
+
+  // 悬浮信息布局下,环境卡片会盖住居中的对话列右缘:被盖住时把对话列放到
+  // 「左侧边栏分界 → 卡片左缘」之间居中(左右距离相等),放不下则收窄不到 10%
+  // 的宽度;需要收窄 10% 以上就保持原样,让卡片覆盖(几何规则与单测见 chat-lane.ts)。
+  useLayoutEffect(() => {
+    const pane = scrollerRef.current?.parentElement;
+    if (!floatingInfo || environmentCollapsed || !pane) return;
+
+    // 消息面会在工作区/会话切换时按 key 重建,每次测量都重新取一遍实时元素。
+    const measure = () => {
+      const surface = pane.querySelector<HTMLElement>(".chat-message-surface");
+      const card = pane.querySelector<HTMLElement>(".floating-environment");
+      if (!surface || !card) return null;
+      const surfaceBox = surface.getBoundingClientRect();
+      if (!(surfaceBox.width > 0)) return null;
+      // 列宽上限由 CSS 变量维护,JS 只负责按实测几何决定移多少、收多少。
+      const maxLane =
+        Number.parseFloat(getComputedStyle(pane).getPropertyValue("--chat-lane-max")) || chatLaneDefaultMaxWidth;
+      const laneWidth = Math.min(surfaceBox.width, maxLane);
+      return planChatLane({
+        laneLeft: surfaceBox.left + (surfaceBox.width - laneWidth) / 2,
+        laneWidth,
+        cardLeft: card.getBoundingClientRect().left,
+        // 左侧边栏分界即对话区左缘,让位后左右两侧的距离以它为参照。
+        laneLimitLeft: pane.getBoundingClientRect().left,
+      });
+    };
+
+    const apply = () => {
+      const plan = measure();
+      if (!plan) return;
+      pane.style.setProperty("--chat-lane-shift", `${Math.round(plan.shift)}px`);
+      pane.style.setProperty("--chat-lane-shrink", `${Math.round(plan.shrink)}px`);
+    };
+
+    apply();
+    // 触发条件只有窗口/侧栏和卡片自身的尺寸变化;变量只改对话列宽度,不会反哺这三者。
+    const observer = new ResizeObserver(apply);
+    observer.observe(pane);
+    const card = pane.querySelector<HTMLElement>(".floating-environment");
+    if (card) observer.observe(card);
+    return () => {
+      observer.disconnect();
+      pane.style.removeProperty("--chat-lane-shift");
+      pane.style.removeProperty("--chat-lane-shrink");
+    };
+  }, [floatingInfo, environmentCollapsed, messageSurfaceKey]);
+
   const enterTrack = useRef<EnterTrack | null>(null);
   enterTrack.current = trackEnteredMessages(
     enterTrack.current,
@@ -270,7 +349,9 @@ export function ChatView({
   );
   const entering = enterTrack.current.enter;
   const mod = modKeyLabel(platform);
-  const rightLabel = rightCollapsed ? tr("展开右侧面板", "Expand right panel") : tr("收起右侧面板", "Collapse right panel");
+  const rightLabel = floatingInfo
+    ? (environmentCollapsed ? tr("展开环境卡片", "Expand environment card") : tr("折叠环境卡片", "Collapse environment card"))
+    : rightCollapsed ? tr("展开右侧面板", "Expand right panel") : tr("收起右侧面板", "Collapse right panel");
   const { agents: roster, activeAgentId, openAgent } = useAgentWorkspace();
   const subagents = useMemo(() => roster.filter((agent) => agent.kind !== "root"), [roster]);
   const runningSubagents = subagents.filter((agent) => agent.status === "running").length;
@@ -285,9 +366,21 @@ export function ChatView({
     [messages, streaming, project.workspace?.current],
   );
   const turns = useMemo(() => groupMessagesIntoTurns(messages), [messages]);
+  // 分支按轮次定位:数到回复所在轮的用户消息序号,与 runtime 重建的历史一致。
+  const userOrdinalById = useMemo(() => {
+    const ordinal = new Map<string, number>();
+    let count = 0;
+    for (const message of messages) {
+      if (message.role !== "user") continue;
+      ordinal.set(message.id, count);
+      count += 1;
+    }
+    return ordinal;
+  }, [messages]);
 
   return (
-    <main className="main-chat-view">
+    <ThinkingSummaryContext.Provider value={thinkingSummaries ?? null}>
+    <main className="main-chat-view" tabIndex={-1}>
       <header className="main-chat-header">
         <div className="chat-title-group">
           {leftCollapsed ? (
@@ -327,6 +420,17 @@ export function ChatView({
               </span>
             </button>
           ) : null}
+          {showNewTab ? (
+            <button
+              className="view-icon-btn"
+              type="button"
+              title={`${tr("新建标签页", "New tab")} (${mod}T)`}
+              aria-label={tr("新建标签页", "New tab")}
+              onClick={onNewTab}
+            >
+              <PlusIcon size={15} />
+            </button>
+          ) : null}
           <button
             className={`view-icon-btn${rightCollapsed ? "" : " active"}`}
             type="button"
@@ -335,12 +439,25 @@ export function ChatView({
             aria-pressed={!rightCollapsed}
             onClick={onToggleRight}
           >
-            <PanelIcon />
+            {floatingInfo ? <EnvironmentInfoIcon /> : <PanelIcon />}
           </button>
         </div>
       </header>
 
+      <nav className="conversation-view-tabs" role="tablist" aria-label={tr("会话视图", "Conversation view")}>
+        <button role="tab" aria-selected={view === "chat"} onClick={() => setView("chat")}>{tr("对话", "Conversation")}</button>
+        <button role="tab" aria-selected={view === "trace"} onClick={() => setView("trace")}>{tr("轨迹", "Trace")}</button>
+      </nav>
+      {view === "trace" ? <TraceView key={viewKey} state={state} onConversation={() => setView("chat")} onAbort={onAbort} pendingInteraction={pendingInteraction} /> : null}
+      <div className="chat-conversation-pane" hidden={view !== "chat"} inert={view !== "chat" ? true : undefined}>
+      {floatingInfo && !environmentCollapsed ? (
+        <div className="floating-environment">
+          <RepoCard project={project} onOpenChanges={onOpenChanges} activeChanges={changesActive}
+            onToggle={onToggleRight} />
+        </div>
+      ) : null}
       <div className="chat-scroll-area" ref={scrollerRef}>
+        <div className="chat-message-surface" key={messageSurfaceKey} ref={messageSurfaceRef}>
         {session?.status === "error" && session.error ? (
           <div className="chat-error-card" role="alert">
             <div className="chat-error-card-title">{tr("会话还不能开始", "Chat is not ready yet")}</div>
@@ -365,6 +482,7 @@ export function ChatView({
               (lastAssistant?.turnStartedAt === undefined || lastAssistant.turnCompletedAt !== undefined)
             ));
             const changes = lastAssistant ? turnChanges.get(lastAssistant.id) ?? null : null;
+            const branchTurn = turn.user ? userOrdinalById.get(turn.user.id) ?? null : null;
 
             return (
               <Fragment key={turn.id}>
@@ -394,10 +512,13 @@ export function ChatView({
                     onReplyQuestion={onReplyQuestion}
                     toolDisplay={toolDisplay}
                     toolFold={toolFold}
+                    branchTurn={branchTurn}
+                    replyTime={finalReply.timestamp ?? lastAssistant.timestamp ?? lastAssistant.turnCompletedAt ?? null}
+                    onBranch={onBranch}
                   />
                 ) : turn.assistants.length > 0 ? (
-                  toolFold === "position" ? (
-                    <div className="assistant-live-turn">
+                  <div className="assistant-live-turn">
+                    {toolFold === "position" ? (
                       <article className="assistant-block">
                         <ToolSequence
                           messages={turn.assistants}
@@ -415,31 +536,41 @@ export function ChatView({
                           />
                         ) : null}
                       </article>
-                    </div>
-                  ) : (
-                  <div className="assistant-live-turn">
-                    {/* 每一步 assistant 的思考都跟着自己的工具调用走;Thinking 组件负责运行中展开、结束后折叠。 */}
-                    {turn.assistants.map((message) => (
-                      <Message
-                        key={message.id}
-                        message={message}
-                        thinkingActive={message.id === activeAssistantId && !message.text && message.tools.length === 0}
-                        entering={entering.has(message.id)}
-                        changes={turnChanges.get(message.id) ?? null}
-                        onOpenChanges={onOpenChanges}
-                        canManageChanges={Boolean(project.git?.repo)}
-                        getQuestion={getQuestion}
-                        onReplyQuestion={onReplyQuestion}
-                        toolDisplay={toolDisplay}
+                    ) : (
+                      // 每一步 assistant 的思考都跟着自己的工具调用走;Thinking 组件负责运行中展开、结束后折叠。
+                      turn.assistants.map((message) => (
+                        <Message
+                          key={message.id}
+                          message={message}
+                          thinkingActive={message.id === activeAssistantId && !message.text && message.tools.length === 0}
+                          streaming={message.id === activeAssistantId}
+                          entering={entering.has(message.id)}
+                          changes={turnChanges.get(message.id) ?? null}
+                          onOpenChanges={onOpenChanges}
+                          canManageChanges={Boolean(project.git?.repo)}
+                          getQuestion={getQuestion}
+                          onReplyQuestion={onReplyQuestion}
+                          toolDisplay={toolDisplay}
+                        />
+                      ))
+                    )}
+                    <PlanPreviewList planIds={collectPlanIds(turn.assistants)} />
+                    {finalReply ? (
+                      <ReplyActions
+                        text={finalReply.text}
+                        timestamp={finalReply.timestamp ?? null}
+                        branchTurn={branchTurn}
+                        branchDisabled={session?.status !== "ready"}
+                        onBranch={onBranch}
                       />
-                    ))}
+                    ) : null}
                   </div>
-                  )
                 ) : null}
               </Fragment>
             );
           })
         )}
+        </div>
       </div>
 
       <Composer
@@ -457,12 +588,15 @@ export function ChatView({
         mode={session?.mode ?? "agent"}
         sendError={sendError}
         usage={state?.context ?? null}
+        contextPopover={floatingInfo}
         project={project}
         onSend={onSend}
         onAbort={onAbort}
         onMode={onMode}
       />
+      </div>
     </main>
+    </ThinkingSummaryContext.Provider>
   );
 }
 
@@ -523,6 +657,7 @@ function UserText({ text }: { text: string }) {
 function Message({
   message,
   thinkingActive,
+  streaming = false,
   entering,
   changes,
   onOpenChanges,
@@ -533,6 +668,7 @@ function Message({
 }: {
   message: UiMessage;
   thinkingActive: boolean;
+  streaming?: boolean;
   entering: boolean;
   changes: TurnChanges | null;
   onOpenChanges: () => void;
@@ -573,6 +709,7 @@ function Message({
       <AssistantMessageContent
         message={message}
         thinkingActive={thinkingActive}
+        streaming={streaming}
         thinkingDisclosure
         showTools
         showText
@@ -590,6 +727,7 @@ function Message({
 function AssistantMessageContent({
   message,
   thinkingActive,
+  streaming = false,
   thinkingDisclosure = true,
   showTools,
   showText,
@@ -602,6 +740,7 @@ function AssistantMessageContent({
 }: {
   message: UiMessage;
   thinkingActive: boolean;
+  streaming?: boolean;
   thinkingDisclosure?: boolean;
   showTools: boolean;
   showText: boolean;
@@ -617,13 +756,14 @@ function AssistantMessageContent({
       {message.thinking ? (
         thinkingDisclosure ? (
           <Thinking
+            messageId={message.id}
             text={message.thinking}
             active={thinkingActive}
             showActivityIndicator={toolDisplay === "compact"}
           />
         ) : (
           <div className="stream-prose-block thinking-text process-thinking-text">
-            <Markdown text={message.thinking} />
+            <Markdown text={message.thinking} streaming={thinkingActive} />
           </div>
         )
       ) : null}
@@ -637,7 +777,7 @@ function AssistantMessageContent({
       ) : null}
       {showText && message.text ? (
         <div className="agent-reply-prose">
-          <Markdown text={message.text} />
+          <Markdown text={message.text} streaming={streaming} />
         </div>
       ) : null}
       {changes ? <TurnChangesCard changes={changes} onOpenChanges={onOpenChanges} canManageChanges={canManageChanges} /> : null}
@@ -711,13 +851,13 @@ function ToolSequence({
     if (node.type === "thinking") {
       const message = messageById.get(node.messageId);
       const active = node.messageId === activeAssistantId && Boolean(message && !message.text && message.tools.length === 0);
-      output.push(withEnter(node.id, node.messageId, <Thinking text={node.text} active={active} showActivityIndicator={compact} />));
+      output.push(withEnter(node.id, node.messageId, <Thinking messageId={node.messageId} text={node.text} active={active} showActivityIndicator={compact} />));
     } else {
       output.push(
         withEnter(
           node.id,
           node.messageId,
-          <div className="agent-reply-prose"><Markdown text={node.text} /></div>,
+          <div className="agent-reply-prose"><Markdown text={node.text} streaming={node.messageId === activeAssistantId} /></div>,
         ),
       );
     }
@@ -738,6 +878,9 @@ function CompletedAssistantTurn({
   onReplyQuestion,
   toolDisplay,
   toolFold,
+  branchTurn,
+  replyTime,
+  onBranch,
 }: {
   messages: UiMessage[];
   finalReply: UiMessage;
@@ -750,6 +893,9 @@ function CompletedAssistantTurn({
   onReplyQuestion: (id: string, answer: string | null) => void;
   toolDisplay?: ToolDisplay;
   toolFold?: ToolFold;
+  branchTurn: number | null;
+  replyTime: number | null;
+  onBranch: (turnIndex: number) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const processId = useId();
@@ -821,9 +967,92 @@ function CompletedAssistantTurn({
       <div className="agent-reply-prose">
         <Markdown text={finalReply.text} />
       </div>
+      <PlanPreviewList planIds={collectPlanIds(messages)} />
+      <ReplyActions
+        text={finalReply.text}
+        timestamp={replyTime}
+        branchTurn={branchTurn}
+        branchDisabled={branchTurn === null}
+        onBranch={onBranch}
+      />
       {changes ? <TurnChangesCard changes={changes} onOpenChanges={onOpenChanges} canManageChanges={canManageChanges} /> : null}
     </article>
   );
+}
+
+/** 回复下方的操作行:左侧复制与分支,右侧显示回复完成的时间点。 */
+function ReplyActions({
+  text,
+  timestamp,
+  branchTurn,
+  branchDisabled,
+  onBranch,
+}: {
+  text: string;
+  timestamp: number | null;
+  branchTurn: number | null;
+  branchDisabled: boolean;
+  onBranch: (turnIndex: number) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const time = formatReplyTime(timestamp);
+  const copy = () => {
+    void navigator.clipboard.writeText(text).then(
+      () => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1400);
+      },
+      () => setCopied(false),
+    );
+  };
+
+  return (
+    <div className="reply-actions">
+      <button
+        className="reply-action"
+        type="button"
+        title={copied ? tr("已复制", "Copied") : tr("复制回复", "Copy reply")}
+        aria-label={copied ? tr("已复制", "Copied") : tr("复制回复", "Copy reply")}
+        onClick={copy}
+      >
+        {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
+        <span>{copied ? tr("已复制", "Copied") : tr("复制", "Copy")}</span>
+      </button>
+      <button
+        className="reply-action"
+        type="button"
+        disabled={branchDisabled || branchTurn === null}
+        title={tr("保留这条回复及之前的对话，在新聊天里继续", "Keep this reply and the conversation before it, then continue in a new chat")}
+        aria-label={tr("分支到新聊天", "Branch to new chat")}
+        onClick={() => {
+          if (branchTurn !== null) onBranch(branchTurn);
+        }}
+      >
+        <BranchIcon size={13} />
+        <span>{tr("分支到新聊天", "Branch to new chat")}</span>
+      </button>
+      {time && timestamp !== null ? (
+        <time className="reply-time" dateTime={new Date(timestamp).toISOString()} title={formatReplyTimeTitle(timestamp)}>
+          {time}
+        </time>
+      ) : null}
+    </div>
+  );
+}
+
+function formatReplyTime(timestamp: number | null): string | null {
+  if (timestamp === null) return null;
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return null;
+  const locale = isEnglish() ? "en-US" : "zh-CN";
+  if (date.toDateString() === new Date().toDateString()) {
+    return date.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
+  }
+  return date.toLocaleString(locale, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function formatReplyTimeTitle(timestamp: number): string {
+  return new Date(timestamp).toLocaleString(isEnglish() ? "en-US" : "zh-CN");
 }
 
 /** 本轮完成后展示文件统计；审核读取保存的工具差异，不受后续工作区改动影响。 */
@@ -937,6 +1166,16 @@ function SidebarIcon() {
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <rect x="3" y="3" width="18" height="18" rx="2" />
       <line x1="9" y1="3" x2="9" y2="21" />
+    </svg>
+  );
+}
+
+function EnvironmentInfoIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="5.5" cy="6.5" r="2.5" />
+      <circle cx="5.5" cy="17.5" r="2.5" />
+      <path d="M12 6.5h9M12 17.5h9" />
     </svg>
   );
 }

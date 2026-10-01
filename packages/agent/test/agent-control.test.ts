@@ -13,6 +13,8 @@ import {
 
 /** 只实现控制面用到的会话表面：prompt / subscribe / abort / dispose / messages / errorMessage。 */
 class FakeSession {
+  sessionFile: string | null = null;
+  readonly sessionManager = { getSessionFile: () => this.sessionFile };
   readonly messages: AgentMessage[] = [];
   readonly prompts: string[] = [];
   readonly agent = { state: { errorMessage: undefined as string | undefined } };
@@ -160,6 +162,33 @@ describe("fork 选择", () => {
 });
 
 describe("agent 树", () => {
+  it("恢复节点时不自动运行；后续任务沿用历史文件且新代理避开旧路径", async () => {
+    const { control, host } = createControl();
+    host.sessionFactory = () => {
+      const session = new FakeSession();
+      session.sessionFile = "/tmp/child-history.jsonl";
+      return session;
+    };
+    const info = control.spawn("root-id", { kind: "explore", task: "查文件", name: "history" });
+    await waitFor(() => control.list().find((item) => item.id === info.id)?.status === "completed", "历史代理完成");
+    const stored = control.storedAgents();
+    assert.equal(stored[0]?.sessionFile, "/tmp/child-history.jsonl");
+    control.dispose();
+
+    const restoredHost = new FakeHost();
+    const restored = new AgentControl({ conversationId: "root-id", host: restoredHost, restoredAgents: stored });
+    restored.registerRoot(new FakeSession().asSession());
+    assert.equal(restoredHost.requests.length, 0);
+    assert.equal(restored.list().find((item) => item.id === info.id)?.finalText, "做完了");
+    await restored.followup("root-id", info.id, "继续检查", undefined);
+    assert.equal(restoredHost.requests[0]?.sessionFile, "/tmp/child-history.jsonl");
+    assert.deepEqual(restoredHost.requests[0]?.forkMessages, []);
+    const next = restored.spawn("root-id", { kind: "explore", task: "新的检查", name: "history" });
+    assert.equal(next.path, "/root/history-2");
+    await waitFor(() => restored.list().find((item) => item.id === next.id)?.status === "completed", "新代理完成");
+    restored.dispose();
+  });
+
   it("spawn 立即返回标识，完成后把结论投递给 root", async () => {
     const { control, host } = createControl();
     const info = control.spawn("root-id", { kind: "explore", task: "查启动流程", name: "startup" });

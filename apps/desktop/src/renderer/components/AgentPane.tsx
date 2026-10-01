@@ -1,26 +1,25 @@
 import type { AgentInfo } from "@vela/shared";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useDismissable } from "../hooks/useDismissable";
-import type { SidebarResize } from "../hooks/useSidebarResize";
+import { useEntryArrival } from "../hooks/useEntryArrival";
 import type { ToolDisplay } from "../hooks/usePreferences";
 import type { UiMessage } from "../hooks/useSession";
 import { tr } from "../locale";
 import { ActivityIndicator } from "./ActivityIndicator";
 import { AgentStatusMark, agentKindLabel, agentStatusLabel } from "./AgentPanel";
 import { Markdown } from "./Markdown";
-import { SidebarResizeHandle } from "./SidebarResizeHandle";
 import { Thinking } from "./Thinking";
 import { ToolList } from "./ToolCard";
-import { BranchIcon, CloseIcon } from "./icons";
+import { BranchIcon } from "./icons";
 
 interface AgentPaneProps {
   agent: AgentInfo;
   agents: readonly AgentInfo[];
   messages: UiMessage[];
   toolDisplay?: ToolDisplay;
-  resize: SidebarResize;
+  /** 宿主切换标签时隐藏但保持挂载，保留各 agent 独立的跟随与滚动位置。 */
+  visible?: boolean;
   onSwitch: (agentId: string) => void;
-  onClose: () => void;
   /** 首次展示某个 agent 时回填历史消息。 */
   ensureMessages: (agentId: string) => void;
 }
@@ -34,9 +33,8 @@ export function AgentPane({
   agents,
   messages,
   toolDisplay,
-  resize,
+  visible = true,
   onSwitch,
-  onClose,
   ensureMessages,
 }: AgentPaneProps) {
   const agentId = agent.id;
@@ -44,6 +42,11 @@ export function AgentPane({
   /** agentId -> 滚动位置与是否贴底跟随；切换 agent 时各自恢复。 */
   const followRef = useRef<Record<string, { pinned: boolean; scrollTop: number }>>({});
   const streaming = agent.status === "running";
+  const arrivalKeys = messages.flatMap((message) => [message.id,
+    ...(message.thinking ? [`${message.id}:thinking`] : []),
+    ...(message.tools.length ? [`${message.id}:tools`] : []),
+    ...(message.text ? [`${message.id}:text`] : []),
+  ]);
 
   useEffect(() => {
     ensureMessages(agentId);
@@ -51,13 +54,14 @@ export function AgentPane({
 
   // 切换 agent：恢复它自己的滚动位置；仍在贴底就继续跟随。
   useLayoutEffect(() => {
+    if (!visible) return;
     const node = scrollRef.current;
     if (!node) return;
     const state = (followRef.current[agentId] ??= { pinned: true, scrollTop: 0 });
     node.scrollTop = state.pinned
       ? node.scrollHeight
       : Math.min(state.scrollTop, Math.max(0, node.scrollHeight - node.clientHeight));
-  }, [agentId]);
+  }, [agentId, visible]);
 
   // 内容更新（流式文本、工具步骤）：只有贴底时才跟随。
   useLayoutEffect(() => {
@@ -76,9 +80,16 @@ export function AgentPane({
     state.scrollTop = node.scrollTop;
   };
 
+  const arrivalRef = useEntryArrival(agentId, arrivalKeys, 0);
   return (
-    <section className="agent-pane" aria-label={`${tr("子代理", "Subagent")} ${agent.path}`}>
-      <SidebarResizeHandle target="agent" resize={resize} />
+    <section
+      ref={arrivalRef}
+      className="agent-pane"
+      aria-label={`${tr("子代理", "Subagent")} ${agent.path}`}
+      aria-hidden={!visible}
+      inert={!visible ? true : undefined}
+      style={{ display: visible ? undefined : "none" }}
+    >
       <header className="agent-pane-header">
         <div className="agent-pane-title">
           <AgentStatusMark status={agent.status} />
@@ -88,18 +99,15 @@ export function AgentPane({
         </div>
         <div className="agent-pane-actions">
           <AgentRosterMenu agents={agents} activeId={agentId} onSelect={onSwitch} />
-          <button
-            className="view-icon-btn"
-            type="button"
-            title={tr("关闭子代理面板", "Close subagent pane")}
-            aria-label={tr("关闭子代理面板", "Close subagent pane")}
-            onClick={onClose}
-          >
-            <CloseIcon size={13} />
-          </button>
         </div>
       </header>
       <div className="agent-pane-scroll" ref={scrollRef} onScroll={onScroll}>
+        {agent.historyIncomplete ? (
+          <p className="agent-history-notice">
+            {tr("此历史会话仅保留任务、工具步骤摘要和最终结论；思考与完整工具输出未保存。",
+              "This historical session retains only the task, tool summaries, and final result. Thinking and full tool output were not saved.")}
+          </p>
+        ) : null}
         {messages.length === 0 ? (
           agent.finalText ? (
             <div className="agent-stream">
@@ -125,7 +133,7 @@ export function AgentPane({
           <div className="agent-stream">
             {messages.map((message, index) => (
               <AgentStreamMessage
-                key={message.id}
+                key={`${agentId}:${message.id}`}
                 message={message}
                 streaming={streaming && index === messages.length - 1}
                 toolDisplay={toolDisplay}
@@ -255,7 +263,7 @@ function AgentStreamMessage({
 }) {
   if (message.role === "user") {
     return (
-      <article className="agent-stream-message is-user">
+      <article className="agent-stream-message is-user" data-arrival-key={message.id}>
         <div className="agent-stream-user">
           {message.text ? <Markdown text={message.text} /> : null}
         </div>
@@ -264,18 +272,18 @@ function AgentStreamMessage({
   }
   const thinkingActive = streaming && !message.text;
   return (
-    <article className="agent-stream-message is-assistant">
+    <article className="agent-stream-message is-assistant" data-arrival-key={message.id}>
       {message.thinking ? (
-        <Thinking
+        <div data-arrival-key={`${message.id}:thinking`}><Thinking
           text={message.thinking}
           active={thinkingActive}
           showActivityIndicator={thinkingActive && toolDisplay === "compact"}
-        />
+        /></div>
       ) : null}
-      {message.tools.length > 0 ? <ToolList tools={message.tools} display={toolDisplay} /> : null}
+      {message.tools.length > 0 ? <div data-arrival-key={`${message.id}:tools`}><ToolList tools={message.tools} display={toolDisplay} /></div> : null}
       {message.text ? (
-        <div className="agent-stream-text">
-          <Markdown text={message.text} />
+        <div className="agent-stream-text" data-arrival-key={`${message.id}:text`}>
+          <Markdown text={message.text} streaming={streaming} />
         </div>
       ) : null}
     </article>

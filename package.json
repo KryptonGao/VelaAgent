@@ -6,7 +6,7 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "postinstall": "node node_modules/electron/install.js && node scripts/brand-electron-dev.mjs",
+    "postinstall": "node node_modules/electron/install.js && node scripts/brand-electron-dev.mjs && node scripts/fix-native-modules.mjs",
     "dev": "pnpm --filter @vela/desktop dev",
     "build": "pnpm --filter @vela/desktop build",
     "package:mac": "pnpm --filter @vela/desktop dist:mac",

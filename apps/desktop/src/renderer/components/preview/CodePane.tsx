@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useContentArrival } from "../BatchMotion";
 import { useFilePreview } from "./FilePreviewContext";
 import { localizeError, tr } from "../../locale";
 import { highlightDocument, type ThemedToken } from "./highlighter";
@@ -19,33 +20,37 @@ export function CodePane({ onOpenExternal }: { onOpenExternal: (absolutePath: st
   const tab = preview?.activeTab ?? null;
   const content = preview?.activeContent ?? null;
 
-  const [highlight, setHighlight] = useState<{ lang: string; lines: ThemedToken[][] } | null>(null);
-  const [activeLine, setActiveLine] = useState<number | null>(null);
+  const [highlight, setHighlight] = useState<{ tabId: string; source: string; lines: ThemedToken[][] } | null>(null);
+  const [activeLine, setActiveLine] = useState<{ tabId: string; line: number } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  const arrivalRef = useContentArrival(`${tab?.id ?? "empty"}:${content?.kind ?? (preview?.contentLoading ? "loading" : "empty")}`);
   const sourceText = content?.kind === "text" ? content.content ?? "" : "";
   const plainLines = useMemo(() => splitLines(sourceText), [sourceText]);
 
+  // 切换标签时清掉选中行与高亮;内容更新交给高亮 effect 按文本判断,不清空以免闪成纯文本。
   useEffect(() => {
     setActiveLine(null);
     setHighlight(null);
-  }, [tab?.id, content]);
+  }, [tab?.id]);
 
-  // 读取完成后异步高亮;内容变化会重新计算,主题色由 CSS 变量决定。
+  // 读取完成后异步高亮;只有文本变化才重新分词,主题色由 CSS 变量决定。
   useEffect(() => {
-    if (!tab || content?.kind !== "text" || !content.content) return;
+    if (!tab || !sourceText) return;
+    const tabId = tab.id;
     let active = true;
-    void highlightDocument(tab.id, content.content).then((result) => {
-      if (active) setHighlight(result);
+    void highlightDocument(tabId, sourceText).then((result) => {
+      if (active) setHighlight(result ? { tabId, source: sourceText, lines: result.lines } : null);
     });
     return () => {
       active = false;
     };
-  }, [tab, content]);
+  }, [tab?.id, sourceText]);
 
   // 行数与高亮结果对齐时才使用 token,否则退回纯文本。
   const rows = useMemo<CodeRow[]>(() => {
-    const highlightLines = highlight?.lines ?? null;
+    const highlightLines =
+      highlight && highlight.tabId === tab?.id && highlight.source === sourceText ? highlight.lines : null;
     if (highlightLines) {
       // shiki 对结尾换行会多算一个空行,先与文本行数对齐。
       const aligned =
@@ -67,25 +72,30 @@ export function CodePane({ onOpenExternal }: { onOpenExternal: (absolutePath: st
       text,
       tokens: null,
     }));
-  }, [plainLines, highlight]);
+  }, [plainLines, sourceText, highlight, tab?.id]);
 
-  // 恢复该标签的上次滚动位置。
-  useEffect(() => {
+  // 恢复该标签的上次滚动位置;行数/内容变化后要重新应用,
+  // 否则异步读入内容或文件变短时浏览器会把 scrollTop 夹回顶部。
+  // 用 layout effect 在绘制前完成,避免先画在顶部再跳回去。
+  useLayoutEffect(() => {
     const container = scrollRef.current;
     if (!container || !tab) return;
-    container.scrollTop = preview?.getTabScroll(tab.id) ?? 0;
+    // 内容还没渲染出来时容器是塌的,此时写 scrollTop 会被夹成 0,等内容出来再恢复。
+    if (container.scrollHeight <= container.clientHeight) return;
+    const saved = preview?.getTabScroll(tab.id) ?? 0;
+    if (Math.abs(container.scrollTop - saved) > 1) container.scrollTop = saved;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab?.id]);
+  }, [tab?.id, rows]);
 
   // 搜索结果/引用跳转:滚动到目标行并高亮。
-  useEffect(() => {
+  useLayoutEffect(() => {
     const line = tab?.jumpLine;
     const container = scrollRef.current;
-    if (!line || !container) return;
+    if (!tab || !line || !container) return;
     const target = container.querySelector<HTMLElement>(`[data-line="${line}"]`);
     if (target) {
       target.scrollIntoView({ block: "center" });
-      setActiveLine(line);
+      setActiveLine({ tabId: tab.id, line });
       preview?.consumeJump();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -93,8 +103,10 @@ export function CodePane({ onOpenExternal }: { onOpenExternal: (absolutePath: st
 
   if (!preview || !tab) return null;
 
+  const tabId = tab.id;
+
   return (
-    <div className="preview-code-pane">
+    <div className="preview-code-pane" ref={arrivalRef}>
       {content?.kind === "image" ? (
         <div className="preview-image-wrap">
           <img src={content.content ?? undefined} alt={tab.name} />
@@ -103,7 +115,12 @@ export function CodePane({ onOpenExternal }: { onOpenExternal: (absolutePath: st
         <div
           ref={scrollRef}
           className="code-scroll"
-          onScroll={(event) => preview.setTabScroll(tab.id, event.currentTarget.scrollTop)}
+          onScroll={(event) => {
+            const node = event.currentTarget;
+            // 容器塌陷(还没内容/正在换行)时的 0 不是用户滚出来的,不能覆盖已记录的位置。
+            if (node.scrollHeight <= node.clientHeight) return;
+            preview.setTabScroll(tab.id, node.scrollTop);
+          }}
         >
           {renderBody()}
         </div>
@@ -112,13 +129,13 @@ export function CodePane({ onOpenExternal }: { onOpenExternal: (absolutePath: st
   );
 
   function renderBody() {
-    if (preview?.contentLoading) {
-      return <div className="code-state">{tr("正在读取文件…", "Reading file…")}</div>;
-    }
-    if (preview?.contentError) {
-      return <div className="code-state error">{localizeError(preview.contentError)}</div>;
-    }
     if (!content) {
+      if (preview?.contentLoading) {
+        return <div className="code-state">{tr("正在读取文件…", "Reading file…")}</div>;
+      }
+      if (preview?.contentError) {
+        return <div className="code-state error">{localizeError(preview.contentError)}</div>;
+      }
       return <div className="code-state">{tr("选择一个文件开始预览", "Select a file to preview")}</div>;
     }
     if (content.kind === "missing") {
@@ -131,7 +148,7 @@ export function CodePane({ onOpenExternal }: { onOpenExternal: (absolutePath: st
         />
       );
     }
-    if (content?.kind === "binary") {
+    if (content.kind === "binary") {
       return (
         <CodeNotice
           title={tr("二进制文件", "Binary file")}
@@ -141,7 +158,7 @@ export function CodePane({ onOpenExternal }: { onOpenExternal: (absolutePath: st
         />
       );
     }
-    if (content?.kind === "too-large") {
+    if (content.kind === "too-large") {
       return (
         <CodeNotice
           title={tr("文件过大", "File is too large")}
@@ -151,7 +168,7 @@ export function CodePane({ onOpenExternal }: { onOpenExternal: (absolutePath: st
         />
       );
     }
-    if (content?.kind === "text" && plainLines.length === 0) {
+    if (content.kind === "text" && plainLines.length === 0) {
       return <CodeNotice title={tr("空文件", "Empty file")} detail={tr("该文件没有任何内容。", "This file has no contents.")} />;
     }
     return (
@@ -159,10 +176,10 @@ export function CodePane({ onOpenExternal }: { onOpenExternal: (absolutePath: st
         <div className="code-rows">
           {rows.map((row) => (
             <div
-              className={`code-row${activeLine === row.line ? " active" : ""}`}
+              className={`code-row${activeLine?.tabId === tabId && activeLine.line === row.line ? " active" : ""}`}
               key={row.line}
               data-line={row.line}
-              onClick={() => setActiveLine(row.line)}
+              onClick={() => setActiveLine({ tabId, line: row.line })}
             >
               <span className="code-row-gutter">{row.line}</span>
               <span className="code-row-content">

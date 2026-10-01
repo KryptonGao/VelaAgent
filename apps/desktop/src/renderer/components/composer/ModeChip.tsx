@@ -1,3 +1,4 @@
+import { PopoverPresence } from "../MotionPresence";
 import type { InteractionMode } from "@vela/shared";
 import { useEffect, useState } from "react";
 import { useDismissable } from "../../hooks/useDismissable";
@@ -52,7 +53,7 @@ export function ModeChip({
       >
         <span>{modeLabels[mode]}</span>
       </button>
-      {open ? (
+      <PopoverPresence present={open}>
         <div className="dock-popover composer-popover up mode-popover">
           <div className="composer-popover-title">{tr("对话模式", "Chat mode")}</div>
           {modes.map((candidate) => (
@@ -75,7 +76,7 @@ export function ModeChip({
           ))}
           <div className="composer-popover-footnote">{tr("模式只影响当前对话。回复进行时不能切换。", "Modes apply only to this chat and cannot be changed while a reply is in progress.")}</div>
         </div>
-      ) : null}
+      </PopoverPresence>
     </div>
   );
 }

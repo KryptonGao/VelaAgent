@@ -2,7 +2,9 @@ import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
-import { memo, useMemo, type ReactNode } from "react";
+import { memo, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
+import { partitionMarkdown, wholeMarkdown, type MarkdownPartition } from "./markdown-blocks";
+import { useReducedMotion } from "../hooks/useMotionPresence";
 import { useFilePreview, type FilePreviewContextValue } from "./preview/FilePreviewContext";
 import { tr, useAppLocale } from "../locale";
 
@@ -105,18 +107,39 @@ function safeUrl(url: string): string {
   return "";
 }
 
-export const Markdown = memo(function Markdown({ text }: { text: string }) {
+const MarkdownBlockView = memo(function MarkdownBlockView({ text, components, entering, motionAllowed }: {
+  text: string; components: Components; entering: boolean; motionAllowed: boolean;
+}) {
+  useAppLocale();
+  const arrival = useRef(entering);
+  useLayoutEffect(() => { if (!motionAllowed) arrival.current = false; }, [motionAllowed]);
+  return <div className={`md-block${arrival.current && motionAllowed ? " is-entering" : ""}`}>
+    <ReactMarkdown remarkPlugins={remarkPlugins} urlTransform={safeUrl} components={components}>
+      {text}
+    </ReactMarkdown>
+  </div>;
+});
+
+export const Markdown = memo(function Markdown({ text, streaming = false }: { text: string; streaming?: boolean }) {
   useAppLocale();
   const preview = useFilePreview();
   const components = useMemo(
     () => (preview ? withFileReference(preview) : baseComponents),
     [preview],
   );
+  const reduced = useReducedMotion();
+  const committed = useRef<MarkdownPartition | undefined>(undefined);
+  // Static documents keep their original single parse. After streaming, retain
+  // the partition so completion doesn't remount settled content or selection.
+  const incremental = streaming || committed.current?.wholeDocument === false;
+  const partition = useMemo(() => incremental ? partitionMarkdown(text, committed.current) : wholeMarkdown(text), [text, incremental]);
+  const initialOffsets = useRef(new Set((streaming ? partition.blocks.slice(0, -1) : partition.blocks).map((block) => block.offset)));
+  useLayoutEffect(() => { committed.current = partition; }, [partition]);
   return (
     <div className="md-content">
-      <ReactMarkdown remarkPlugins={remarkPlugins} urlTransform={safeUrl} components={components}>
-        {text}
-      </ReactMarkdown>
+      {partition.blocks.map((block) => <MarkdownBlockView key={block.offset} text={block.text}
+        components={components} motionAllowed={!reduced && !partition.wholeDocument} entering={streaming && !reduced && !partition.wholeDocument &&
+          block.offset === partition.blocks.at(-1)?.offset && !initialOffsets.current.has(block.offset)} />)}
     </div>
   );
 });

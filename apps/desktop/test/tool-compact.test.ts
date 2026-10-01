@@ -4,6 +4,7 @@ import type { ToolTrace } from "@vela/shared";
 import {
   compactSummaryParts,
   diffStat,
+  parseDisplayDiff,
   splitPath,
   toolCompactKind,
   totalDiffStat,
@@ -60,6 +61,33 @@ describe("diffStat", () => {
   it("没有增删或无 diff 时返回 null", () => {
     assert.equal(diffStat("  1 ctx"), null);
     assert.equal(diffStat(undefined), null);
+  });
+});
+
+describe("parseDisplayDiff", () => {
+  it("记录两侧行索引,并拼出供高亮的旧/新文本", () => {
+    const parsed = parseDisplayDiff(["+ 1 a", "- 2 b", " 3 c", " 4 d"].join("\n"));
+    assert.deepEqual(parsed.rows.map((row) => row.kind), ["add", "del", "ctx", "ctx"]);
+    assert.deepEqual(parsed.oldLines, ["b", "c", "d"]);
+    assert.deepEqual(parsed.newLines, ["a", "c", "d"]);
+    assert.deepEqual(parsed.rows[0], { kind: "add", gutter: "1", text: "a", oldIndex: -1, newIndex: 0 });
+    assert.deepEqual(parsed.rows[1], { kind: "del", gutter: "2", text: "b", oldIndex: 0, newIndex: -1 });
+    assert.deepEqual(parsed.rows[2], { kind: "ctx", gutter: "3", text: "c", oldIndex: 1, newIndex: 1 });
+  });
+
+  it("省略的上下文记为 gap,不占两侧内容", () => {
+    const parsed = parseDisplayDiff(["+ 1 a", "...", "+ 9 b"].join("\n"));
+    assert.deepEqual(parsed.rows.map((row) => row.kind), ["add", "gap", "add"]);
+    assert.equal(parsed.rows[1]?.text, "…");
+    assert.deepEqual(parsed.newLines, ["a", "b"]);
+  });
+
+  it("兼容没有行号前缀的裸行与空 diff", () => {
+    const parsed = parseDisplayDiff(["+plain", "-old", " ctx"].join("\n"));
+    assert.deepEqual(parsed.rows.map((row) => row.kind), ["add", "del", "ctx"]);
+    assert.deepEqual(parsed.oldLines, ["old", "ctx"]);
+    assert.deepEqual(parsed.newLines, ["plain", "ctx"]);
+    assert.deepEqual(parseDisplayDiff(""), { rows: [], oldLines: [], newLines: [] });
   });
 });
 

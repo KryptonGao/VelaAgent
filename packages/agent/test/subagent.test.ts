@@ -95,26 +95,23 @@ describe("查阅子代理命令守卫", () => {
 });
 
 describe("子代理结论", () => {
-  it("回合上限和过长结论会写进返回给父代理的正文", () => {
+  it("返回结论，并标记过长文本", () => {
     const report = formatAgentReport({
       agent: "explore",
       path: "/root/scan",
       text: "查完了",
       failure: "",
-      turnLimited: true,
       stopped: false,
     });
     assert.match(report.text, /\/root\/scan/);
     assert.match(report.text, /查完了/);
-    assert.match(report.text, /回合上限/);
-    assert.equal(report.truncated, true);
+    assert.equal(report.truncated, false);
 
     const clipped = formatAgentReport({
       agent: "general",
       path: "/root/run",
       text: "x".repeat(12_001),
       failure: "",
-      turnLimited: false,
       stopped: false,
     });
     assert.match(clipped.text, /结论过长，已截断/);

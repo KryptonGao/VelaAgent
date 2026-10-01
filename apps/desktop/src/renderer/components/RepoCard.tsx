@@ -1,9 +1,12 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { ProjectApi } from "../hooks/useProject";
 import { useDismissable } from "../hooks/useDismissable";
 import { fileManagerName } from "../platform";
-import { formatCount, BranchPickerContent } from "./composer/BranchChip";
+import { BranchPickerContent } from "./composer/BranchChip";
+import { PopoverPresence } from "./MotionPresence";
+import { RepoCardPopover } from "./RepoCardPopover";
 import {
+  ChevronDownIcon,
   BranchIcon,
   FolderIcon,
   GithubIcon,
@@ -32,11 +35,16 @@ export function RepoCard({
   project,
   onOpenChanges,
   activeChanges,
+  collapsed = false,
+  onToggle,
 }: {
   project: ProjectApi;
   onOpenChanges: () => void;
   activeChanges: boolean;
+  collapsed?: boolean;
+  onToggle?: () => void;
 }) {
+  const contentId = useId();
   const [menuOpen, setMenuOpen] = useState(false);
   const [branchOpen, setBranchOpen] = useState(false);
   const [sourcesOpen, setSourcesOpen] = useState(false);
@@ -66,9 +74,17 @@ export function RepoCard({
   return (
     <div className="repo-card">
       <div className="repo-card-header">
-        <span className="repo-card-title" title={repo?.root ?? currentWorkspace ?? undefined}>
+        {onToggle ? (
+          <button type="button" className="repo-card-title environment-toggle" aria-expanded={!collapsed} aria-controls={contentId}
+            aria-label={collapsed ? tr("展开环境卡片", "Expand environment card") : tr("折叠环境卡片", "Collapse environment card")}
+            title={collapsed ? tr("展开环境卡片", "Expand environment card") : tr("折叠环境卡片", "Collapse environment card")}
+            onClick={onToggle}>
+            <span className="repo-card-name" title={repo?.root ?? currentWorkspace ?? undefined}>{name}</span>
+            <span aria-hidden="true" className={`environment-chevron${collapsed ? " collapsed" : ""}`}><ChevronDownIcon /></span>
+          </button>
+        ) : <span className="repo-card-title" title={repo?.root ?? currentWorkspace ?? undefined}>
           {name}
-        </span>
+        </span>}
         <div className="repo-card-more-anchor" ref={menuRef}>
           <button
             type="button"
@@ -82,8 +98,8 @@ export function RepoCard({
           >
             <MoreIcon size={13} />
           </button>
-          {menuOpen ? (
-            <div className="dock-popover composer-popover repo-menu">
+          <PopoverPresence present={menuOpen}>
+            <RepoCardPopover anchor={menuRef} className="repo-menu" label={tr("更多操作", "More actions")}>
               <button type="button" className="workspace-action-row" onClick={revealRoot}>
                 <FolderIcon />
                 <span>{tr("在", "Open in ")}{fileManagerName(window.vela?.platform ?? "darwin")}{tr("中打开", "")}</span>
@@ -92,11 +108,12 @@ export function RepoCard({
                 <FolderIcon />
                 <span>{tr("复制路径", "Copy path")}</span>
               </button>
-            </div>
-          ) : null}
+            </RepoCardPopover>
+          </PopoverPresence>
         </div>
       </div>
 
+      <div id={contentId} className="repo-card-content" hidden={collapsed}>
       {repo && git ? (
         <>
           <div className="repo-branch-row" ref={branchRef}>
@@ -119,23 +136,23 @@ export function RepoCard({
             >
               {hasChanges ? (
                 <>
-                  <span className="repo-diff-added">+{formatCount(git.addedLines)}</span>
-                  <span className="repo-diff-deleted">−{formatCount(git.deletedLines)}</span>
+                  <span className="repo-diff-added">+{git.addedLines.toLocaleString("en-US")}</span>
+                  <span className="repo-diff-deleted">−{git.deletedLines.toLocaleString("en-US")}</span>
                 </>
               ) : (
                 <span className="repo-diff-clean">{tr("无变更", "No changes")}</span>
               )}
             </button>
-            {branchOpen ? (
-              <div className="dock-popover composer-popover repo-branch-popover">
+            <PopoverPresence present={branchOpen}>
+              <RepoCardPopover anchor={branchRef} className="repo-branch-popover" label={tr("切换分支", "Switch branch")}>
                 <BranchPickerContent
                   project={project}
                   onClose={() => {
                     setBranchOpen(false);
                   }}
                 />
-              </div>
-            ) : null}
+              </RepoCardPopover>
+            </PopoverPresence>
           </div>
 
           <div className="repo-pr-row">
@@ -232,6 +249,7 @@ export function RepoCard({
               </button>
             ))
           : null}
+      </div>
       </div>
     </div>
   );

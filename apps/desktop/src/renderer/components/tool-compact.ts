@@ -54,6 +54,79 @@ export function diffStat(diff: string | undefined): DiffStat | null {
   return { added, removed };
 }
 
+/** 展示 diff 的一行;gap 是省略的上下文,不占两侧内容索引。 */
+export interface DisplayDiffRow {
+  kind: "add" | "del" | "ctx" | "gap";
+  /** 行号列;gap 行为空串。 */
+  gutter: string;
+  text: string;
+  /** 该行在旧文件中的索引;不存在时为 -1。 */
+  oldIndex: number;
+  /** 该行在新文件中的索引;不存在时为 -1。 */
+  newIndex: number;
+}
+
+export interface ParsedDisplayDiff {
+  rows: DisplayDiffRow[];
+  /** 旧/新两侧按行拼接的内容,供 shiki 整体分词后把 token 贴回对应行。 */
+  oldLines: string[];
+  newLines: string[];
+}
+
+/** 行首是 +、- 或空格,随后是行号和内容。 */
+const displayDiffLine = /^([+\- ]) *(\d+) (.*)$/;
+
+/** 解析 edit / write 的展示 diff(形如 `+ 12 new line`);省略的上下文是一行 `...`。 */
+export function parseDisplayDiff(diff: string): ParsedDisplayDiff {
+  const rows: DisplayDiffRow[] = [];
+  const oldLines: string[] = [];
+  const newLines: string[] = [];
+  if (!diff) return { rows, oldLines, newLines };
+
+  const lines = diff.split("\n");
+  if (lines[lines.length - 1] === "") lines.pop();
+
+  const pushAdd = (text: string, gutter = "") => {
+    rows.push({ kind: "add", gutter, text, oldIndex: -1, newIndex: newLines.length });
+    newLines.push(text);
+  };
+  const pushDel = (text: string, gutter = "") => {
+    rows.push({ kind: "del", gutter, text, oldIndex: oldLines.length, newIndex: -1 });
+    oldLines.push(text);
+  };
+  const pushCtx = (text: string, gutter = "") => {
+    rows.push({ kind: "ctx", gutter, text, oldIndex: oldLines.length, newIndex: newLines.length });
+    oldLines.push(text);
+    newLines.push(text);
+  };
+
+  for (const line of lines) {
+    if (line.trim() === "..." || line.trim() === "…") {
+      rows.push({ kind: "gap", gutter: "", text: "…", oldIndex: -1, newIndex: -1 });
+      continue;
+    }
+    if (line.startsWith("…") || line.startsWith("@@")) {
+      rows.push({ kind: "gap", gutter: "", text: line, oldIndex: -1, newIndex: -1 });
+      continue;
+    }
+    const matched = displayDiffLine.exec(line);
+    if (matched) {
+      const text = matched[3] ?? "";
+      const gutter = matched[2] ?? "";
+      if (matched[1] === "+") pushAdd(text, gutter);
+      else if (matched[1] === "-") pushDel(text, gutter);
+      else pushCtx(text, gutter);
+      continue;
+    }
+    if (line.startsWith("+") && !line.startsWith("+++")) pushAdd(line.slice(1));
+    else if (line.startsWith("-") && !line.startsWith("---")) pushDel(line.slice(1));
+    else if (line.startsWith(" ")) pushCtx(line.slice(1));
+    else pushCtx(line);
+  }
+
+  return { rows, oldLines, newLines };
+}
+
 /** 汇总一组工具的 diff 增删行数,全部为空时返回 null。 */
 export function totalDiffStat(tools: ToolTrace[]): DiffStat | null {
   let added = 0;

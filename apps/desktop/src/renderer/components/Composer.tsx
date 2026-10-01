@@ -6,10 +6,13 @@ import type {
   SkillSummary,
   ThinkingLevel,
 } from "@vela/shared";
-import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { useModels } from "../hooks/useModels";
 import type { ProjectApi } from "../hooks/useProject";
 import { CloseIcon, FileIcon, SendIcon } from "./icons";
+import { MotionList } from "./BatchMotion";
+import { useReducedMotion } from "../hooks/useMotionPresence";
+import { PopoverPresence } from "./MotionPresence";
 import { ModelControls } from "./ModelControls";
 import { ApprovalSlot } from "./composer/ApprovalBanner";
 import { AttachMenu } from "./composer/AttachMenu";
@@ -39,6 +42,7 @@ export interface ComposerProps {
   sendError: string | null;
   /** 会话统计条数据，来自主进程的 Context 用量快照。 */
   usage: ContextUsage | null;
+  contextPopover?: boolean;
   project: ProjectApi;
   onSend: (text: string, images?: ImageAttachment[]) => Promise<void>;
   onAbort: () => Promise<void>;
@@ -59,6 +63,7 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
   mode,
   sendError,
   usage,
+  contextPopover = false,
   project,
   onSend,
   onAbort,
@@ -73,6 +78,8 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
   const [activeIndex, setActiveIndex] = useState(0);
   const [attachments, setAttachments] = useState<FileAttachmentPayload[]>([]);
   const [dragging, setDragging] = useState(false);
+  const reducedMotion = useReducedMotion();
+  const measuredInput = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const pendingCaret = useRef<number | null>(null);
@@ -85,12 +92,32 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
   const safeIndex = filtered.length === 0 ? 0 : Math.min(activeIndex, filtered.length - 1);
   const prompt = composeSkillPrompt(skill?.name ?? null, value);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const input = inputRef.current;
     if (!input) return;
+    const currentHeight = input.getBoundingClientRect().height;
+    // Measure at natural height without animating the temporary auto value.
+    input.style.transition = "none";
     input.style.height = "auto";
-    input.style.height = `${Math.min(input.scrollHeight, 140)}px`;
-  }, [value]);
+    const targetHeight = Math.min(input.scrollHeight, 140);
+    input.style.height = `${currentHeight}px`;
+    void input.offsetHeight;
+    input.style.transition = measuredInput.current && !reducedMotion ? "" : "none";
+    input.style.height = `${targetHeight}px`;
+    measuredInput.current = true;
+    const observer = new ResizeObserver(() => {
+      // Width changes (sidebar resize/window resize) can change line wrapping too.
+      if (Math.abs(input.getBoundingClientRect().width - measuredWidth) < 1) return;
+      measuredWidth = input.getBoundingClientRect().width;
+      input.style.transition = "none";
+      input.style.height = "auto";
+      input.style.height = `${Math.min(input.scrollHeight, 140)}px`;
+      input.style.transition = "";
+    });
+    let measuredWidth = input.getBoundingClientRect().width;
+    observer.observe(input);
+    return () => observer.disconnect();
+  }, [value, skill, reducedMotion]);
 
   useEffect(() => {
     setActiveIndex(0);
@@ -268,7 +295,7 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
           ) : null}
         </div>
 
-        {menuOpen ? (
+        <PopoverPresence present={menuOpen}>
           <div className="skill-menu-anchor" ref={menuRef}>
             <SkillMenu
               skills={skills === null ? null : filtered}
@@ -279,12 +306,11 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
               onSelect={selectSkill}
             />
           </div>
-        ) : null}
+        </PopoverPresence>
 
-        {attachments.length > 0 ? (
-          <div className="attachment-row">
-            {attachments.map((entry, index) => (
-              <div className={`attachment-chip attachment-${entry.kind}`} key={`${entry.path}-${index}`}>
+        <MotionList className="attachment-row" items={attachments} keyOf={attachmentKey} horizontal>
+            {(entry) => (
+              <div className={`attachment-chip attachment-${entry.kind}`}>
                 {entry.image ? (
                   <img
                     className="attachment-thumb"
@@ -303,14 +329,13 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
                   type="button"
                   className="attachment-remove"
                   title={tr("移除附件", "Remove attachment")}
-                  onClick={() => setAttachments((current) => current.filter((_, i) => i !== index))}
+                  onClick={() => setAttachments((current) => current.filter((item) => item !== entry))}
                 >
                   <CloseIcon size={10} />
                 </button>
               </div>
-            ))}
-          </div>
-        ) : null}
+            )}
+        </MotionList>
 
         <div className="composer-entry">
           {skill ? (
@@ -417,35 +442,42 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
               onCancelLogin={models.cancelLogin}
               onDismissLogin={models.dismissLogin}
             />
-            {streaming ? (
-              <button
-                className="send-action-blue-btn stop"
-                type="button"
-                title={tr("停止生成", "Stop generating")}
-                aria-label={tr("停止生成", "Stop generating")}
-                onClick={() => void onAbort()}
-              >
-                <span className="stop-square" />
-              </button>
-            ) : (
-              <button
-                className="send-action-blue-btn"
-                type="submit"
-                title={sendHint}
-                aria-label={tr("发送", "Send")}
-                disabled={disabled || !modelReady || !prompt}
-              >
-                <SendIcon />
-              </button>
-            )}
+            <ComposerActions streaming={streaming} sendHint={sendHint}
+              disabled={disabled || !modelReady || !prompt} onAbort={onAbort} />
           </div>
         </div>
 
-        <ComposerStatsRow usage={usage} />
+        <ComposerStatsRow usage={usage} contextPopover={contextPopover} />
       </form>
     </div>
   );
 });
+
+const attachmentIds = new WeakMap<FileAttachmentPayload, string>();
+let nextAttachmentId = 0;
+function attachmentKey(entry: FileAttachmentPayload): string {
+  let id = attachmentIds.get(entry);
+  if (!id) { id = `attachment-${++nextAttachmentId}`; attachmentIds.set(entry, id); }
+  return id;
+}
+
+function ComposerActions({ streaming, sendHint, disabled, onAbort }: {
+  streaming: boolean; sendHint: string; disabled: boolean; onAbort: () => Promise<void>;
+}) {
+  return <span className={`composer-action-slot${streaming ? " is-streaming" : ""}`}>
+    <button className="send-action-blue-btn send" type="submit" title={sendHint}
+      aria-label={tr("发送", "Send")} disabled={disabled || streaming}
+      inert={streaming} aria-hidden={streaming} tabIndex={streaming ? -1 : undefined}>
+      <SendIcon />
+    </button>
+    <button className="send-action-blue-btn stop" type="button"
+      title={tr("停止生成", "Stop generating")} aria-label={tr("停止生成", "Stop generating")}
+      inert={!streaming} aria-hidden={!streaming} tabIndex={streaming ? undefined : -1}
+      disabled={!streaming} onClick={() => void onAbort()}>
+      <span className="stop-square" />
+    </button>
+  </span>;
+}
 
 function placeholderFor(mode: InteractionMode): string {
   if (mode === "plan") return tr("描述你想规划的改动", "Describe the change you want to plan");

@@ -3,8 +3,6 @@ import { isToolCallEventType, type ExtensionFactory } from "@earendil-works/pi-c
 import { agentToolNames, type AgentKind, type SubagentKind, type ToolStep } from "@vela/shared";
 import { isPlanSafeCommand } from "./plan-command";
 
-export const subagentTurnLimit = 12;
-
 export const subagentOutputCap = 12_000;
 
 export const subagentStepCap = 40;
@@ -39,8 +37,6 @@ const emptyNote = "子代理没有留下文字结论。";
 
 const stoppedNote = "子代理已停止。";
 
-const turnLimitNote = "已达到子代理回合上限，结论可能不完整。";
-
 const clipNote = "结论过长，已截断。";
 
 /** 查阅子代理的 bash 只放行 Plan 模式同一套只读命令。 */
@@ -73,18 +69,16 @@ export function formatAgentReport(input: {
   path: string;
   text: string;
   failure: string;
-  turnLimited: boolean;
   stopped: boolean;
 }): { text: string; truncated: boolean } {
   const clipped = clipText(input.text.trim(), subagentOutputCap);
   const parts = [`[${input.path} · ${input.agent}]`];
   if (clipped.text) parts.push(clipped.text);
   else if (!input.stopped && !input.failure) parts.push(emptyNote);
-  if (input.failure && !input.stopped && !input.turnLimited) parts.push(`子代理没有完成：${input.failure}`);
+  if (input.failure && !input.stopped) parts.push(`子代理没有完成：${input.failure}`);
   if (input.stopped) parts.push(stoppedNote);
-  if (input.turnLimited) parts.push(turnLimitNote);
   if (clipped.truncated) parts.push(clipNote);
-  return { text: parts.join("\n\n"), truncated: clipped.truncated || input.turnLimited };
+  return { text: parts.join("\n\n"), truncated: clipped.truncated };
 }
 
 /** 把一条工具调用记进展示用步骤列表，并按上限裁剪。 */

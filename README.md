@@ -12,8 +12,9 @@
 
 ## 工作方式
 
-- **按任务选择模式：** `Agent` 负责日常读写与执行；`Plan` 只读查阅代码并提交计划，确认后再执行；`Goal` 记录多步目标与进度，持续推进直到完成。
+- **按任务选择模式：** `Agent` 负责日常读写与执行；`Plan` 只读查阅代码并输出完整实施方案，批准后再执行；`Goal` 记录多步目标与进度，持续推进直到完成。
 - **在真实工作区中操作：** 打开本机项目目录，或使用独立的 Git worktree。工作区决定 Agent 的文件范围、Shell 目录和 Git 上下文。
+- **查看完整执行轨迹：** 会话可在「对话」与「轨迹」之间切换；轨迹按顺序展示思考、工具参数和返回，Timeline 与节点详情同步选择，并显示请求首 Token 延迟、工具耗时、Token 和缓存指标。旧会话缺失的指标标为未记录。
 - **随时检查改动：** 查看工具调用和结果、Git 差异与暂存状态，并查看或创建当前分支的 Pull Request。
 - **保留工作上下文：** 会话会在应用重启后恢复；模型、思考强度、上下文用量和 Skill 活动都能在界面中查看。
 
@@ -58,6 +59,8 @@ pnpm dev
 2. 选择本机项目目录或 Git worktree。
 3. 选择 `Agent`、`Plan` 或 `Goal` 模式，描述要完成的任务。
 
+可在「设置 → 外观与快捷键 → 思考总结」开启自动总结（默认关闭）。新完成的思考会由当前聊天选定的模型生成摘要，语言跟随界面设置，并显示在思考右侧；历史思考可点击「总结」手动生成。每段总结会额外调用模型，不写入聊天上下文。
+
 ## 权限与本地数据
 
 - 执行权限分三档：「每次询问」在运行终端命令前请求批准，写入所选工作区之外的位置也会请求批准；「帮我批准」由当前对话选择的模型判断风险，只有风险操作或判断失败时才请求批准；「完全访问」跳过这些逐项确认。这里的权限设置是交互式审批策略，不是操作系统级沙箱。
@@ -85,6 +88,8 @@ description: 从 PDF 提取文字和表格。在阅读、转换或检查 PDF 时
 pnpm dev         # 启动 Electron 开发环境
 pnpm build       # 编译桌面端代码
 pnpm typecheck   # 检查 TypeScript 类型
+pnpm --filter @vela/desktop test:trace  # 轨迹采集与显示逻辑的定向测试
+pnpm --filter @vela/desktop test:trace:preview  # 确定性 UI 测试页面（非生产数据）
 ```
 
 安装依赖时，`postinstall` 会把 Electron 开发二进制改名为 `Vela.app`、修改其应用名并重新签名（`scripts/brand-electron-dev.mjs`，仅 macOS），这样菜单栏和 Dock 显示的就是 Vela 的名字和图标，而不是 Electron 的默认模板。应用图标 `apps/desktop/resources/icon.png` 由 `scripts/generate-app-icon.py` 从 `assets/icon/VelaAgentIcon.png` 生成（圆角与留白按 macOS 图标网格加工），更换原图后重跑该脚本即可。
@@ -95,6 +100,7 @@ pnpm typecheck   # 检查 TypeScript 类型
 | `⌘J` / `Ctrl+J` | 折叠或展开右侧栏 |
 | `⌘,` / `Ctrl+,` | 打开或关闭设置 |
 | `⌘N` / `Ctrl+N` | 新建会话 |
+| `⌘T` / `Ctrl+T` | 在右侧工作面板打开新标签页 |
 | `Enter` | 发送消息 |
 | `Shift+Enter` | 输入换行 |
 
@@ -105,6 +111,7 @@ pnpm typecheck   # 检查 TypeScript 类型
 - `packages/workspace` — 工作区、worktree、Git、Pull Request 与权限审批。
 - `packages/shared` — 主进程与界面共享的类型和 IPC 定义。
 - `packages/tools` — Agent 内置工具目录。
+- `docs/` — 专题文档：Plan 模式的使用说明与实现架构。
 
 ## 技术细节
 
@@ -124,7 +131,7 @@ Vela 基于 [Pi Agent](https://github.com/earendil-works/pi) 构建，并通过 
 ### 工具、模式与权限
 
 - 基础工具为 Pi 的 `read`、`bash`、`edit` 和 `write`。Vela 包装 `bash`、`edit`、`write`：默认权限模式下，Shell 命令逐条请求批准，工作区外的文件修改也需要批准；工作区内读写不逐项拦截。
-- `Plan` 模式通过 Pi 工具调用钩子禁止文件编辑和写入，并只放行只读命令；`submit_plan` 与 `ask_user_question` 将计划交给用户确认。`Goal` 模式通过 `update_goal` 记录进度与完成状态。
+- `Plan` 模式通过 ToolPolicy 禁止文件编辑和写入，并只放行只读命令；模型以 `<proposed_plan>` 输出完整实施方案，每次修改生成新 revision，批准后可在当前或全新上下文执行，并用 `update_plan` 跟踪执行进度。`Goal` 模式通过 `update_goal` 记录进度与完成状态。详细行为与实现见 [docs/plan-mode.md](./docs/plan-mode.md) 与 [docs/plan-mode-architecture.md](./docs/plan-mode-architecture.md)。
 - Agent 可调用 `task` 启动子会话。`explore` 子任务只读；`general` 子任务使用当前会话的权限，并在内存会话中运行。
 
 ### 工作区与 Electron 进程

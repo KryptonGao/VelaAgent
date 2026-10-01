@@ -1,3 +1,4 @@
+import { PopoverPresence } from "../MotionPresence";
 import type { SandboxMode } from "@vela/shared";
 import type { ProjectApi } from "../../hooks/useProject";
 import { useDismissable } from "../../hooks/useDismissable";
@@ -45,7 +46,7 @@ export function SandboxPill({ project }: { project: ProjectApi }) {
         <ShieldIcon size={12} />
         <span>{modeLabel(mode)}</span>
       </button>
-      {open ? (
+      <PopoverPresence present={open}>
         <div className="dock-popover composer-popover up sandbox-popover">
           <div className="composer-popover-title">{tr("执行权限", "Execution permissions")}</div>
           {(["ask", "smart", "full"] as SandboxMode[]).map((candidate) => (
@@ -70,7 +71,7 @@ export function SandboxPill({ project }: { project: ProjectApi }) {
           ))}
           <div className="composer-popover-footnote">{tr("执行权限会影响 Agent 能自动完成的操作。「帮我批准」由当前对话选择的模型判断风险。", "Permissions control which actions the agent can complete automatically. Smart approval uses the model selected for the current conversation to check risk.")}</div>
         </div>
-      ) : null}
+      </PopoverPresence>
     </div>
   );
 }

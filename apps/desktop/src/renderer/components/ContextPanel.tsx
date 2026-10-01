@@ -1,21 +1,18 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import {
   contextCategories,
   type AppState,
   type ContextCategory,
   type ContextUsage,
   type ConversationGoal,
-  type ConversationPlan,
   type GoalValidationCategory,
   type GoalStatus,
 } from "@vela/shared";
 import type { ProjectApi } from "../hooks/useProject";
 import type { SidebarResize } from "../hooks/useSidebarResize";
-import { ChangesView } from "./ChangesView";
+import type { PlanDraft } from "../plan-draft";
 import { ChevronDownIcon } from "./icons";
-import { SheetPresence } from "./Presence";
-import { FilePreviewView } from "./preview/FilePreviewView";
-import { useFilePreview } from "./preview/FilePreviewContext";
+import { PlanReferenceCard } from "./PlanPanel";
 import { RepoCard } from "./RepoCard";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
 import { isEnglish, tr } from "../locale";
@@ -35,40 +32,42 @@ function categoryLabel(category: ContextCategory): string {
 
 interface ContextPanelProps {
   collapsed: boolean;
+  leftOpen: boolean;
   resize: SidebarResize;
   state: AppState | null;
+  planDraft: PlanDraft | null;
   project: ProjectApi;
   onToggle: () => void;
-  onExecutePlan: () => void;
+  onOpenPlan: (planId: string) => void;
   onResumeGoal: () => void;
-  changesOpen: boolean;
-  onChangesOpenChange: (open: boolean) => void;
+  changesActive?: boolean;
+  onOpenChanges: () => void;
 }
 
 export function ContextPanel({
   collapsed,
+  leftOpen,
   resize,
   state,
+  planDraft,
   project,
   onToggle,
-  onExecutePlan,
+  onOpenPlan,
   onResumeGoal,
-  changesOpen,
-  onChangesOpenChange,
+  changesActive = false,
+  onOpenChanges,
 }: ContextPanelProps) {
-  const [diffRequestPath, setDiffRequestPath] = useState<string | null>(null);
   const [contextOpen, setContextOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
-  const preview = useFilePreview();
   const session = state?.session;
   const context = state?.context;
 
   return (
     <aside
-      className={`sidebar-right${collapsed ? " collapsed" : ""}${preview?.open ? " preview-mode" : ""}`}
+      className={`sidebar-right${collapsed ? " collapsed" : ""}`}
       inert={collapsed ? true : undefined}
     >
-      <SidebarResizeHandle target={preview?.open ? "preview" : "right"} resize={resize} />
+      <SidebarResizeHandle target="right" resize={resize} leftOpen={leftOpen} />
       <div className="sidebar-right-header">
         <div className="sidebar-right-header-spacer" />
         <button
@@ -84,20 +83,14 @@ export function ContextPanel({
         </button>
       </div>
 
-      <div key={preview?.open ? "preview" : "context"} className="side-panel-swap">
-      {preview?.open ? (
-        <FilePreviewView
-          project={project}
-          onShowDiff={(path) => {
-            setDiffRequestPath(path);
-            onChangesOpenChange(true);
-          }}
-        />
-      ) : (
-        <>
-          <div className="sidebar-right-scroll">
-        {session?.plan ? (
-          <PlanCard plan={session.plan} busy={session.status !== "ready"} onExecute={onExecutePlan} />
+      <div className="sidebar-right-scroll">
+        {session?.proposedPlan || planDraft ? (
+          <PlanReferenceCard
+            plan={session?.proposedPlan ?? null}
+            draft={planDraft}
+            execution={session?.executionPlan ?? null}
+            onOpen={onOpenPlan}
+          />
         ) : null}
         {session?.goal ? (
           <GoalCard goal={session.goal} busy={session.status !== "ready"} onResume={onResumeGoal} />
@@ -105,8 +98,8 @@ export function ContextPanel({
 
         <RepoCard
           project={project}
-          onOpenChanges={() => onChangesOpenChange(true)}
-          activeChanges={changesOpen}
+          onOpenChanges={onOpenChanges}
+          activeChanges={changesActive}
         />
 
         <PanelDisclosure
@@ -144,29 +137,13 @@ export function ContextPanel({
             <p className="tool-chip-empty">{tr("会话开始后显示", "Shown after the chat starts")}</p>
           )}
         </PanelDisclosure>
-          </div>
-
-          <ContextUsageCard context={context} />
-        </>
-      )}
       </div>
-
-      <SheetPresence present={changesOpen}>
-        <ChangesView
-          project={project}
-          initialPath={diffRequestPath}
-          onClose={() => {
-            onChangesOpenChange(false);
-            setDiffRequestPath(null);
-          }}
-          onPreviewFile={(path) => preview?.openFile(path)}
-        />
-      </SheetPresence>
+      <ContextUsageCard context={context} />
     </aside>
   );
 }
 
-function PanelDisclosure({
+export function PanelDisclosure({
   title,
   meta,
   open,
@@ -193,8 +170,8 @@ function PanelDisclosure({
         <span className="panel-disclosure-meta">{meta}</span>
         <span className="panel-disclosure-chevron" aria-hidden="true"><ChevronDownIcon /></span>
       </button>
-      <div id={contentId} className="panel-disclosure-content" hidden={!open}>
-        {children}
+      <div id={contentId} className="panel-disclosure-content" inert={!open} aria-hidden={!open}>
+        <div className="panel-disclosure-inner">{children}</div>
       </div>
     </section>
   );
@@ -229,77 +206,6 @@ const validationRiskLabels = {
 
 function translatedPair(pair: readonly [string, string]): string {
   return tr(pair[0], pair[1]);
-}
-
-function PlanCard({
-  plan,
-  busy,
-  onExecute,
-}: {
-  plan: ConversationPlan;
-  busy: boolean;
-  onExecute: () => void;
-}) {
-  const done = plan.steps.filter((step) => step.done).length;
-  const total = plan.steps.length;
-  const percent = total === 0 ? 0 : Math.round((done / total) * 100);
-  const planId = plan.steps[0]?.id ?? `empty-${plan.updatedAt}`;
-  const complete = total > 0 && done === total;
-  const [collapseState, setCollapseState] = useState({ planId, collapsed: false });
-  const collapsed = collapseState.planId === planId && collapseState.collapsed;
-  const toggleRef = useRef<HTMLButtonElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!complete) return;
-    if (contentRef.current?.contains(document.activeElement)) toggleRef.current?.focus();
-    setCollapseState({ planId, collapsed: true });
-  }, [complete, planId]);
-
-  return (
-    <section className={`mode-card${collapsed ? " is-collapsed" : ""}`}>
-      <button
-        ref={toggleRef}
-        className="side-panel-title-row mode-card-toggle"
-        type="button"
-        aria-expanded={!collapsed}
-        aria-controls="plan-card-content"
-        aria-label={`${collapsed ? tr("展开", "Expand") : tr("折叠", "Collapse")} ${tr("计划", "plan")}, ${done}/${total} ${tr("步", "steps")}`}
-        onClick={() => setCollapseState((current) => ({
-          planId,
-          collapsed: !(current.planId === planId && current.collapsed),
-        }))}
-      >
-        <span className="side-panel-heading">{tr("计划", "Plan")}</span>
-        <span className="mode-card-toggle-meta">
-          <span className="side-panel-counter">
-            {done}/{total}
-          </span>
-          <span className="mode-card-chevron" aria-hidden="true"><ChevronDownIcon /></span>
-        </span>
-      </button>
-      <div className="mode-card-title">{plan.title}</div>
-      <div className="mode-progress" aria-hidden="true">
-        <span style={{ width: `${percent}%` }} />
-      </div>
-      <div ref={contentRef} id="plan-card-content" className="mode-card-content" hidden={collapsed}>
-        {plan.overview ? <p className="mode-card-copy">{plan.overview}</p> : null}
-        <div className="mode-steps">
-          {plan.steps.map((step) => (
-            <div className={`mode-step${step.done ? " done" : ""}`} key={step.id}>
-              <span className="mode-step-mark" aria-hidden="true">
-                {step.done ? "✓" : ""}
-              </span>
-              <span>{step.text}</span>
-            </div>
-          ))}
-        </div>
-        <button className="mode-card-action" type="button" disabled={busy} onClick={onExecute}>
-          {tr("执行计划", "Run plan")}
-        </button>
-      </div>
-    </section>
-  );
 }
 
 function GoalCard({
@@ -366,7 +272,7 @@ function GoalCard({
   );
 }
 
-function ContextUsageCard({ context }: { context: ContextUsage | undefined }) {
+export function ContextUsageCard({ context, details = false }: { context: ContextUsage | undefined | null; details?: boolean }) {
   const [open, setOpen] = useState(false);
   const tokens = context?.tokens ?? 0;
   const contextWindow = context?.contextWindow ?? null;
@@ -375,8 +281,8 @@ function ContextUsageCard({ context }: { context: ContextUsage | undefined }) {
   const basis = contextWindow && contextWindow > 0 ? Math.max(contextWindow, used) : used;
 
   return (
-    <section className={`context-usage${open ? "" : " collapsed"}`} aria-label={tr("上下文用量", "Context usage")}>
-      <button
+    <section className={`context-usage${open || details ? "" : " collapsed"}`} aria-label={tr("上下文用量", "Context usage")}>
+      {details ? <div className="context-usage-title">{tr("上下文用量", "Context usage")}</div> : <button
         className="context-usage-title"
         type="button"
         aria-expanded={open}
@@ -387,7 +293,7 @@ function ContextUsageCard({ context }: { context: ContextUsage | undefined }) {
         <span className="context-usage-chevron" aria-hidden="true">
           <ChevronDownIcon />
         </span>
-      </button>
+      </button>}
       <div className="context-usage-summary">
         <span className={`context-usage-percent${(context?.percent ?? 0) >= 80 ? " high" : ""}`}>
           {formatPercent(context?.percent ?? null, tokens)}
@@ -408,7 +314,8 @@ function ContextUsageCard({ context }: { context: ContextUsage | undefined }) {
           );
         })}
       </div>
-      {open ? (
+      <div className={`context-usage-details${open || details ? " open" : ""}`} inert={!open && !details} aria-hidden={!open && !details}>
+        <div className="context-usage-details-inner">
         <ul className="context-usage-legend">
           {contextCategories.map((id) => (
             <li className="context-usage-row" key={id}>
@@ -422,7 +329,8 @@ function ContextUsageCard({ context }: { context: ContextUsage | undefined }) {
             </li>
           ))}
         </ul>
-      ) : null}
+        </div>
+      </div>
     </section>
   );
 }

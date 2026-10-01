@@ -1,3 +1,5 @@
+import { TraceRecorder } from "./trace";
+import type { TraceUpdate } from "@vela/shared";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -16,16 +18,17 @@ import {
   type AskUserQuestionEvent,
   type AuthMethodType,
   type ConversationGoal,
-  type ConversationPlan,
   type ConversationSummary,
   type CustomModelInput,
+  type ExecutionPlan,
   type GoalStatus,
   type GoalValidation,
   type ImageAttachment,
   type InteractionMode,
   type ModelAuthEvent,
   type ModelCatalog,
-  type PlanStep,
+  type PlanExecutionContextStrategy,
+  type ProposedPlanItem,
   type SandboxRiskInput,
   type SandboxRiskVerdict,
   type SessionSnapshot,
@@ -35,9 +38,9 @@ import {
   type SkillMigrationResult,
   type ExternalSkillScan,
   type ThinkingLevel,
+  type ThinkingSummaryInput,
   type ToolActivity,
   type TranscriptMessage,
-  type TranscriptTool,
 } from "@vela/shared";
 import { defaultToolNames } from "@vela/tools";
 import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
@@ -52,7 +55,10 @@ import {
   measureSessionUsage,
   userMessageText,
 } from "./context-usage";
+import { clipTitle, requestConversationTitle } from "./conversation-title";
 import { ConversationStore } from "./conversation-store";
+import { legacyAgentTranscript, recoverLegacyAgents, type StoredAgent } from "./agent-history";
+import { createPersistedSession } from "./session-persistence";
 import {
   createGoalValidation,
   goalCompletionBlocker,
@@ -60,25 +66,37 @@ import {
   type GoalValidationEvidence,
 } from "./goal-validation";
 import { ModelDirectory } from "./model-directory";
+import { openCodeSessionHeaders } from "./provider-headers";
 import {
-  acceptPlanDraft,
   createModeExtension,
   createModeTools,
+  defaultToolPolicy,
   goalContinuePrompt,
   goalTurnLimit,
   goalTurnLimitNote,
-  isPlanExecutionPrompt,
   modeToolNames,
-  planConfirmExecuteLabel,
-  planConfirmOptions,
-  planExecutionPrompt,
-  toolNamesFor,
   type AskUserInput,
   type AskUserOutcome,
-  type PlanDraft,
   type ToolOutcome,
 } from "./interaction";
+import {
+  activeExecutionPlan,
+  appendPlanRevision,
+  applyExecutionPlanUpdate,
+  approvePlanRevision,
+  bindExecutionPlan,
+  createExecutionPlan,
+  createPlanStreamParser,
+  isPlanExecutionPrompt,
+  latestPlan,
+  planContinuePrompt,
+  planFreshPrompt,
+  type ExecutionPlanUpdateItem,
+  type PlanStreamEvent,
+  type PlanStreamParser,
+} from "./plan";
 import { QuestionManager } from "./question-manager";
+import { ThinkingSummaryGenerator } from "./thinking-summary";
 import {
   buildSandboxRiskMessage,
   parseSandboxRiskVerdict,
@@ -95,6 +113,13 @@ import {
 import { migrateExternalSkills, scanExternalSkills as scanExternalSkillSources } from "./skill-migration";
 import { activityFromCall, activityFromExecution, activityFromOutput } from "./tool-activity";
 import {
+  branchLeafForTurn,
+  countTranscriptActivity,
+  transcriptFromMessages,
+  transcriptFromProjection,
+  transcriptSourcesFromProjection,
+} from "./transcript";
+import {
   AgentControl,
   type AgentRootMessage,
   type AgentSessionRequest,
@@ -108,6 +133,7 @@ import {
 } from "./subagent";
 
 export type RuntimeEvent =
+  | TraceUpdate
   | { type: "status"; conversationId: string }
   | { type: "text_delta"; conversationId: string; delta: string }
   | { type: "thinking_delta"; conversationId: string; delta: string }
@@ -118,6 +144,9 @@ export type RuntimeEvent =
   | { type: "agents"; conversationId: string; agents: AgentInfo[] }
   | { type: "agent_event"; conversationId: string; agentId: string; event: AgentRuntimeStreamEvent }
   | { type: "user_message"; conversationId: string; text: string }
+  | { type: "proposed_plan_start"; conversationId: string; planId: string; revision: number }
+  | { type: "proposed_plan_delta"; conversationId: string; planId: string; delta: string }
+  | { type: "proposed_plan_end"; conversationId: string; plan: ProposedPlanItem }
   | { type: "error"; conversationId: string; message: string };
 
 export interface AgentRuntimeOptions {
@@ -150,8 +179,16 @@ interface Conversation {
   stopRequested: boolean;
   /** drive() 进行中。两轮之间 Pi 会话会短暂空闲,不能靠 isStreaming 判断。 */
   driving: boolean;
-  /** 用户在计划确认提问里选了「执行计划」,本轮回复结束后自动开始执行。 */
-  planExecutionQueued: boolean;
+  /** 全部 ProposedPlan revision;新 revision 不改写旧版本。 */
+  plans: ProposedPlanItem[];
+  latestProposedPlanId: string | null;
+  /** 历次执行计划,activeExecutionPlanId 指向当前激活的一个。 */
+  executionPlans: ExecutionPlan[];
+  activeExecutionPlanId: string | null;
+  /** 当前 assistant 消息的 <proposed_plan> 解析器;message_end 时收尾。 */
+  planStream: PlanStreamParser | null;
+  /** 已开始但还没结束的 plan 块分配到的 id 和 revision。 */
+  planStreamPlan: { id: string; revision: number } | null;
   /** 当前 Goal 中已结束的 bash 工具结果，可供验证记录引用。 */
   goalValidationEvidence: Map<string, GoalValidationEvidence>;
   goalValidationSequence: number;
@@ -166,6 +203,7 @@ interface Conversation {
   archivedAt: number | null;
   /** 这个对话的 agent 树控制面；会话启动时创建，会话销毁时释放。 */
   control: AgentControl | null;
+  storedAgents: StoredAgent[];
   /** 已经触发过 Goal 工作区修订的子代理 id，避免同一次改动重复计数。 */
   agentMutationsSeen: Set<string>;
 }
@@ -186,10 +224,12 @@ export class AgentRuntime {
   /** toolCallId -> 已校验参数。结果事件本身不带参数，用来还原命令和路径。 */
   private readonly toolArgs = new Map<string, unknown>();
   /** toolCallId -> Goal id 与执行时工作区修订号。 */
+  private readonly traces = new Map<string, TraceRecorder>();
   private readonly toolGoalContexts = new Map<string, { goalId: string; workRevision: number }>();
   /** toolCallId -> 子代理工具参数；子代理事件不带参数，结果事件用它还原命令和路径。 */
   private readonly agentToolArgs = new Map<string, unknown>();
   private readonly questions = new QuestionManager();
+  private readonly thinkingSummaries = new ThinkingSummaryGenerator();
   private readonly initializePromise: Promise<void>;
   private readonly store: ConversationStore;
   private currentCwd: string;
@@ -220,7 +260,9 @@ export class AgentRuntime {
       ...snapshot,
       tools: [...snapshot.tools],
       thinkingLevels: [...snapshot.thinkingLevels],
-      plan: clonePlan(snapshot.plan),
+      proposedPlan: cloneProposedPlan(snapshot.proposedPlan),
+      planRevisions: snapshot.planRevisions.map((plan) => ({ ...plan })),
+      executionPlan: cloneExecutionPlan(snapshot.executionPlan),
       goal: cloneGoal(snapshot.goal),
     };
   }
@@ -272,8 +314,48 @@ export class AgentRuntime {
       await this.ready();
       // 新对话可能沿用「上次使用」,所以先把当前对话正在用的选择记下来。
       await this.rememberActiveSelection();
-      const sessionManager = SessionManager.create(cwd, this.sessionDir());
-      const entry = this.addEntry(cwd, sessionManager);
+      const entry = this.addEntry(cwd);
+      return this.startInternal(entry);
+    });
+  }
+
+  /**
+   * 从某一轮回复处分支:把该轮及之前的历史复制成新会话文件并切换过去。
+   * turnIndex 是界面上可见用户消息的序号(从 0 数起),与 getMessages 的轮次一致。
+   */
+  async branchConversation(conversationId: string, turnIndex: number): Promise<SessionSnapshot> {
+    return this.exclusive(async () => {
+      await this.ready();
+      const source = this.conversations.get(conversationId);
+      if (!source) throw new Error("对话不存在或已结束");
+      if (source.driving || source.session?.isStreaming) throw new Error("回复进行中，不能分支到新聊天");
+      const sessionFile = source.sessionFile;
+      if (!sessionFile) throw new Error("这个对话还没有可以分支的回复");
+      // 分支会改写调用方管理器的会话文件,所以在独立的临时管理器上创建。
+      const manager = SessionManager.open(sessionFile, this.sessionDir(), source.snapshot.cwd);
+      const sources = transcriptSourcesFromProjection(manager.buildSessionProjection());
+      const leaf = branchLeafForTurn(sources, turnIndex);
+      if (!leaf) throw new Error("找不到要分支的回复");
+      const branchedFile = manager.createBranchedSession(leaf);
+      if (!branchedFile) throw new Error("无法创建分支会话");
+      const branched = SessionManager.open(branchedFile, this.sessionDir(), source.snapshot.cwd);
+      const branchedSources = transcriptSourcesFromProjection(branched.buildSessionProjection());
+      await this.rememberActiveSelection();
+      const entry = this.addEntry(source.snapshot.cwd, {
+        sessionManager: branched,
+        title: branchTitle(source.snapshot.title),
+        mode: source.snapshot.mode,
+        instructions: source.instructions,
+      });
+      // 带上已提交的 Plan revision，分支里的历史 Plan Preview 才能对应到文档；
+      // 执行进度不复制，分支是新的执行上下文。
+      if (source.plans.length > 0) {
+        entry.plans = source.plans.map((plan) => ({ ...plan }));
+        entry.latestProposedPlanId = source.latestProposedPlanId;
+        this.syncPlanState(entry);
+      }
+      this.trace(source.id).forkTo(this.trace(entry.id, false), turnIndex);
+      this.store.update(entry.id, countTranscriptActivity(branchedSources));
       return this.startInternal(entry);
     });
   }
@@ -360,15 +442,38 @@ export class AgentRuntime {
     this.applyActiveTools(entry);
   }
 
-  /** 切到 Agent，并把计划正文作为下一条用户消息发出(界面上不展示)。 */
-  async executePlan(conversationId: string): Promise<void> {
+  /**
+   * 批准最新 Plan revision 并开始执行。
+   * continue：沿用当前对话上下文；fresh：用原始目标 + 已批准方案开一个新的执行对话。
+   */
+  async executePlan(
+    conversationId: string,
+    strategy: PlanExecutionContextStrategy = "continue",
+  ): Promise<void> {
     const entry = this.requireIdle(conversationId);
-    const plan = entry.snapshot.plan;
+    const plan = latestPlan(entry.plans);
     if (!plan) throw new Error("还没有可以执行的计划");
+    const plans = approvePlanRevision(entry.plans, plan.id, Date.now());
+    const approved = plans.find((item) => item.id === plan.id) ?? plan;
     if (entry.snapshot.mode === "goal") this.pauseGoal(entry, null);
+    if (strategy === "fresh") {
+      // 规划对话里也记下批准结果，fresh 对话再带上这份已批准的 revision。
+      entry.plans = plans;
+      entry.latestProposedPlanId = approved.id;
+      this.syncPlanState(entry);
+      const fresh = await this.startFreshExecution(entry, approved);
+      await this.drive(fresh, planFreshPrompt(approved.objective, approved), undefined, {
+        autonomous: false,
+        announce: true,
+        hidden: true,
+        rename: false,
+      });
+      return;
+    }
+    this.bindExecution(entry, approved, plans);
     if (entry.snapshot.mode !== "agent") this.patchEntry(entry, { mode: "agent" });
     this.applyActiveTools(entry);
-    await this.drive(entry, planExecutionPrompt(plan), undefined, {
+    await this.drive(entry, planContinuePrompt(approved), undefined, {
       autonomous: false,
       announce: true,
       hidden: true,
@@ -397,11 +502,14 @@ export class AgentRuntime {
     const entry = conversationId ? this.conversations.get(conversationId) : this.activeConversation();
     if (!entry) return;
     entry.stopRequested = true;
-    entry.planExecutionQueued = false;
+    // 中断时不沉淀未写完的 plan 草稿。
+    entry.planStream = null;
+    entry.planStreamPlan = null;
     this.questions.cancelConversation(entry.id);
     if (entry.snapshot.mode === "goal") this.pauseGoal(entry, null);
     entry.control?.abortAll();
     if (entry.session) await entry.session.abort();
+    this.trace(entry.id).settle("Interrupted");
     entry.control?.setRootStatus("aborted");
     this.patchEntry(entry, { status: "ready", updatedAt: Date.now() });
   }
@@ -462,7 +570,13 @@ export class AgentRuntime {
             { role: "user", content: buildSandboxRiskMessage(input, task), timestamp: Date.now() },
           ],
         },
-        { maxTokens: sandboxRiskMaxTokens, temperature: 0, signal: controller.signal },
+        {
+          maxTokens: sandboxRiskMaxTokens,
+          temperature: 0,
+          signal: controller.signal,
+          sessionId: entry.id,
+          headers: openCodeSessionHeaders(model, entry.id),
+        },
       );
       return parseSandboxRiskVerdict(
         response.content
@@ -683,11 +797,44 @@ export class AgentRuntime {
     });
   }
 
+  private trace(conversationId: string, restoreHistory = true): TraceRecorder {
+    let recorder = this.traces.get(conversationId);
+    if (!recorder) {
+      recorder = new TraceRecorder(conversationId, join(this.options.agentDir, "traces", `${conversationId}.jsonl`), (event) => this.emit(event));
+      this.traces.set(conversationId, recorder);
+      const entry = this.conversations.get(conversationId);
+      const manager = entry?.sessionManager ?? (entry?.sessionFile ? SessionManager.open(entry.sessionFile, this.sessionDir(), entry.snapshot.cwd) : null);
+      if (manager && restoreHistory) recorder.restoreHistory(manager.getBranch());
+    }
+    return recorder;
+  }
+
+  getTrace(conversationId: string) {
+    if (!this.conversations.has(conversationId)) throw new Error("对话不存在或已结束");
+    return this.trace(conversationId).snapshot();
+  }
+
+  getTraceDetails(conversationId: string, nodeId: string) {
+    if (!this.conversations.has(conversationId)) throw new Error("对话不存在或已结束");
+    return this.trace(conversationId).details(nodeId);
+  }
+
   /** 恢复界面消息列表(应用重启后渲染层桶是空的,从会话文件重建)。 */
   getMessages(conversationId: string): TranscriptMessage[] {
-    const session = this.conversations.get(conversationId)?.session ?? null;
-    if (!session) return [];
-    return transcriptFromMessages(session.agent.state.messages);
+    const entry = this.conversations.get(conversationId);
+    const session = entry?.session ?? null;
+    if (!session || !entry) return [];
+    return transcriptFromProjection(session.sessionManager.buildSessionProjection(), entry.plans);
+  }
+
+  /** 捕获指定对话当前选定的模型；独立调用，不进入 drive 或修改会话消息。 */
+  async summarizeThinking(input: ThinkingSummaryInput): Promise<string> {
+    const entry = this.conversations.get(input.conversationId);
+    if (!entry) throw new Error("对话不存在或已结束");
+    const model = entry.session?.model;
+    const directory = await this.readyDirectory();
+    if (!model || !directory.isAvailable(model)) throw new Error("先选择一个已登录或已配置密钥的模型");
+    return this.thinkingSummaries.generate(directory.runtime, model, input);
   }
 
   /**
@@ -698,11 +845,23 @@ export class AgentRuntime {
     const entry = this.conversations.get(conversationId);
     if (!entry) return [];
     const session = agentId === entry.id ? entry.session : entry.control?.getSession(agentId) ?? null;
-    if (!session) return [];
-    return transcriptFromMessages(session.messages);
+    if (session) return transcriptFromMessages(session.messages);
+    const stored = entry.storedAgents.find((agent) => agent.id === agentId);
+    if (stored?.sessionFile && existsSync(stored.sessionFile)) {
+      const manager = SessionManager.open(stored.sessionFile, this.childSessionDir(entry.id), entry.snapshot.cwd);
+      return transcriptFromProjection(manager.buildSessionProjection());
+    }
+    return stored ? legacyAgentTranscript(stored) : [];
+  }
+
+  getAgents(conversationId: string | null): AgentInfo[] {
+    const entry = conversationId ? this.conversations.get(conversationId) : null;
+    return entry?.control?.list() ?? entry?.storedAgents.map(({ sessionFile: _file, ...agent }) => agent) ?? [];
   }
 
   dispose(): void {
+    this.thinkingSummaries.dispose();
+    for (const trace of this.traces.values()) trace.dispose();
     this.directory?.cancelLogin();
     this.questions.cancelAll();
     for (const entry of this.conversations.values()) this.detachEntry(entry);
@@ -716,9 +875,15 @@ export class AgentRuntime {
 
   private async initialize(): Promise<void> {
     await this.store.load();
-    // 会话文件仍在磁盘上的对话才恢复;文件被清理的对话直接丢弃。
+    // 会话文件仍在磁盘上的对话才恢复。新对话在创建时就写入了文件
+    // (见 createPersistedSession),所以没有文件的记录只会是历史遗留或已被外部清理的会话。
     for (const stored of this.store.list()) {
       if (!stored.sessionFile || !existsSync(stored.sessionFile)) continue;
+      const activeExecution = activeExecutionPlan(stored.executionPlans, stored.activeExecutionPlanId);
+      const storedAgents = stored.agents?.length ? stored.agents : recoverLegacyAgents(
+        SessionManager.open(stored.sessionFile, this.sessionDir(), stored.cwd).buildSessionProjection().messages,
+        stored.id,
+      );
       this.conversations.set(stored.id, {
         id: stored.id,
         session: null,
@@ -729,9 +894,11 @@ export class AgentRuntime {
           id: stored.id,
           title: stored.title,
           mode: stored.mode,
-          plan: stored.plan,
+          proposedPlan: cloneProposedPlan(latestPlan(stored.plans)),
+          planRevisions: stored.plans.map((plan) => ({ ...plan })),
+          executionPlan: cloneExecutionPlan(activeExecution),
           goal: stored.goal,
-          tools: toolNamesFor(stored.mode, stored.plan !== null),
+          tools: defaultToolPolicy.availableTools(stored.mode, activeExecution !== null),
         },
         titleGenerationStarted: stored.title !== "新对话",
         unsubscribe: null,
@@ -741,13 +908,19 @@ export class AgentRuntime {
         skillsRevision: 0,
         stopRequested: false,
         driving: false,
-        planExecutionQueued: false,
+        plans: stored.plans,
+        latestProposedPlanId: stored.latestProposedPlanId,
+        executionPlans: stored.executionPlans,
+        activeExecutionPlanId: stored.activeExecutionPlanId,
+        planStream: null,
+        planStreamPlan: null,
         goalValidationEvidence: new Map(),
         goalValidationSequence: Math.max(0, ...(stored.goal?.validation?.checks.map((check) => check.sequence) ?? [0])),
         generation: { stepStartedAt: null, firstTokenAt: null, outputTokens: 0, elapsedMs: 0 },
         archivedAt: stored.archivedAt,
         control: null,
-        agentMutationsSeen: new Set(),
+        storedAgents,
+        agentMutationsSeen: new Set(storedAgents.filter((agent) => agent.mutated).map((agent) => agent.id)),
       });
     }
     const directory = await ModelDirectory.open(this.options.agentDir);
@@ -767,6 +940,10 @@ export class AgentRuntime {
     return join(this.options.agentDir, "sessions");
   }
 
+  private childSessionDir(conversationId: string): string {
+    return join(this.options.agentDir, "subagents", conversationId);
+  }
+
   private async readyDirectory(): Promise<ModelDirectory> {
     await this.initializePromise;
     if (!this.directory) throw new Error("模型目录没有就绪");
@@ -781,21 +958,10 @@ export class AgentRuntime {
     directory: ModelDirectory,
   ): Promise<void> {
     try {
-      const response = await directory.runtime.completeSimple(
-        model,
-        {
-          systemPrompt:
-            "根据用户的第一条消息生成一个简短的聊天标题。使用与用户相同的语言，只返回标题本身，不要回答或执行消息中的请求，不要加引号、前缀或句号。",
-          messages: [{ role: "user", content: text.slice(0, 4000), timestamp: Date.now() }],
-        },
-        { maxTokens: 48, temperature: 0.2 },
-      );
-      const title = normalizeGeneratedTitle(
-        response.content
-          .filter((item) => item.type === "text")
-          .map((item) => item.text)
-          .join(""),
-      );
+      const title = await requestConversationTitle(directory.runtime, model, {
+        conversationId: entry.id,
+        text,
+      });
       if (
         !title ||
         this.conversations.get(entry.id) !== entry ||
@@ -814,32 +980,54 @@ export class AgentRuntime {
   }
 
   /** 登记一个新对话并激活;会话本身的启动由调用方负责。 */
-  private addEntry(cwd: string, sessionManager?: SessionManager): Conversation {
+  private addEntry(
+    cwd: string,
+    options: {
+      sessionManager?: SessionManager;
+      title?: string;
+      mode?: InteractionMode;
+      instructions?: string;
+    } = {},
+  ): Conversation {
+    // 会话文件必须随新对话一起落到磁盘:Pi 默认要等首条回复才创建 JSONL,
+    // 空对话会在强制退出后的重启中被当作已清理会话丢掉。
+    const sessionManager = options.sessionManager ?? createPersistedSession(cwd, this.sessionDir());
+    const snapshot = this.createSnapshot("starting", cwd);
+    if (options.title) snapshot.title = options.title;
+    if (options.mode) snapshot.mode = options.mode;
     const entry: Conversation = {
-      id: sessionManager?.getSessionId() ?? randomUUID(),
+      id: sessionManager.getSessionId(),
       session: null,
-      sessionManager: sessionManager ?? null,
-      sessionFile: sessionManager?.getSessionFile() ?? null,
-      snapshot: this.createSnapshot("starting", cwd),
+      sessionManager,
+      sessionFile: sessionManager.getSessionFile() ?? null,
+      snapshot,
       titleGenerationStarted: false,
       unsubscribe: null,
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      instructions: this.directory?.getSettings().instructions ?? "",
+      instructions: options.instructions ?? this.directory?.getSettings().instructions ?? "",
       skillsRevision: this.skillsRevision,
       stopRequested: false,
       driving: false,
-      planExecutionQueued: false,
+      plans: [],
+      latestProposedPlanId: null,
+      executionPlans: [],
+      activeExecutionPlanId: null,
+      planStream: null,
+      planStreamPlan: null,
       goalValidationEvidence: new Map(),
       goalValidationSequence: 0,
       generation: { stepStartedAt: null, firstTokenAt: null, outputTokens: 0, elapsedMs: 0 },
       archivedAt: null,
       control: null,
+      storedAgents: [],
       agentMutationsSeen: new Set(),
     };
     this.conversations.set(entry.id, entry);
     this.activeId = entry.id;
     this.persistEntry(entry);
+    // 新对话是用户明确创建的状态,不等防抖窗口,立刻同步落盘。
+    this.store.flushSync();
     this.notifyActiveCwd(cwd);
     this.emitStatus(entry);
     return entry;
@@ -855,7 +1043,7 @@ export class AgentRuntime {
       const sessionManager = entry.sessionManager
         ?? (entry.sessionFile
           ? SessionManager.open(entry.sessionFile, this.sessionDir(), cwd)
-          : SessionManager.create(cwd, this.sessionDir()));
+          : createPersistedSession(cwd, this.sessionDir()));
       const settingsManager = SettingsManager.inMemory();
       const instructions = entry.instructions.trim();
       await this.loadDisabledSkills();
@@ -869,7 +1057,7 @@ export class AgentRuntime {
           hidden: true,
           factory: createModeExtension(() => ({
             mode: entry.snapshot.mode,
-            hasPlan: entry.snapshot.plan !== null,
+            hasExecutionPlan: entry.snapshot.executionPlan !== null,
           })),
         }],
         appendSystemPromptOverride: instructions ? (base) => [...base, instructions] : undefined,
@@ -877,6 +1065,7 @@ export class AgentRuntime {
       await resourceLoader.reload();
       const control = new AgentControl({
         conversationId: entry.id,
+        restoredAgents: entry.storedAgents,
         host: {
           createChildSession: (input) => this.createChildSession(entry, input),
           deliverToRoot: (input) => {
@@ -902,8 +1091,7 @@ export class AgentRuntime {
           customTools: [
             ...(this.options.toolFactory?.(cwd) ?? []),
             ...createModeTools({
-              submitPlan: (draft) => this.submitPlan(entry, draft),
-              completeStep: (id) => this.completeStep(entry, id),
+              updateExecutionPlan: (items) => this.updateExecutionPlan(entry, items),
               updateGoal: (status, note) => this.updateGoal(entry, status, note),
               recordGoalValidation: (draft) => this.recordGoalValidation(entry, draft),
               askUser: (input) => this.askUser(entry, input),
@@ -1002,7 +1190,15 @@ export class AgentRuntime {
     entry.session = session;
     entry.sessionManager = sessionManager;
     entry.sessionFile = sessionManager.getSessionFile() ?? entry.sessionFile;
+    const recorder = this.trace(entry.id);
+    const originalStream = session.agent.streamFunction;
+    const tracedStream = recorder.wrapStream(originalStream);
+    session.agent.streamFunction = tracedStream;
     entry.unsubscribe = session.subscribe((event) => {
+      // Pi compares the stream function identity for summarization authentication.
+      // Preserve its original function during compaction, then resume main-agent tracing.
+      if (event.type === "compaction_start") session.agent.streamFunction = originalStream;
+      if (event.type === "compaction_end") session.agent.streamFunction = tracedStream;
       this.handlePiEvent(entry.id, event);
     });
   }
@@ -1017,29 +1213,54 @@ export class AgentRuntime {
   }
 
   private handlePiEvent(conversationId: string, event: AgentSessionEvent): void {
+    const recorder = this.trace(conversationId);
+    recorder.capture(() => recorder.handle(event));
     // agent 循环里每步 assistant 消息都要在界面上独立成块;user/toolResult 的 message_start 不是边界。
     if (event.type === "message_start" && event.message.role === "assistant") {
       const entry = this.conversations.get(conversationId);
       if (entry) {
         entry.generation.stepStartedAt = Date.now();
         entry.generation.firstTokenAt = null;
+        // 每条 assistant 消息独立解析，plan 块不跨消息。
+        entry.planStream = createPlanStreamParser();
+        entry.planStreamPlan = null;
       }
       this.emit({ type: "assistant_start", conversationId });
       return;
     }
     if (event.type === "message_end") {
+      if (event.message.role === "assistant") {
+        const entry = this.conversations.get(conversationId);
+        const stream = entry?.planStream;
+        if (entry && stream) {
+          entry.planStream = null;
+          entry.planStreamPlan = null;
+          // 用户停止时丢弃未完成的草稿，不生成半截 revision。
+          if (!entry.stopRequested) {
+            for (const streamEvent of stream.flush()) this.emitPlanStream(entry, streamEvent);
+          }
+        }
+      }
       this.recordGeneration(conversationId, event.message);
       return;
     }
     if (event.type === "message_update") {
       const update = event.assistantMessageEvent;
+      const entry = this.conversations.get(conversationId);
       if (update.type === "text_delta" || update.type === "thinking_delta") {
-        const entry = this.conversations.get(conversationId);
         // 首字到达前的等待属于提示词处理,不计入生成速度。
         if (entry && entry.generation.firstTokenAt === null) entry.generation.firstTokenAt = Date.now();
       }
-      if (update.type === "text_delta") this.emit({ type: "text_delta", conversationId, delta: update.delta });
-      else if (update.type === "thinking_delta") this.emit({ type: "thinking_delta", conversationId, delta: update.delta });
+      if (update.type === "text_delta") {
+        if (entry?.planStream) {
+          // <proposed_plan> 之外的文本仍然按普通 assistant 文本输出。
+          for (const streamEvent of entry.planStream.push(update.delta)) this.emitPlanStream(entry, streamEvent);
+        } else {
+          this.emit({ type: "text_delta", conversationId, delta: update.delta });
+        }
+      } else if (update.type === "thinking_delta") {
+        this.emit({ type: "thinking_delta", conversationId, delta: update.delta });
+      }
       return;
     }
 
@@ -1211,6 +1432,8 @@ export class AgentRuntime {
   }
 
   private failPrompt(entry: Conversation, message: string): void {
+    const recorder = this.trace(entry.id);
+    recorder.capture(() => { recorder.fail(message); recorder.settle("Failed"); });
     this.emit({ type: "error", conversationId: entry.id, message });
     this.patchEntry(entry, { status: "ready", error: null });
   }
@@ -1244,9 +1467,13 @@ export class AgentRuntime {
       sessionFile: entry.sessionFile,
       instructions: entry.instructions,
       mode: entry.snapshot.mode,
-      plan: entry.snapshot.plan,
+      plans: entry.plans,
+      latestProposedPlanId: entry.latestProposedPlanId,
+      executionPlans: entry.executionPlans,
+      activeExecutionPlanId: entry.activeExecutionPlanId,
       goal: entry.snapshot.goal,
       archivedAt: entry.archivedAt,
+      agents: entry.storedAgents,
     });
   }
 
@@ -1292,7 +1519,9 @@ export class AgentRuntime {
       thinkingLevels: ["off"],
       tools: [...defaultToolNames],
       mode: "agent",
-      plan: null,
+      proposedPlan: null,
+      planRevisions: [],
+      executionPlan: null,
       goal: null,
       error: null,
     };
@@ -1344,19 +1573,6 @@ export class AgentRuntime {
         });
         announce = true;
         rename = false;
-        // 计划确认提问里用户选了「执行计划」:切回 Agent 模式,把计划正文作为下一轮输入。
-        const queued = entry.planExecutionQueued;
-        entry.planExecutionQueued = false;
-        if (queued && outcome === "ok" && !entry.stopRequested) {
-          const plan = entry.snapshot.plan;
-          if (plan) {
-            if (entry.snapshot.mode === "goal") this.pauseGoal(entry, null);
-            if (entry.snapshot.mode !== "agent") this.patchEntry(entry, { mode: "agent" });
-            this.applyActiveTools(entry);
-            current = { text: planExecutionPrompt(plan), hidden: true };
-            continue;
-          }
-        }
         if (!options.autonomous || entry.snapshot.mode !== "goal") return;
         if (entry.stopRequested || outcome === "aborted") {
           this.pauseGoal(entry, null);
@@ -1421,9 +1637,11 @@ export class AgentRuntime {
       }
       const failure = readSessionError(session);
       if (failure && failure !== previousError) {
+        this.trace(entry.id).settle("Failed");
         this.failPrompt(entry, failure);
         return "error";
       }
+      this.trace(entry.id).settle("Completed");
       this.patchEntry(entry, {
         status: options.release ? "ready" : "streaming",
         error: null,
@@ -1435,7 +1653,10 @@ export class AgentRuntime {
         this.patchEntry(entry, { status: "ready", updatedAt: Date.now() });
         return "aborted";
       }
-      this.failPrompt(entry, error instanceof Error ? error.message : "会话执行失败");
+      const failureMessage = error instanceof Error ? error.message : "会话执行失败";
+      this.trace(entry.id).fail(failureMessage);
+      this.trace(entry.id).settle("Failed");
+      this.failPrompt(entry, failureMessage);
       return "error";
     }
   }
@@ -1472,10 +1693,16 @@ export class AgentRuntime {
       ],
     });
     await resourceLoader.reload();
-    // fork 的消息先写进独立的内存会话，子代理看到的是父上下文副本，之后互不影响。
-    const sessionManager = SessionManager.inMemory(cwd);
-    for (const message of input.forkMessages) {
-      sessionManager.appendMessage(message as Parameters<SessionManager["appendMessage"]>[0]);
+    // 子代理独立落盘；恢复时沿用自己的历史，新建时才复制 fork 上下文。
+    const sessionDir = this.childSessionDir(entry.id);
+    const restoring = input.sessionFile && existsSync(input.sessionFile);
+    const sessionManager = restoring
+      ? SessionManager.open(input.sessionFile!, sessionDir, cwd)
+      : createPersistedSession(cwd, sessionDir);
+    if (!restoring) {
+      for (const message of input.forkMessages) {
+        sessionManager.appendMessage(message as Parameters<SessionManager["appendMessage"]>[0]);
+      }
     }
     const sandboxTools = this.options.toolFactory?.(cwd) ?? [];
     const childSandboxTools = input.kind === "explore"
@@ -1498,6 +1725,8 @@ export class AgentRuntime {
   }
 
   private handleAgentsChange(entry: Conversation, agents: AgentInfo[]): void {
+    entry.storedAgents = entry.control?.storedAgents() ?? entry.storedAgents;
+    this.persistEntry(entry);
     this.emit({ type: "agents", conversationId: entry.id, agents });
     // 子代理改完工作区后，按一次修订推进 Goal 验证的有效性。
     for (const agent of agents) {
@@ -1568,9 +1797,114 @@ export class AgentRuntime {
   }
 
   private applyActiveTools(entry: Conversation): void {
-    const tools = toolNamesFor(entry.snapshot.mode, entry.snapshot.plan !== null);
+    const tools = defaultToolPolicy.availableTools(entry.snapshot.mode, entry.snapshot.executionPlan !== null);
     entry.session?.setActiveToolsByName(tools);
     this.patchEntry(entry, { tools });
+  }
+
+  /** conversation 上的 plan 字段变化后，把只读快照同步给界面并持久化。 */
+  private syncPlanState(entry: Conversation): void {
+    const activeExecution = activeExecutionPlan(entry.executionPlans, entry.activeExecutionPlanId);
+    this.patchEntry(entry, {
+      proposedPlan: cloneProposedPlan(latestPlan(entry.plans)),
+      planRevisions: entry.plans.map((plan) => ({ ...plan })),
+      executionPlan: cloneExecutionPlan(activeExecution),
+    });
+  }
+
+  /**
+   * <proposed_plan> 解析结果转成 runtime 事件：
+   * plan_start 分配 revision，plan_end 立即持久化成新的 ProposedPlanItem。
+   */
+  private emitPlanStream(entry: Conversation, event: PlanStreamEvent): void {
+    if (event.type === "text") {
+      this.emit({ type: "text_delta", conversationId: entry.id, delta: event.delta });
+      return;
+    }
+    if (event.type === "plan_start") {
+      const allocation = {
+        id: randomUUID(),
+        revision: (latestPlan(entry.plans)?.revision ?? 0) + 1,
+      };
+      entry.planStreamPlan = allocation;
+      this.emit({
+        type: "proposed_plan_start",
+        conversationId: entry.id,
+        planId: allocation.id,
+        revision: allocation.revision,
+      });
+      return;
+    }
+    const allocation = entry.planStreamPlan;
+    if (!allocation) return;
+    if (event.type === "plan_delta") {
+      this.emit({
+        type: "proposed_plan_delta",
+        conversationId: entry.id,
+        planId: allocation.id,
+        delta: event.delta,
+      });
+      return;
+    }
+    // plan_end：新 revision 指向上一版，旧版本原地保留。
+    const result = appendPlanRevision(entry.plans, {
+      id: allocation.id,
+      markdown: event.markdown,
+      objective: this.planObjective(entry),
+      createdAt: Date.now(),
+    });
+    entry.plans = result.plans;
+    entry.latestProposedPlanId = result.plan.id;
+    entry.planStreamPlan = null;
+    this.syncPlanState(entry);
+    this.emit({ type: "proposed_plan_end", conversationId: entry.id, plan: result.plan });
+  }
+
+  /** 规划开始时用户提出的目标：会话里最近一条非系统代发的用户消息。 */
+  private planObjective(entry: Conversation): string | null {
+    const messages = entry.session?.messages ?? [];
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (!message || message.role !== "user") continue;
+      const text = userMessageText(message);
+      if (!text.trim() || isPlanExecutionPrompt(text)) continue;
+      return clipObjective(text);
+    }
+    return null;
+  }
+
+  /** 批准 revision 后绑定一个执行计划；同一 revision 重复执行时复用已有进度。 */
+  private bindExecution(
+    entry: Conversation,
+    plan: ProposedPlanItem,
+    plans: ProposedPlanItem[],
+  ): ExecutionPlan {
+    const bound = bindExecutionPlan(entry.executionPlans, plan, Date.now());
+    entry.plans = plans;
+    entry.latestProposedPlanId = plan.id;
+    entry.executionPlans = bound.executionPlans;
+    entry.activeExecutionPlanId = bound.execution.id;
+    this.syncPlanState(entry);
+    return bound.execution;
+  }
+
+  /** fresh 策略：新开一个只带原始目标与已批准方案的对话，不继承规划阶段的搜索与 reasoning。 */
+  private async startFreshExecution(source: Conversation, plan: ProposedPlanItem): Promise<Conversation> {
+    await this.ready();
+    await this.rememberActiveSelection();
+    const entry = this.addEntry(source.snapshot.cwd, {
+      title: freshExecutionTitle(source.snapshot.title),
+      mode: "agent",
+      instructions: source.instructions,
+    });
+    const execution = createExecutionPlan(plan, Date.now());
+    entry.plans = [plan];
+    entry.latestProposedPlanId = plan.id;
+    entry.executionPlans = [execution];
+    entry.activeExecutionPlanId = execution.id;
+    this.syncPlanState(entry);
+    await this.startInternal(entry);
+    return entry;
   }
 
   private beginGoal(entry: Conversation, text: string): void {
@@ -1620,19 +1954,15 @@ export class AgentRuntime {
 
   /**
    * ask_user_question 的宿主实现:挂起工具执行,把问题推给界面,等用户答复。
-   * plan_confirm 是提交计划后的执行确认,用户选「执行计划」时记下标志,
-   * 由 drive() 在本轮回复结束后自动开始执行。
+   * 计划批准改由界面驱动，这里只处理真正的设计决策问题。
    */
   private async askUser(entry: Conversation, input: AskUserInput): Promise<AskUserOutcome> {
-    const confirm = input.kind === "plan_confirm";
     const question = clipField(input.question, 500);
     if (!question) return { ok: false, text: "问题不能为空。" };
-    const options = confirm
-      ? planConfirmOptions
-      : input.options.slice(0, 4).map((option) => ({
-          label: clipField(option.label, 100),
-          description: option.description ? clipField(option.description, 200) : undefined,
-        }));
+    const options = input.options.slice(0, 4).map((option) => ({
+      label: clipField(option.label, 100),
+      description: option.description ? clipField(option.description, 200) : undefined,
+    }));
     const onAbort = (): void => this.questions.cancelConversation(entry.id);
     input.signal?.addEventListener("abort", onAbort, { once: true });
     let answer: string | null;
@@ -1654,43 +1984,25 @@ export class AgentRuntime {
         answer: null,
       };
     }
-    if (confirm && answer === planConfirmExecuteLabel && entry.snapshot.mode === "plan" && entry.snapshot.plan) {
-      entry.planExecutionQueued = true;
-      return {
-        ok: true,
-        text: "用户确认执行计划。请立即结束本轮回复，系统会自动开始执行计划，现在不要修改文件。",
-        answer,
-      };
-    }
     return { ok: true, text: `用户回答：${clipField(answer, 2000)}`, answer };
   }
 
-  private submitPlan(entry: Conversation, draft: PlanDraft): ToolOutcome {
-    const accepted = acceptPlanDraft(draft);
-    if (!accepted.ok) return accepted;
-    const { title, overview } = accepted.plan;
-    const steps = accepted.plan.steps.map((text): PlanStep => ({ id: randomUUID(), text, done: false }));
-    const plan: ConversationPlan = { title, overview, steps, updatedAt: Date.now() };
-    this.patchEntry(entry, { plan });
+  /** update_plan 的宿主实现：只改 ExecutionPlan，不触碰 ProposedPlan。 */
+  private updateExecutionPlan(entry: Conversation, items: readonly ExecutionPlanUpdateItem[]): ToolOutcome {
+    const execution = activeExecutionPlan(entry.executionPlans, entry.activeExecutionPlanId);
+    if (!execution) return { ok: false, text: "当前没有执行计划。" };
+    const result = applyExecutionPlanUpdate(execution, items, Date.now());
+    if (!result.ok) return result;
+    entry.executionPlans = entry.executionPlans.map((plan) =>
+      plan.id === execution.id ? result.execution : plan,
+    );
+    this.syncPlanState(entry);
+    const done = result.execution.items.filter((item) => item.status === "completed").length;
+    const active = result.execution.items.find((item) => item.status === "in_progress");
     return {
       ok: true,
-      text: `已提交计划「${title}」，共 ${steps.length} 步。请立即调用 ask_user_question（kind 设为 plan_confirm）问用户是否执行。`,
+      text: `执行清单已更新：${done}/${result.execution.items.length} 完成${active ? `，进行中：${active.text}` : ""}。`,
     };
-  }
-
-  private completeStep(entry: Conversation, id: string): ToolOutcome {
-    const plan = entry.snapshot.plan;
-    if (!plan) return { ok: false, text: "当前没有计划。" };
-    const step = plan.steps.find((item) => item.id === id);
-    if (!step) return { ok: false, text: `找不到步骤 ${id}。` };
-    this.patchEntry(entry, {
-      plan: {
-        ...plan,
-        updatedAt: Date.now(),
-        steps: plan.steps.map((item) => (item.id === id ? { ...item, done: true } : item)),
-      },
-    });
-    return { ok: true, text: `已完成：${step.text}` };
   }
 
   private updateGoal(
@@ -1768,20 +2080,16 @@ function isThinkingLevel(value: string): value is ThinkingLevel {
   return (thinkingLevels as readonly string[]).includes(value);
 }
 
-function clipTitle(text: string): string {
-  const singleLine = text.replace(/\s+/g, " ").trim();
-  return singleLine.length > 32 ? `${singleLine.slice(0, 32)}…` : singleLine;
+/** 分支会话在侧边栏里用原标题加后缀区分。 */
+function branchTitle(title: string): string {
+  const base = title.trim() || "新对话";
+  return `${base} · 分支`;
 }
 
-function normalizeGeneratedTitle(text: string): string {
-  const firstLine = text.replace(/\r/g, "").split("\n", 1)[0]?.trim() ?? "";
-  const withoutPrefix = firstLine.replace(/^(?:标题|title)\s*[:：]\s*/i, "");
-  const withoutWrapping = withoutPrefix
-    .replace(/^#+\s*/, "")
-    .replace(/^[`"'“‘《]+/, "")
-    .replace(/[`"'”’》]+$/, "")
-    .trim();
-  return clipTitle(withoutWrapping);
+/** fresh 执行会新开一个对话，标题标明它来自哪次规划。 */
+function freshExecutionTitle(title: string): string {
+  const base = title.trim() || "新对话";
+  return `${base} · 执行`;
 }
 
 function clipObjective(text: string): string {
@@ -1793,9 +2101,13 @@ function clipField(text: string, max: number): string {
   return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed;
 }
 
-function clonePlan(plan: ConversationPlan | null): ConversationPlan | null {
+function cloneProposedPlan(plan: ProposedPlanItem | null): ProposedPlanItem | null {
+  return plan ? { ...plan } : null;
+}
+
+function cloneExecutionPlan(plan: ExecutionPlan | null): ExecutionPlan | null {
   if (!plan) return null;
-  return { ...plan, steps: plan.steps.map((step) => ({ ...step })) };
+  return { ...plan, items: plan.items.map((item) => ({ ...item })) };
 }
 
 function cloneGoal(goal: ConversationGoal | null): ConversationGoal | null {
@@ -1830,61 +2142,4 @@ function formatAgentRootMessage(message: AgentRootMessage): string {
 function readSessionError(session: AgentSession): string | null {
   const errorMessage = session.agent.state.errorMessage;
   return errorMessage?.trim() ? errorMessage : null;
-}
-
-/** 把 Pi 的会话消息重建为界面消息，并带上命令、输出、diff 和文件正文。 */
-function transcriptFromMessages(messages: AgentMessage[]): TranscriptMessage[] {
-  const result: TranscriptMessage[] = [];
-  const argsByCall = new Map<string, unknown>();
-  for (const message of messages) {
-    if (message.role === "user") {
-      const parts = typeof message.content === "string"
-        ? [{ type: "text" as const, text: message.content }]
-        : message.content;
-      const text = userMessageText(message);
-      const images = parts
-        .filter((part) => part.type === "image")
-        .map((part) => ({ type: "image" as const, data: part.data, mimeType: part.mimeType }));
-      if ((!text.trim() && images.length === 0) || isPlanExecutionPrompt(text)) continue;
-      result.push({ id: randomUUID(), role: "user", text, images, thinking: "", tools: [] });
-      continue;
-    }
-
-    if (message.role === "assistant") {
-      let text = "";
-      let thinking = "";
-      const tools: TranscriptTool[] = [];
-      for (const part of message.content) {
-        if (part.type === "text") text += part.text;
-        else if (part.type === "thinking") thinking += part.thinking;
-        else if (part.type === "toolCall") {
-          argsByCall.set(part.id, part.arguments);
-          tools.push({
-            id: part.id,
-            name: part.name,
-            status: "done",
-            activity: activityFromCall(part.name, part.arguments),
-          });
-        }
-      }
-      if (!text && !thinking && tools.length === 0) continue;
-      result.push({ id: randomUUID(), role: "assistant", text, thinking, tools });
-      continue;
-    }
-
-    if (message.role === "toolResult") {
-      for (const entry of result) {
-        const tool = entry.tools.find((item) => item.id === message.toolCallId);
-        if (!tool) continue;
-        tool.status = message.isError ? "error" : "done";
-        tool.activity = activityFromExecution(
-          message.toolName || tool.name,
-          argsByCall.get(message.toolCallId),
-          message,
-          message.isError,
-        );
-      }
-    }
-  }
-  return result;
 }

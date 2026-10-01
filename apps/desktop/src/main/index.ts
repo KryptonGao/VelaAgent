@@ -19,6 +19,7 @@ import { registerOpenTargetIpc } from "./open-targets";
 import { ProjectHost } from "./project-host";
 import { SessionHost } from "./session-host";
 import { ensureLoginShellPath } from "./shell-path";
+import { TerminalHost } from "./terminal-host";
 import { prepareVelaHome, resolveVelaHome } from "./vela-home";
 import appIconPath from "../../resources/icon.png?asset";
 
@@ -33,6 +34,7 @@ const preloadPath = join(rootDir, "../preload/index.js");
 
 let host: SessionHost | null = null;
 let project: ProjectHost | null = null;
+let terminals: TerminalHost | null = null;
 
 /*
  * macOS 上由系统 vibrancy 提供毛玻璃,窗口底色必须是透明的,
@@ -156,6 +158,8 @@ async function start(): Promise<void> {
     currentCwd: () => workspaceManager.getState().current ?? fallbackCwd,
   });
   host.register();
+  terminals = new TerminalHost(() => workspaceManager.getState().current ?? fallbackCwd);
+  terminals.register();
   registerOpenTargetIpc();
   createWindow();
 
@@ -194,4 +198,6 @@ app.on("before-quit", () => {
   host = null;
   project?.dispose();
   project = null;
+  terminals?.dispose();
+  terminals = null;
 });

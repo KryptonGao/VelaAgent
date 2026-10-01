@@ -1,3 +1,4 @@
+import { PopoverPresence } from "../MotionPresence";
 import type { ProjectApi } from "../../hooks/useProject";
 import { useDismissable } from "../../hooks/useDismissable";
 import { ArrowDownIcon, ArrowUpIcon, BranchIcon, PlusIcon, SearchIcon } from "../icons";
@@ -155,11 +156,11 @@ export function BranchChip({ project }: { project: ProjectApi }) {
         <span>{branch}</span>
         <BranchAheadBehind ahead={project.git.ahead} behind={project.git.behind} />
       </button>
-      {open ? (
+      <PopoverPresence present={open}>
         <div className="dock-popover composer-popover up">
           <BranchPickerContent project={project} onClose={() => setOpen(false)} />
         </div>
-      ) : null}
+      </PopoverPresence>
     </div>
   );
 }

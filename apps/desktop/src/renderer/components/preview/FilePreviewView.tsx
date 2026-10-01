@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ProjectApi } from "../../hooks/useProject";
-import { CheckIcon, CloseIcon, ExternalIcon, FileIcon, GridIcon } from "../icons";
+import { CheckIcon, ExternalIcon, GridIcon } from "../icons";
 import { CodePane } from "./CodePane";
 import { ExplorerPane } from "./ExplorerPane";
 import { tr } from "../../locale";
@@ -50,43 +50,15 @@ export function FilePreviewView({
 
   return (
     <div className="panel-file-preview-view">
-      <div className="preview-tabs-bar">
-        <div className="preview-tabs-left">
-          {preview.tabs.map((item) => (
-            <div
-              key={item.id}
-              role="button"
-              tabIndex={0}
-              aria-current={item.id === tab.id ? "true" : undefined}
-              className={`preview-tab-item${item.id === tab.id ? " active" : ""}`}
-              title={item.id}
-              onClick={() => preview.setActiveTab(item.id)}
-              onKeyDown={(event) => {
-                if (event.target !== event.currentTarget) return;
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  preview.setActiveTab(item.id);
-                }
-              }}
-            >
-              <FileIcon size={12} />
-              <span>{item.name}</span>
-              <button
-                type="button"
-                className="preview-tab-close"
-                title={tr("关闭标签", "Close tab")}
-                aria-label={`${tr("关闭", "Close")} ${item.name}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  preview.closeTab(item.id);
-                }}
-              >
-                ×
-              </button>
-            </div>
-          ))}
+      <div className="preview-subbar">
+        <div className="preview-breadcrumbs-text" title={tab.id}>
+          {absoluteTab ? null : <span>{rootName}</span>}
+          {tab.dir
+            ? tab.dir.split("/").map((segment) => <span key={segment}>{segment}</span>)
+            : null}
+          <strong>{tab.name}</strong>
         </div>
-        <div className="preview-tabs-right">
+        <div className="preview-actions-group">
           <button
             type="button"
             className={`icon-btn-ghost${explorerOpen ? " on" : ""}`}
@@ -97,27 +69,6 @@ export function FilePreviewView({
           >
             <GridIcon size={12} />
           </button>
-          <button
-            type="button"
-            className="icon-btn-ghost"
-            title={tr("关闭预览，返回上下文面板", "Close preview and return to context panel")}
-            aria-label={tr("关闭预览", "Close preview")}
-            onClick={preview.closePreview}
-          >
-            <CloseIcon size={12} />
-          </button>
-        </div>
-      </div>
-
-      <div className="preview-subbar">
-        <div className="preview-breadcrumbs-text" title={tab.id}>
-          {absoluteTab ? null : <span>{rootName}</span>}
-          {tab.dir
-            ? tab.dir.split("/").map((segment) => <span key={segment}>{segment}</span>)
-            : null}
-          <strong>{tab.name}</strong>
-        </div>
-        <div className="preview-actions-group">
           {markdownBody ? (
             <div className="preview-view-toggle" role="group" aria-label={tr("Markdown 显示方式", "Markdown view mode")}>
               <button

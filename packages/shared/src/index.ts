@@ -1,3 +1,5 @@
+export * from "./trace";
+import type { TraceSnapshot, TraceDetails, TraceUpdate } from "./trace";
 export const IpcChannel = {
   getState: "session:get-state",
   prompt: "session:prompt",
@@ -6,7 +8,11 @@ export const IpcChannel = {
   sessionSwitch: "session:switch",
   sessionArchive: "session:archive",
   sessionUnarchive: "session:unarchive",
+  sessionBranch: "session:branch",
   sessionMessages: "session:messages",
+  sessionSummarizeThinking: "session:summarize-thinking",
+  sessionTrace: "session:trace",
+  sessionTraceDetails: "session:trace-details",
   sessionSetMode: "session:set-mode",
   sessionExecutePlan: "session:execute-plan",
   sessionResumeGoal: "session:resume-goal",
@@ -68,10 +74,22 @@ export const IpcChannel = {
   setSkillEnabled: "skills:set-enabled",
   deleteSkill: "skills:delete",
   registerModel: "models:register",
+  terminalCreate: "terminal:create",
+  terminalWrite: "terminal:write",
+  terminalResize: "terminal:resize",
+  terminalClose: "terminal:close",
+  terminalEvent: "terminal:event",
 } as const;
 
 export const appLocales = ["zh-CN", "en"] as const;
 export type AppLocale = (typeof appLocales)[number];
+
+/** 独立总结一段已完成的思考，不写入聊天上下文。 */
+export interface ThinkingSummaryInput {
+  conversationId: string;
+  text: string;
+  locale: AppLocale;
+}
 
 export const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
@@ -305,18 +323,49 @@ export function isInteractionMode(value: string): value is InteractionMode {
   return (interactionModes as readonly string[]).includes(value);
 }
 
-export interface PlanStep {
+export const proposedPlanStatuses = ["draft", "approved", "superseded"] as const;
+
+export type ProposedPlanStatus = (typeof proposedPlanStatuses)[number];
+
+/**
+ * 一份待实施的完整方案。Plan 是稳定的设计规格，不是执行清单；
+ * 每次修改都生成新的 revision，旧 revision 保持原样。
+ */
+export interface ProposedPlanItem {
   id: string;
-  text: string;
-  done: boolean;
+  /** 完整的 Markdown 实施方案。 */
+  markdown: string;
+  /** 从 1 开始的修订号；同一对话内单调递增。 */
+  revision: number;
+  /** 上一版 revision 的 id；首版为 null。 */
+  supersedes: string | null;
+  status: ProposedPlanStatus;
+  /** 规划开始时用户提出的原始目标，供 fresh 执行上下文使用。 */
+  objective: string | null;
+  createdAt: number;
+  approvedAt: number | null;
 }
 
-export interface ConversationPlan {
-  title: string;
-  overview: string;
-  steps: PlanStep[];
+export const executionItemStatuses = ["pending", "in_progress", "completed"] as const;
+
+export type ExecutionItemStatus = (typeof executionItemStatuses)[number];
+
+export interface ExecutionPlanItem {
+  id: string;
+  text: string;
+  status: ExecutionItemStatus;
+}
+
+/** 执行进度清单；绑定它所依据的 ProposedPlan revision，执行中可动态调整。 */
+export interface ExecutionPlan {
+  id: string;
+  sourcePlanId: string;
+  items: ExecutionPlanItem[];
   updatedAt: number;
 }
+
+/** continue 沿用规划上下文；fresh 用原始目标 + 已批准方案开新的执行上下文。 */
+export type PlanExecutionContextStrategy = "continue" | "fresh";
 
 export const goalStatuses = ["active", "paused", "complete"] as const;
 
@@ -386,7 +435,12 @@ export interface SessionSnapshot {
   thinkingLevels: ThinkingLevel[];
   tools: string[];
   mode: InteractionMode;
-  plan: ConversationPlan | null;
+  /** 最新的 ProposedPlan revision；没有提交过计划时为 null。 */
+  proposedPlan: ProposedPlanItem | null;
+  /** 全部 revision，按提交顺序排列，供历史查看。 */
+  planRevisions: ProposedPlanItem[];
+  /** 当前激活的执行计划；执行中才会创建。 */
+  executionPlan: ExecutionPlan | null;
   goal: ConversationGoal | null;
   error: string | null;
 }
@@ -437,6 +491,8 @@ export interface AppState {
   context: ContextUsage;
   conversations: ConversationSummary[];
   activeConversationId: string | null;
+  /** 当前对话的 agent 树，供重启或渲染层重载后回填。 */
+  agents?: AgentInfo[];
 }
 
 export const subagentKinds = ["explore", "general"] as const;
@@ -459,6 +515,8 @@ export type AgentKind = SubagentKind | "root";
 
 /** 控制面维护的一个常驻 agent 的快照；子代理是独立会话，完成后仍可继续收消息。 */
 export interface AgentInfo {
+  /** 旧版未保存独立会话，仅能恢复任务、步骤摘要和结论。 */
+  historyIncomplete?: boolean;
   /** agent 标识，也是子代理目标寻址的首选 id。 */
   id: string;
   /** 父 agent 的 id；root 为 null。 */
@@ -492,6 +550,12 @@ export interface ToolStep {
   status: "running" | "done" | "error";
 }
 
+/** update_plan 提交的一条执行项；界面据此渲染图标与引导线。 */
+export interface ToolPlanItem {
+  text: string;
+  status: ExecutionItemStatus;
+}
+
 /** 一条工具调用在对话里展示的内容。正文已经截断；steps 只保留最近若干条。 */
 export interface ToolActivity {
   /** bash 要执行的命令 */
@@ -502,6 +566,8 @@ export interface ToolActivity {
   body?: string;
   /** edit / write 的展示用 diff。行首是 +、- 或空格，后面跟行号。 */
   diff?: string;
+  /** update_plan 的结构化执行清单 */
+  plan?: ToolPlanItem[];
   /** task 子代理类型 */
   agent?: SubagentKind;
   /** 常驻子代理的 id 和路径，供界面把卡片关联到 agent 列表。 */
@@ -536,9 +602,14 @@ export interface TranscriptMessage {
   tools: TranscriptTool[];
   /** role 为 user 时随消息发出的图片附件。 */
   images?: ImageAttachment[];
+  /** 这条 assistant 消息里 <proposed_plan> 对应的 revision id；用于历史里的 Plan Preview。 */
+  planIds?: string[];
+  /** 这条消息写入会话文件的时间(毫秒);没有持久化条目时为 null。 */
+  timestamp: number | null;
 }
 
 export type AgentStreamEvent =
+  | TraceUpdate
   | { type: "state"; state: AppState }
   | { type: "text_delta"; conversationId: string; delta: string }
   | { type: "thinking_delta"; conversationId: string; delta: string }
@@ -552,6 +623,10 @@ export type AgentStreamEvent =
   /** 某个子代理自己的运行流；带 agentId，供右侧 Agent Pane 实时渲染。 */
   | { type: "agent_event"; conversationId: string; agentId: string; event: AgentRuntimeStreamEvent }
   | { type: "user_message"; conversationId: string; text: string }
+  /** Plan 模式输出的 <proposed_plan> 块，流式解析成独立事件。 */
+  | { type: "proposed_plan_start"; conversationId: string; planId: string; revision: number }
+  | { type: "proposed_plan_delta"; conversationId: string; planId: string; delta: string }
+  | { type: "proposed_plan_end"; conversationId: string; plan: ProposedPlanItem }
   | { type: "error"; conversationId: string; message: string };
 
 /** 子代理会话的实时事件；形状与主对话一致，只是用 agentId 代替 conversationId。 */
@@ -674,6 +749,28 @@ export interface WorkspaceSearchResult {
   matches: WorkspaceSearchMatch[];
   truncated: boolean;
 }
+
+// ---------- 集成终端 ----------
+
+export interface TerminalCreateOptions {
+  /** 渲染层生成,同一 id 在同一个 webContents 内只会有一个 PTY 会话 */
+  id: string;
+  cols: number;
+  rows: number;
+}
+
+export interface TerminalSessionInfo {
+  id: string;
+  /** 实际启动的 shell 可执行文件路径 */
+  shell: string;
+  /** shell 启动目录 */
+  cwd: string;
+}
+
+/** 终端输出与退出事件,经 terminal:event 推送到渲染层。 */
+export type TerminalEvent =
+  | { type: "output"; id: string; data: string }
+  | { type: "exit"; id: string; exitCode: number; signal: number };
 
 // ---------- Pull Request ----------
 
@@ -814,8 +911,8 @@ export interface VelaApi {
   prompt(text: string, images?: ImageAttachment[], conversationId?: string): Promise<AppState>;
   abort(conversationId?: string): Promise<AppState>;
   setInteractionMode(mode: InteractionMode, conversationId?: string): Promise<AppState>;
-  /** 切回 Agent，并把当前计划作为下一条消息发出。 */
-  executePlan(conversationId?: string): Promise<AppState>;
+  /** 批准当前 Plan revision，并开始执行；strategy 决定复用规划上下文还是开新的执行上下文。 */
+  executePlan(conversationId?: string, strategy?: PlanExecutionContextStrategy): Promise<AppState>;
   /** 把暂停中的目标重新设为进行中，并自动续跑。 */
   resumeGoal(conversationId?: string): Promise<AppState>;
   /** 新建一个对话并切换过去;原对话保留在侧边栏列表里。 */
@@ -823,10 +920,15 @@ export interface VelaApi {
   switchConversation(id: string): Promise<AppState>;
   /** 归档一个对话;侧边栏不再显示,历史保留,可在设置的归档列表里搜索恢复。 */
   archiveConversation(id: string): Promise<AppState>;
+  /** 从某一轮回复处分支:复制该轮及之前的历史到新对话并切换过去。 */
+  branchConversation(conversationId: string, turnIndex: number): Promise<AppState>;
   /** 取消归档,对话回到侧边栏。 */
   unarchiveConversation(id: string): Promise<AppState>;
   /** 读取某个对话的完整历史(用于应用重启后恢复界面消息)。 */
   getMessages(conversationId: string): Promise<TranscriptMessage[]>;
+  summarizeThinking(input: ThinkingSummaryInput): Promise<string>;
+  getTrace(conversationId: string): Promise<TraceSnapshot>;
+  getTraceDetails(conversationId: string, nodeId: string): Promise<TraceDetails | null>;
   /** 读取某个常驻子代理自己的消息历史(用于打开右侧 Agent Pane 时回填)。 */
   getAgentMessages(conversationId: string, agentId: string): Promise<TranscriptMessage[]>;
   onEvent(listener: (event: AgentStreamEvent) => void): () => void;
@@ -877,6 +979,15 @@ export interface VelaApi {
   /** 在工作区内做代码内容搜索(git 仓库走 git grep,否则本地扫描)。 */
   searchWorkspaceCode(query: string): Promise<WorkspaceSearchResult>;
   onGitEvent(listener: (event: GitEvent) => void): () => void;
+  /** 在工作区目录启动一个交互式终端；同一 id 已存在时返回既有会话。 */
+  createTerminal(options: TerminalCreateOptions): Promise<TerminalSessionInfo>;
+  /** 把键盘输入写入终端。 */
+  writeTerminal(id: string, data: string): void;
+  /** 面板尺寸变化时同步 PTY 窗口大小。 */
+  resizeTerminal(id: string, cols: number, rows: number): void;
+  /** 关闭终端并结束 shell 进程。 */
+  closeTerminal(id: string): void;
+  onTerminalEvent(listener: (event: TerminalEvent) => void): () => void;
   getPullRequest(): Promise<PullRequestInfo>;
   openPullRequest(url: string): Promise<void>;
   createPullRequest(): Promise<void>;

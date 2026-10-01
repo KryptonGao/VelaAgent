@@ -10,6 +10,7 @@ import {
 } from "../themes";
 import type { AppLocale } from "@vela/shared";
 
+export type InfoLayout = "sidebar" | "floating";
 export type Appearance = "system" | "light" | "dark";
 export type { AppLocale };
 
@@ -17,14 +18,19 @@ export type { AppLocale };
 export type ToolDisplay = "card" | "compact";
 /** 工具折叠的分组范围:按 Assistant 消息,或按界面上的位置关系跨消息合并。 */
 export type ToolFold = "message" | "position";
+/** 思考总结的展示方式:跟在“思考”后面、替换“思考”作为标题、或跟随回复正文样式。 */
+export type ThinkingSummaryStyle = "inline" | "headline" | "prose";
 export type FileIconTheme = "devicon" | "material";
 
+const infoLayoutKey = "vela.infoLayout";
 const appearanceKey = "vela.appearance";
 const lightThemeKey = "vela.theme.light";
 const darkThemeKey = "vela.theme.dark";
 const localeKey = "vela.locale";
 const toolDisplayKey = "vela.toolDisplay";
 const toolFoldKey = "vela.toolFold";
+const thinkingSummaryKey = "vela.thinkingSummary";
+const thinkingSummaryStyleKey = "vela.thinkingSummaryStyle";
 const fileIconThemeKey = "vela.fileIconTheme";
 const hiddenModelsKey = "vela.hiddenModels";
 const darkQuery = "(prefers-color-scheme: dark)";
@@ -84,6 +90,10 @@ function isToolFold(value: unknown): value is ToolFold {
   return value === "message" || value === "position";
 }
 
+function isThinkingSummaryStyle(value: unknown): value is ThinkingSummaryStyle {
+  return value === "inline" || value === "headline" || value === "prose";
+}
+
 function isFileIconTheme(value: unknown): value is FileIconTheme {
   return value === "devicon" || value === "material";
 }
@@ -93,6 +103,9 @@ function systemScheme(): ColorScheme {
 }
 
 export function usePreferences() {
+  const [infoLayout, setInfoLayout] = useState<InfoLayout>(() =>
+    readStored(infoLayoutKey, (value): value is InfoLayout => value === "sidebar" || value === "floating", "sidebar"),
+  );
   const [appearance, setAppearance] = useState<Appearance>(() => readStored(appearanceKey, isAppearance, "system"));
   const [lightTheme, setLightTheme] = useState<LightTheme>(() =>
     readStored(lightThemeKey, isLightTheme, defaultLightTheme),
@@ -110,8 +123,14 @@ export function usePreferences() {
   const [toolFold, setToolFold] = useState<ToolFold>(() =>
     readStored(toolFoldKey, isToolFold, "message"),
   );
+  const [thinkingSummary, setThinkingSummary] = useState(() =>
+    readStored(thinkingSummaryKey, (value): value is string => value === "true", "false") === "true",
+  );
+  const [thinkingSummaryStyle, setThinkingSummaryStyle] = useState<ThinkingSummaryStyle>(() =>
+    readStored(thinkingSummaryStyleKey, isThinkingSummaryStyle, "inline"),
+  );
   const [fileIconTheme, setFileIconTheme] = useState<FileIconTheme>(() =>
-    readStored(fileIconThemeKey, isFileIconTheme, "devicon"),
+    readStored(fileIconThemeKey, isFileIconTheme, "material"),
   );
   const [hiddenModels, setHiddenModels] = useState<string[]>(() =>
     readStoredJson(hiddenModelsKey, isHiddenModelList, []),
@@ -149,6 +168,7 @@ export function usePreferences() {
     root.dataset.theme = theme;
   }, [scheme, theme]);
 
+  useEffect(() => writeStored(infoLayoutKey, infoLayout), [infoLayout]);
   useEffect(() => writeStored(appearanceKey, appearance), [appearance]);
   useEffect(() => writeStored(lightThemeKey, lightTheme), [lightTheme]);
   useEffect(() => writeStored(darkThemeKey, darkTheme), [darkTheme]);
@@ -160,10 +180,14 @@ export function usePreferences() {
 
   useEffect(() => writeStored(toolDisplayKey, toolDisplay), [toolDisplay]);
   useEffect(() => writeStored(toolFoldKey, toolFold), [toolFold]);
+  useEffect(() => writeStored(thinkingSummaryKey, String(thinkingSummary)), [thinkingSummary]);
+  useEffect(() => writeStored(thinkingSummaryStyleKey, thinkingSummaryStyle), [thinkingSummaryStyle]);
   useEffect(() => writeStored(fileIconThemeKey, fileIconTheme), [fileIconTheme]);
   useEffect(() => writeStored(hiddenModelsKey, JSON.stringify(hiddenModels)), [hiddenModels]);
 
   return {
+    infoLayout,
+    setInfoLayout,
     appearance,
     scheme,
     theme,
@@ -172,6 +196,8 @@ export function usePreferences() {
     locale,
     toolDisplay,
     toolFold,
+    thinkingSummary,
+    thinkingSummaryStyle,
     fileIconTheme,
     hiddenModels,
     isModelHidden,
@@ -183,6 +209,8 @@ export function usePreferences() {
     setLocale,
     setToolDisplay,
     setToolFold,
+    setThinkingSummary,
+    setThinkingSummaryStyle,
     setFileIconTheme,
   };
 }

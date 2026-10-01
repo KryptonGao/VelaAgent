@@ -7,6 +7,7 @@ import type {
   AskUserQuestionRequest,
   ImageAttachment,
   InteractionMode,
+  PlanExecutionContextStrategy,
   ToolActivity,
   ToolStep,
   ToolTrace,
@@ -14,6 +15,7 @@ import type {
 } from "@vela/shared";
 import { agentStatuses } from "@vela/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { applyPlanDraft, type PlanDraft } from "../plan-draft";
 import { localizeError, tr } from "../locale";
 
 export interface UiMessage {
@@ -24,17 +26,21 @@ export interface UiMessage {
   tools: ToolTrace[];
   /** role 为 user 时随消息发出的图片附件。 */
   images?: ImageAttachment[];
+  /** 这条 assistant 消息里 <proposed_plan> 对应的 revision id；聊天里据此显示 Plan Preview。 */
+  planIds?: string[];
   turnStartedAt?: number;
   turnCompletedAt?: number;
+  /** 这条消息写入会话文件的时间;实时消息在完成时补上。 */
+  timestamp?: number;
 }
 
 /** 每个对话独立保存界面上的消息,切换对话时互不影响。 */
-type MessageBuckets = Record<string, UiMessage[]>;
+export type MessageBuckets = Record<string, UiMessage[]>;
 
 /** conversationId -> agentId -> 子代理自己的消息流，供右侧 Agent Pane 渲染。 */
 export type AgentMessageBuckets = Record<string, Record<string, UiMessage[]>>;
 
-type StreamUpdate = Exclude<AgentStreamEvent, { type: "state" }>;
+type StreamUpdate = Exclude<AgentStreamEvent, { type: "state" } | { type: "trace" }>;
 
 export function useSession() {
   const [state, setState] = useState<AppState | null>(null);
@@ -46,6 +52,10 @@ export function useSession() {
   const [agents, setAgents] = useState<Record<string, AgentInfo[]>>({});
   /** conversationId -> agentId -> 子代理运行流。 */
   const [agentBuckets, setAgentBuckets] = useState<AgentMessageBuckets>({});
+  /** conversationId -> 正在流式接收的 <proposed_plan> 草稿。 */
+  const [planDrafts, setPlanDrafts] = useState<Record<string, PlanDraft | null>>({});
+  /** 当前对话开始生成新方案时指向它，用来打开 Plan Document。 */
+  const [planFocus, setPlanFocus] = useState<{ planId: string; nonce: number } | null>(null);
   const activeConversationId = state?.activeConversationId ?? null;
   const activeIdRef = useRef<string | null>(null);
   const bucketsRef = useRef<MessageBuckets>({});
@@ -107,6 +117,7 @@ export function useSession() {
     const acceptState = (next: AppState) => {
       const id = next.activeConversationId;
       if (id) {
+        if (next.agents) setAgents((current) => ({ ...current, [id]: sanitizeAgents(next.agents!) }));
         const status = next.session.status;
         const previous = statusesRef.current[id];
         if (status === "streaming" && previous !== "streaming") {
@@ -119,6 +130,9 @@ export function useSession() {
             const completedAt = Date.now();
             const startedAt = turnStartedAtRef.current[id] ?? completedAt;
             setBuckets((current) => updateLastAssistant(current, id, { startedAt, completedAt }));
+          } else if (status === "ready") {
+            // 中止或失败也要留下回复时间,操作行右侧才有值可显示。
+            setBuckets((current) => updateLastAssistant(current, id, { timestamp: Date.now() }));
           }
           delete turnStartedAtRef.current[id];
           delete completionBlockedRef.current[id];
@@ -136,6 +150,7 @@ export function useSession() {
     });
 
     const unsubscribe = api.onEvent((event) => {
+      if (event.type === "trace") return;
       if (event.type === "state") {
         receivedStateEvent = true;
         acceptState(event.state);
@@ -161,6 +176,19 @@ export function useSession() {
         setAgentBuckets((current) =>
           applyAgentStreamEvent(current, event.conversationId, event.agentId, streamEvent),
         );
+        return;
+      }
+      if (event.type === "proposed_plan_start" || event.type === "proposed_plan_delta" || event.type === "proposed_plan_end") {
+        setPlanDrafts((current) => ({
+          ...current,
+          [event.conversationId]: applyPlanDraft(current[event.conversationId] ?? null, event),
+        }));
+        const planId = event.type === "proposed_plan_end" ? event.plan.id : event.planId;
+        setBuckets((current) => attachPlanToLastAssistant(current, event.conversationId, planId));
+        // 开始生成时把 Plan Document 带到前台；完成后保留用户手动关闭的选择。
+        if (event.type === "proposed_plan_start" && event.conversationId === activeIdRef.current) {
+          setPlanFocus((current) => ({ planId: event.planId, nonce: (current?.nonce ?? 0) + 1 }));
+        }
         return;
       }
       setBuckets((current) => applyStreamEvent(current, event, turnStartedAtRef.current[event.conversationId]));
@@ -236,13 +264,13 @@ export function useSession() {
     }
   }, []);
 
-  const executePlan = useCallback(async () => {
+  const executePlan = useCallback(async (strategy: PlanExecutionContextStrategy) => {
     const api = window.vela;
     const id = activeIdRef.current;
     if (!api || !id) return;
     setErrors((current) => ({ ...current, [id]: "" }));
     try {
-      setState(await api.executePlan(id));
+      setState(await api.executePlan(id, strategy));
     } catch (error) {
       const message = error instanceof Error ? error.message : "无法执行计划";
       setErrors((current) => ({ ...current, [id]: message }));
@@ -309,6 +337,24 @@ export function useSession() {
     }
   }, []);
 
+  /** 从某一轮回复处分支出新对话并切换过去;turnIndex 是可见用户消息的序号。 */
+  const branch = useCallback(async (turnIndex: number) => {
+    const api = window.vela;
+    const id = activeIdRef.current;
+    if (!api || !id) return;
+    setErrors((current) => ({ ...current, [id]: "" }));
+    try {
+      const next = await api.branchConversation(id, turnIndex);
+      setState(next);
+      if (next.activeConversationId) void loadTranscript(next.activeConversationId);
+    } catch (error) {
+      const message = error instanceof Error
+        ? localizeError(error.message)
+        : tr("无法分支到新聊天", "Could not branch to a new chat");
+      setErrors((current) => ({ ...current, [id]: message }));
+    }
+  }, [loadTranscript]);
+
   const sendError = activeConversationId ? errors[activeConversationId] || null : null;
   const messages = useMemo(() => {
     const list = activeConversationId ? buckets[activeConversationId] ?? [] : [];
@@ -316,7 +362,13 @@ export function useSession() {
     const next = [...list];
     while (next.length > 0) {
       const last = next[next.length - 1];
-      if (last.role === "assistant" && !last.text && !last.thinking && last.tools.length === 0) {
+      if (
+        last.role === "assistant" &&
+        !last.text &&
+        !last.thinking &&
+        last.tools.length === 0 &&
+        (last.planIds?.length ?? 0) === 0
+      ) {
         next.pop();
       } else {
         break;
@@ -365,13 +417,22 @@ export function useSession() {
     [loadAgentMessages],
   );
 
+  const activeAgents = useMemo(
+    () => (activeConversationId ? agents[activeConversationId] ?? state?.agents ?? [] : []),
+    [activeConversationId, agents, state?.agents],
+  );
+
   return {
     available: typeof window.vela !== "undefined",
     state,
     messages,
     conversations: state?.conversations ?? [],
     activeConversationId,
-    agents: activeConversationId ? agents[activeConversationId] ?? [] : [],
+    agents: activeAgents,
+    /** 当前对话正在流式生成的方案草稿；没有时为 null。 */
+    planDraft: activeConversationId ? planDrafts[activeConversationId] ?? null : null,
+    /** 当前对话刚开始生成新方案时指向它，用来打开 Plan Document。 */
+    planFocus,
     sendError,
     question:
       activeConversationId && questions[activeConversationId]
@@ -390,6 +451,7 @@ export function useSession() {
     switchTo,
     archive,
     unarchive,
+    branch,
     setAppState: setState,
   };
 }
@@ -402,13 +464,41 @@ function toUiMessage(message: TranscriptMessage): UiMessage {
     thinking: message.thinking,
     tools: message.tools.map((tool) => ({ ...tool })),
     images: message.images ? message.images.map((image) => ({ ...image })) : undefined,
+    planIds: message.planIds ? [...message.planIds] : undefined,
+    timestamp: message.timestamp ?? undefined,
   };
+}
+
+/**
+ * 把 plan revision 挂到当前对话最后一条 assistant 消息上，供 turn 渲染 Plan Preview。
+ * 历史恢复时由 transcript 重建同样的关联。
+ */
+export function attachPlanToLastAssistant(
+  buckets: MessageBuckets,
+  conversationId: string,
+  planId: string,
+): MessageBuckets {
+  const messages = buckets[conversationId];
+  if (!messages || messages.length === 0) return buckets;
+  let index = -1;
+  for (let cursor = messages.length - 1; cursor >= 0; cursor -= 1) {
+    if (messages[cursor]?.role === "assistant") {
+      index = cursor;
+      break;
+    }
+  }
+  if (index < 0) return buckets;
+  const message = messages[index]!;
+  if (message.planIds?.includes(planId)) return buckets;
+  const next = [...messages];
+  next[index] = { ...message, planIds: [...(message.planIds ?? []), planId] };
+  return { ...buckets, [conversationId]: next };
 }
 
 function updateLastAssistant(
   buckets: MessageBuckets,
   id: string,
-  timing: { startedAt?: number; completedAt?: number },
+  timing: { startedAt?: number; completedAt?: number; timestamp?: number },
 ): MessageBuckets {
   const messages = buckets[id] ?? [];
   const next = stampLastAssistant(messages, timing);
@@ -417,7 +507,7 @@ function updateLastAssistant(
 
 function stampLastAssistant(
   messages: UiMessage[],
-  timing: { startedAt?: number; completedAt?: number },
+  timing: { startedAt?: number; completedAt?: number; timestamp?: number },
 ): UiMessage[] {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
@@ -427,7 +517,10 @@ function stampLastAssistant(
       ...(timing.startedAt !== undefined
         ? { turnStartedAt: timing.startedAt, turnCompletedAt: undefined }
         : {}),
-      ...(timing.completedAt !== undefined ? { turnCompletedAt: timing.completedAt } : {}),
+      ...(timing.completedAt !== undefined
+        ? { turnCompletedAt: timing.completedAt, timestamp: timing.completedAt }
+        : {}),
+      ...(timing.timestamp !== undefined ? { timestamp: timing.timestamp } : {}),
     };
     return [...messages.slice(0, index), next, ...messages.slice(index + 1)];
   }
@@ -577,17 +670,32 @@ function ensureAssistant(messages: UiMessage[], startedAt?: number): UiMessage[]
 
 function sanitizeActivity(value: ToolActivity | undefined): ToolActivity {
   const steps = sanitizeSteps(value?.steps);
+  const plan = sanitizePlanItems(value?.plan);
   return {
     command: typeof value?.command === "string" ? value.command : undefined,
     path: typeof value?.path === "string" ? value.path : undefined,
     body: typeof value?.body === "string" ? value.body : undefined,
     diff: typeof value?.diff === "string" ? value.diff : undefined,
+    plan,
     agent: value?.agent === "explore" || value?.agent === "general" ? value.agent : undefined,
     agentId: typeof value?.agentId === "string" ? value.agentId : undefined,
     agentPath: typeof value?.agentPath === "string" ? value.agentPath : undefined,
     steps,
     mutated: value?.mutated === true ? true : undefined,
   };
+}
+
+function sanitizePlanItems(value: ToolActivity["plan"]): ToolActivity["plan"] {
+  if (!Array.isArray(value)) return undefined;
+  const items: NonNullable<ToolActivity["plan"]> = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const text = typeof item.text === "string" ? item.text : "";
+    if (!text.trim()) continue;
+    const status = item.status === "completed" || item.status === "in_progress" ? item.status : "pending";
+    items.push({ text, status });
+  }
+  return items.length > 0 ? items.slice(-60) : undefined;
 }
 
 function sanitizeSteps(value: ToolActivity["steps"]): ToolActivity["steps"] {
@@ -624,6 +732,7 @@ function sanitizeAgents(value: unknown): AgentInfo[] {
     if (!id || !path || !kind || !status) continue;
     result.push({
       id,
+      historyIncomplete: record.historyIncomplete === true,
       parentId: typeof record.parentId === "string" ? record.parentId : null,
       path,
       name: typeof record.name === "string" ? record.name : "",
@@ -684,6 +793,7 @@ function mergeActivity(current: ToolActivity | undefined, patch: ToolActivity): 
     path: patch.path ?? base.path,
     body: patch.body ?? base.body,
     diff: patch.diff ?? base.diff,
+    plan: patch.plan ?? base.plan,
     agent: patch.agent ?? base.agent,
     agentId: patch.agentId ?? base.agentId,
     agentPath: patch.agentPath ?? base.agentPath,

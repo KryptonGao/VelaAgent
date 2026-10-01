@@ -27,6 +27,13 @@ export function isEnglish(): boolean {
 }
 
 const knownErrors: Record<string, string> = {
+  "思考总结参数不正确": "Invalid thinking summary request.",
+  "思考总结语言不正确": "Unsupported thinking summary language.",
+  "思考内容不能为空": "Thinking content cannot be empty.",
+  "思考内容过长": "Thinking content is too long.",
+  "无法生成思考总结": "Could not generate a thinking summary.",
+  "思考总结生成超时": "Thinking summary timed out.",
+  "模型未返回思考总结": "The model returned no thinking summary.",
   "无法读取模型": "Could not load models.",
   "模型操作失败": "Model operation failed.",
   "应用还没准备好": "The app is not ready yet.",
@@ -61,6 +68,11 @@ const knownErrors: Record<string, string> = {
   "这个接口还没有密钥": "This endpoint has no API key.",
   "这个模型还不能使用，请先在账号里登录。": "This model is unavailable. Sign in to the provider first.",
   "对话不存在或已结束": "Chat not found or already ended.",
+  "回复位置不正确": "Invalid reply position.",
+  "回复进行中，不能分支到新聊天": "A reply is in progress. Wait for it to finish before branching.",
+  "这个对话还没有可以分支的回复": "This chat has no reply to branch from yet.",
+  "找不到要分支的回复": "Could not find that reply to branch from.",
+  "无法创建分支会话": "Could not create the branched chat.",
   "回复进行中，不能切换模式": "The mode cannot be changed while a reply is in progress.",
   "上一个回复还在进行中": "The previous reply is still in progress.",
   "还没有可以执行的计划": "There is no plan to run yet.",

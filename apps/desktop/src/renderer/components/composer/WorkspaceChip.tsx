@@ -1,3 +1,4 @@
+import { PopoverPresence } from "../MotionPresence";
 import type { ProjectApi } from "../../hooks/useProject";
 import { useDismissable } from "../../hooks/useDismissable";
 import { CloseIcon, FolderIcon, PlusIcon } from "../icons";
@@ -27,7 +28,7 @@ export function WorkspaceChip({ project }: { project: ProjectApi }) {
         <FolderIcon />
         <span>{current ? workspaceName(current) : tr("选择工作区", "Choose workspace")}</span>
       </button>
-      {open ? (
+      <PopoverPresence present={open}>
         <div className="dock-popover composer-popover up workspace-picker">
           <div className="composer-popover-title">{tr("工作区", "Workspace")}</div>
           {current ? (
@@ -101,7 +102,7 @@ export function WorkspaceChip({ project }: { project: ProjectApi }) {
             </button>
           ) : null}
         </div>
-      ) : null}
+      </PopoverPresence>
     </div>
   );
 }

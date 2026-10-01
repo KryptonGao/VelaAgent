@@ -81,6 +81,30 @@ describe("子代理运行流 reducer", () => {
     assert.match(messages[0]?.text ?? "", /模型中断了/);
   });
 
+  it("update_plan 事件保留结构化执行清单，未知状态退回 pending", () => {
+    const messages = reduce([
+      { type: "assistant_start" },
+      {
+        type: "tool_start",
+        toolCallId: "plan-1",
+        toolName: "update_plan",
+        activity: {
+          body: "✓ A\n→ B",
+          plan: [
+            { text: "A", status: "completed" },
+            { text: "B", status: "in_progress" },
+            { text: "C", status: "bogus" as never },
+          ],
+        },
+      },
+    ]);
+    assert.deepEqual(messages[0]?.tools[0]?.activity.plan, [
+      { text: "A", status: "completed" },
+      { text: "B", status: "in_progress" },
+      { text: "C", status: "pending" },
+    ]);
+  });
+
   it("assistant_start 会另起一块，不同 agent 互不串流", () => {
     let buckets: AgentMessageBuckets = {};
     buckets = applyAgentStreamEvent(buckets, "conv-1", "a1", { type: "assistant_start" });

@@ -1,3 +1,4 @@
+import { PopoverPresence } from "../MotionPresence";
 import type { FileAttachmentPayload } from "@vela/shared";
 import { useDismissable } from "../../hooks/useDismissable";
 import { FileIcon, ImageIcon, PlusIcon } from "../icons";
@@ -36,7 +37,7 @@ export function AttachMenu({
       >
         <PlusIcon />
       </button>
-      {open ? (
+      <PopoverPresence present={open}>
         <div className="dock-popover composer-popover up attach-menu">
           <button type="button" className="attach-menu-row" onClick={() => void pick("file")}>
             <FileIcon />
@@ -48,7 +49,7 @@ export function AttachMenu({
           </button>
           <div className="composer-popover-footnote">{tr("也可以把文件或图片直接拖进输入框", "You can also drag files or images into the message box")}</div>
         </div>
-      ) : null}
+      </PopoverPresence>
     </div>
   );
 }

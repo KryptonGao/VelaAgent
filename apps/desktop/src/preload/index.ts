@@ -25,6 +25,9 @@ import {
   type ExternalSkillScan,
   type SkillCatalog,
   type SkillMigrationResult,
+  type TerminalCreateOptions,
+  type TerminalEvent,
+  type TerminalSessionInfo,
   type ThinkingLevel,
   type TranscriptMessage,
   type VelaApi,
@@ -50,8 +53,8 @@ const api: VelaApi = {
     ipcRenderer.invoke(IpcChannel.abort, conversationId ?? null) as Promise<AppState>,
   setInteractionMode: (mode: InteractionMode, conversationId) =>
     ipcRenderer.invoke(IpcChannel.sessionSetMode, mode, conversationId ?? null) as Promise<AppState>,
-  executePlan: (conversationId) =>
-    ipcRenderer.invoke(IpcChannel.sessionExecutePlan, conversationId ?? null) as Promise<AppState>,
+  executePlan: (conversationId, strategy) =>
+    ipcRenderer.invoke(IpcChannel.sessionExecutePlan, conversationId ?? null, strategy ?? "continue") as Promise<AppState>,
   resumeGoal: (conversationId) =>
     ipcRenderer.invoke(IpcChannel.sessionResumeGoal, conversationId ?? null) as Promise<AppState>,
   createConversation: () => ipcRenderer.invoke(IpcChannel.sessionCreate) as Promise<AppState>,
@@ -61,8 +64,13 @@ const api: VelaApi = {
     ipcRenderer.invoke(IpcChannel.sessionArchive, id) as Promise<AppState>,
   unarchiveConversation: (id: string) =>
     ipcRenderer.invoke(IpcChannel.sessionUnarchive, id) as Promise<AppState>,
+  branchConversation: (conversationId: string, turnIndex: number) =>
+    ipcRenderer.invoke(IpcChannel.sessionBranch, conversationId, turnIndex) as Promise<AppState>,
+  getTrace: (conversationId) => ipcRenderer.invoke(IpcChannel.sessionTrace, conversationId),
+  getTraceDetails: (conversationId, nodeId) => ipcRenderer.invoke(IpcChannel.sessionTraceDetails, conversationId, nodeId),
   getMessages: (conversationId: string) =>
     ipcRenderer.invoke(IpcChannel.sessionMessages, conversationId) as Promise<TranscriptMessage[]>,
+  summarizeThinking: (input) => ipcRenderer.invoke(IpcChannel.sessionSummarizeThinking, input) as Promise<string>,
   getAgentMessages: (conversationId: string, agentId: string) =>
     ipcRenderer.invoke(IpcChannel.sessionAgentMessages, conversationId, agentId) as Promise<TranscriptMessage[]>,
   getCatalog: () => ipcRenderer.invoke(IpcChannel.getCatalog) as Promise<ModelCatalog>,
@@ -176,6 +184,27 @@ const api: VelaApi = {
       ipcRenderer.removeListener(IpcChannel.gitEvent, wrapped);
     };
   },
+  createTerminal: (options: TerminalCreateOptions) =>
+    ipcRenderer.invoke(IpcChannel.terminalCreate, options) as Promise<TerminalSessionInfo>,
+  writeTerminal: (id: string, data: string) => {
+    ipcRenderer.send(IpcChannel.terminalWrite, id, data);
+  },
+  resizeTerminal: (id: string, cols: number, rows: number) => {
+    ipcRenderer.send(IpcChannel.terminalResize, id, cols, rows);
+  },
+  closeTerminal: (id: string) => {
+    ipcRenderer.send(IpcChannel.terminalClose, id);
+  },
+  onTerminalEvent: (listener) => {
+    const wrapped = (_event: IpcRendererEvent, payload: unknown) => {
+      if (!isTerminalEvent(payload)) return;
+      listener(payload);
+    };
+    ipcRenderer.on(IpcChannel.terminalEvent, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IpcChannel.terminalEvent, wrapped);
+    };
+  },
   onApprovalEvent: (listener) => {
     const wrapped = (_event: IpcRendererEvent, payload: unknown) => {
       if (!isApprovalEvent(payload)) return;
@@ -229,6 +258,9 @@ function isModelEvent(value: unknown): value is ModelAuthEvent {
 function isStreamEvent(value: unknown): value is AgentStreamEvent {
   if (!isRecord(value)) return false;
   const type = value.type;
+  if (type === "trace") {
+    return typeof value.conversationId === "string" && typeof value.version === "number" && Array.isArray(value.nodes) && Array.isArray(value.requests);
+  }
   if (type === "user_message") {
     return typeof value.conversationId === "string" && typeof value.text === "string";
   }
@@ -272,6 +304,12 @@ function isApprovalEvent(value: unknown): value is SandboxApprovalEvent {
     return isObject(request) && typeof request.id === "string" && typeof request.kind === "string";
   }
   return value.type === "resolved" && typeof value.id === "string";
+}
+
+function isTerminalEvent(value: unknown): value is TerminalEvent {
+  if (!isRecord(value) || typeof value.id !== "string") return false;
+  if (value.type === "output") return typeof value.data === "string";
+  return value.type === "exit" && typeof value.exitCode === "number" && typeof value.signal === "number";
 }
 
 function isQuestionEvent(value: unknown): value is AskUserQuestionEvent {

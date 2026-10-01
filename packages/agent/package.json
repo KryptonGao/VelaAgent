@@ -16,6 +16,6 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import ./test/register-ts.mjs --experimental-transform-types --test test/skill-migration.test.ts test/skill-management.test.ts test/question-manager.test.ts test/subagent.test.ts test/agent-control.test.ts test/plan.test.ts test/goal-validation.test.ts test/context-usage.test.ts test/sandbox-risk.test.ts test/model-selection.test.ts"
+    "test": "node --import ./test/register-ts.mjs --experimental-transform-types --test test/skill-migration.test.ts test/skill-management.test.ts test/question-manager.test.ts test/subagent.test.ts test/agent-control.test.ts test/agent-history.test.ts test/plan.test.ts test/plan-store.test.ts test/goal-validation.test.ts test/context-usage.test.ts test/sandbox-risk.test.ts test/model-selection.test.ts test/session-persistence.test.ts test/transcript.test.ts test/trace.test.ts test/thinking-summary.test.ts test/thinking-summary-http.test.ts test/conversation-title.test.ts test/conversation-title-http.test.ts"
   }
 }

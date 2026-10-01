@@ -1,4 +1,4 @@
-import type { SubagentKind, ToolActivity, ToolStep } from "@vela/shared";
+import type { SubagentKind, ToolActivity, ToolPlanItem, ToolStep } from "@vela/shared";
 import { followupTaskToolName, sendMessageToolName, spawnAgentToolName } from "./subagent";
 
 const maxChars = 80_000;
@@ -9,6 +9,7 @@ export function activityFromCall(toolName: string, args: unknown): ToolActivity 
   if (toolName === sendMessageToolName || toolName === followupTaskToolName) {
     return agentMessageCallActivity(toolName, args);
   }
+  if (toolName === "update_plan") return planActivity(args);
   const command = readString(args, "command");
   const path = readString(args, "path") ?? readString(args, "file_path");
   if (toolName === "bash") return command ? { command } : {};
@@ -57,6 +58,10 @@ export function activityFromExecution(
   }
   if (toolName === "submit_plan") {
     return { body: planSummary(args) || clip(text) || "已提交计划" };
+  }
+  if (toolName === "update_plan") {
+    const activity = planActivity(args);
+    return { ...activity, body: activity.body || clip(text) || "已更新执行清单" };
   }
   const summary = modeToolSummary(toolName, args);
   if (summary) {
@@ -250,6 +255,7 @@ function modeToolSummary(toolName: string, args: unknown): string | null {
     return [question, ...readOptionLabels(args, "options").map((label) => `· ${label}`)].join("\n");
   }
   if (toolName === "submit_plan") return planSummary(args);
+  if (toolName === "update_plan") return planUpdateSummary(args);
   if (toolName === "record_goal_validation") {
     const risk = readString(args, "risk");
     const counts = (key: string) => {
@@ -282,6 +288,46 @@ function planSummary(args: unknown): string | null {
   const lines = [title, overview, ...steps.map((step, index) => `${index + 1}. ${step}`)].filter(
     (line) => line.length > 0,
   );
+  return lines.length > 0 ? lines.join("\n") : null;
+}
+
+/** update_plan 的结构化清单：保留每个执行项的文本和状态，同时给旧路径留一份文本摘要。 */
+function planActivity(args: unknown): ToolActivity {
+  const plan = readPlanItems(args);
+  const body = planUpdateSummary(args);
+  return { ...(plan ? { plan } : {}), ...(body ? { body } : {}) };
+}
+
+function readPlanItems(args: unknown): ToolPlanItem[] | undefined {
+  if (!args || typeof args !== "object") return undefined;
+  const value = (args as Record<string, unknown>).plan;
+  if (!Array.isArray(value)) return undefined;
+  const items: ToolPlanItem[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const record = raw as Record<string, unknown>;
+    const text = typeof record.step === "string" ? singleLine(record.step).slice(0, 200) : "";
+    if (!text) continue;
+    const status = record.status === "completed" || record.status === "in_progress" ? record.status : "pending";
+    items.push({ text, status });
+  }
+  return items.length > 0 ? items : undefined;
+}
+
+/** update_plan 的卡片摘要：用符号标出每项状态。 */
+function planUpdateSummary(args: unknown): string | null {
+  if (!args || typeof args !== "object") return null;
+  const value = (args as Record<string, unknown>).plan;
+  if (!Array.isArray(value)) return null;
+  const lines: string[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    const step = typeof record.step === "string" ? singleLine(record.step).slice(0, 200) : "";
+    if (!step) continue;
+    const mark = record.status === "completed" ? "✓" : record.status === "in_progress" ? "→" : "○";
+    lines.push(`${mark} ${step}`);
+  }
   return lines.length > 0 ? lines.join("\n") : null;
 }
 

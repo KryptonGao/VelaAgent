@@ -1,3 +1,4 @@
+import { PopoverPresence } from "../MotionPresence";
 import type { ProjectApi } from "../../hooks/useProject";
 import { useDismissable } from "../../hooks/useDismissable";
 import { CheckIcon, MonitorIcon } from "../icons";
@@ -50,7 +51,7 @@ export function EnvironmentChip({ project }: { project: ProjectApi }) {
         <MonitorIcon />
         <span>{activeLabel}</span>
       </button>
-      {open ? (
+      <PopoverPresence present={open}>
         <div className="dock-popover composer-popover up">
           <div className="composer-popover-title">{tr("执行环境", "Execution environment")}</div>
           <button
@@ -95,7 +96,7 @@ export function EnvironmentChip({ project }: { project: ProjectApi }) {
             </div>
           ))}
         </div>
-      ) : null}
+      </PopoverPresence>
     </div>
   );
 }

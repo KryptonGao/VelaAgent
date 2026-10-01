@@ -1,6 +1,7 @@
-import type { AskUserQuestionRequest, ToolActivity, ToolTrace } from "@vela/shared";
+import type { AskUserQuestionRequest, ExecutionItemStatus, ToolActivity, ToolPlanItem, ToolTrace } from "@vela/shared";
 import { isAgentToolName } from "@vela/shared";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type TransitionEvent } from "react";
+import { ContentSwap } from "./BatchMotion";
 import { ActivityIndicator } from "./ActivityIndicator";
 import { Markdown } from "./Markdown";
 import { ScrollFade } from "./ScrollFade";
@@ -13,16 +14,20 @@ import {
   useAgentWorkspace,
 } from "./AgentPanel";
 import { useFilePreview } from "./preview/FilePreviewContext";
+import type { ThemedToken } from "./preview/highlighter";
 import { QuestionCard } from "./QuestionCard";
 import { FileTypeIcon } from "./FileTypeIcon";
-import { CheckIcon, ExternalIcon, EyeIcon, FilePlusIcon, PencilIcon, StackIcon, SubagentIcon, TerminalIcon } from "./icons";
+import { tokenStyle, useDiffHighlight, type HighlightedDiff } from "./diff-highlight";
+import { ArrowRightIcon, CheckIcon, CircleIcon, ExternalIcon, EyeIcon, FilePlusIcon, PencilIcon, StackIcon, SubagentIcon, TerminalIcon } from "./icons";
 import {
   compactSummaryParts,
   diffStat,
+  parseDisplayDiff,
   splitPath,
   totalDiffStat,
   toolCompactKind,
   type CompactSummaryPart,
+  type DisplayDiffRow,
 } from "./tool-compact";
 import { shouldFoldRun } from "./tool-sequence";
 import type { ToolDisplay } from "../hooks/usePreferences";
@@ -354,6 +359,7 @@ function GenericToolCard({ tool, compact = false }: ToolCardProps) {
   const kind = toolKind(tool.name);
   const activity = tool.activity ?? {};
   const subject = subjectOf(kind, activity, tool.name);
+  const planFirst = activity.plan?.[0] ?? null;
   const stat = diffStat(activity.diff);
   const lines = kind === "read" ? readLineCount(activity.body) : null;
   const previewPath = kind === "bash" ? null : activity.path?.trim() || null;
@@ -391,7 +397,10 @@ function GenericToolCard({ tool, compact = false }: ToolCardProps) {
           </span>
           <span className="tool-kind-label">{toolLabel(tool.name, kind)}</span>
           <span className="tool-card-main">
-            <span className={`tool-card-name${subject.dir ? "" : " grow"}`}>{subject.name}</span>
+            <span className={`tool-card-name${subject.dir ? "" : " grow"}`}>
+              {planFirst ? <PlanStatusIcon status={planFirst.status} className="plan-status-inline" /> : null}
+              {subject.name}
+            </span>
             {subject.dir ? <span className="tool-card-dir">{subject.dir}</span> : null}
           </span>
           {stat ? (
@@ -535,7 +544,7 @@ export function CompactToolGroup({ tools }: { tools: ToolTrace[] }) {
     <div
       className={`tool-compact-group tool-kind-${uniform ?? "other"}${open ? " open" : ""}${
         running ? " is-running" : ""
-      }${open && fileDiffGroup ? " has-file-diff-previews" : ""}`}
+      }`}
     >
       <button
         className="tool-compact-summary"
@@ -737,7 +746,12 @@ export function CompactToolLine({
         <ToolCollapse open={open}>
           <div className={`tool-compact-file-detail${isDiffPreview ? " has-diff-preview" : ""}`}>
             {hasCompactDiff && activity.diff ? (
-              <CompactDiffCard fileName={subject.name} diff={activity.diff} note={activity.body} />
+              <CompactDiffCard
+                fileName={subject.name}
+                filePath={previewPath ?? undefined}
+                diff={activity.diff}
+                note={activity.body}
+              />
             ) : (
               <ToolBody kind={kind} activity={activity} status={tool.status} />
             )}
@@ -757,6 +771,13 @@ function compactAction(kind: ToolKind): string {
 
 /** 紧凑行只标异常状态:运行中转圈、失败红叉,完成不占位置。 */
 function CompactStatus({ running, failed }: { running: boolean; failed: boolean }) {
+  const key = running ? "running" : failed ? "error" : "done";
+  return <ContentSwap inline hideWhenEmpty className={`tool-status-swap compact is-${key}`} motionKey={key}>
+    {running || failed ? <CompactStatusContent running={running} failed={failed} /> : null}
+  </ContentSwap>;
+}
+
+function CompactStatusContent({ running, failed }: { running: boolean; failed: boolean }) {
   if (running) return <ActivityIndicator />;
   if (failed) {
     return (
@@ -780,7 +801,7 @@ function CopyIcon({ size = 13 }: { size?: number }) {
   );
 }
 
-function CompactDiffCard({ fileName, diff, note }: { fileName: string; diff: string; note?: string }) {
+function CompactDiffCard({ fileName, filePath, diff, note }: { fileName: string; filePath?: string; diff: string; note?: string }) {
   const [copied, setCopied] = useState(false);
   const stat = diffStat(diff);
 
@@ -813,13 +834,13 @@ function CompactDiffCard({ fileName, diff, note }: { fileName: string; diff: str
         </button>
       </header>
       {note ? <p className="compact-diff-card-note">{note}</p> : null}
-      <CompactDiffView diff={diff} />
+      <CompactDiffView diff={diff} path={filePath} />
     </section>
   );
 }
 
 /** 紧凑 diff 保留改动附近的上下文,长段未改内容自动折叠。 */
-function CompactDiffView({ diff }: { diff: string }) {
+function CompactDiffView({ diff, path }: { diff: string; path?: string }) {
   return (
     <div className="compact-diff-scroll-shell">
       <div
@@ -829,9 +850,41 @@ function CompactDiffView({ diff }: { diff: string }) {
         tabIndex={0}
       >
         <div className="compact-diff-scroll-content">
-          <DiffView diff={diff} compact />
+          <DiffView diff={diff} path={path} compact />
         </div>
       </div>
+    </div>
+  );
+}
+
+/** 执行项的图标标记：完成对勾、进行中箭头、待办空心圆。 */
+function PlanStatusIcon({ status, className }: { status: ExecutionItemStatus; className?: string }) {
+  return (
+    <span
+      className={`plan-status-icon is-${status}${className ? ` ${className}` : ""}`}
+      aria-hidden="true"
+    >
+      {status === "completed" ? (
+        <CheckIcon size={11} />
+      ) : status === "in_progress" ? (
+        <ArrowRightIcon size={11} />
+      ) : (
+        <CircleIcon size={11} />
+      )}
+    </span>
+  );
+}
+
+/** update_plan 展开后的清单：左侧一条竖向引导线把各项状态串起来。 */
+function PlanChecklist({ items }: { items: ToolPlanItem[] }) {
+  return (
+    <div className="plan-checklist" role="list">
+      {items.map((item, index) => (
+        <div className={`plan-checklist-item is-${item.status}`} role="listitem" key={`${index}-${item.text}`}>
+          <PlanStatusIcon status={item.status} className="plan-checklist-icon" />
+          <span className="plan-checklist-text">{item.text}</span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -858,13 +911,14 @@ function ToolBody({
   if (status === "error") {
     return <pre className="tool-error">{activity.body ? localizeError(activity.body) : tr("执行失败", "Execution failed")}</pre>;
   }
+  if (activity.plan && activity.plan.length > 0) return <PlanChecklist items={activity.plan} />;
   if (kind === "read") return <ReadView body={activity.body} running={status === "running"} />;
   if (kind === "edit" || kind === "write") {
     return (
       <>
         {activity.body && activity.diff ? <p className="tool-note">{activity.body}</p> : null}
         {activity.diff ? (
-          <DiffView diff={activity.diff} />
+          <DiffView diff={activity.diff} path={activity.path} />
         ) : activity.body ? (
           <p className="tool-note">{activity.body}</p>
         ) : status === "running" ? (
@@ -926,34 +980,56 @@ function ReadView({ body, running }: { body?: string; running: boolean }) {
   );
 }
 
-function DiffView({ diff, compact = false }: { diff: string; compact?: boolean }) {
-  const parsedRows = parseDiff(diff);
-  const rows = compact ? collapseDiffContext(parsedRows) : parsedRows;
+function DiffView({ diff, path, compact = false }: { diff: string; path?: string; compact?: boolean }) {
+  const parsed = useMemo(() => parseDisplayDiff(diff), [diff]);
+  const rows = useMemo(() => (compact ? collapseDiffContext(parsed.rows) : parsed.rows), [parsed, compact]);
+  const highlight = useDiffHighlight(path, parsed.oldLines, parsed.newLines);
   if (rows.length === 0) return <p className="tool-wait">{tr("没有差异", "No diff")}</p>;
   return (
     <div className={`tool-sheet${compact ? " tool-sheet-compact-diff" : ""}`}>
-      {rows.map((row, index) =>
-        row.kind === "gap" ? (
-          <div className={`tool-diff-gap${compact ? " is-compact" : ""}`} key={index}>
-            {compact ? null : row.text}
-          </div>
-        ) : (
+      {rows.map((row, index) => {
+        if (row.kind === "gap") {
+          return (
+            <div className={`tool-diff-gap${compact ? " is-compact" : ""}`} key={index}>
+              {compact ? null : row.text}
+            </div>
+          );
+        }
+        const tokens = rowTokens(row, highlight);
+        return (
           <div className={`tool-code-line tool-diff-line ${row.kind}`} key={index}>
             <span className="tool-gutter">
               <span className="tool-sign">{row.kind === "add" ? "+" : row.kind === "del" ? "−" : ""}</span>
               {row.gutter}
             </span>
-            <span className="tool-code-text">{row.text || " "}</span>
+            <span className="tool-code-text">
+              {tokens
+                ? tokens.map((token, tokenIndex) => (
+                    <span key={tokenIndex} style={tokenStyle(token)}>
+                      {token.content}
+                    </span>
+                  ))
+                : row.text || " "}
+            </span>
           </div>
-        ),
-      )}
+        );
+      })}
     </div>
   );
 }
 
+/** 上下文行取新侧 token;两侧内容一致,缺哪侧用哪侧兜底。 */
+function rowTokens(row: DisplayDiffRow, highlight: HighlightedDiff | null): ThemedToken[] | null {
+  if (!highlight) return null;
+  if (row.kind === "add") return highlight.new?.[row.newIndex] ?? null;
+  if (row.kind === "del") return highlight.old?.[row.oldIndex] ?? null;
+  if (row.kind === "ctx") return highlight.new?.[row.newIndex] ?? highlight.old?.[row.oldIndex] ?? null;
+  return null;
+}
+
 /** 长上下文只显示靠近两侧改动的行,并以细分隔带代表折叠内容。 */
-function collapseDiffContext(rows: DiffRow[]): DiffRow[] {
-  const output: DiffRow[] = [];
+function collapseDiffContext(rows: DisplayDiffRow[]): DisplayDiffRow[] {
+  const output: DisplayDiffRow[] = [];
   const changedAfter = new Array<boolean>(rows.length + 1).fill(false);
   for (let index = rows.length - 1; index >= 0; index -= 1) {
     const row = rows[index];
@@ -976,7 +1052,7 @@ function collapseDiffContext(rows: DiffRow[]): DiffRow[] {
     const hasChangeAfter = changedAfter[index] ?? false;
     if (context.length > 3 && hasChangeBefore && hasChangeAfter) {
       output.push(context[0]!);
-      output.push({ kind: "gap", gutter: "", text: "" });
+      output.push({ kind: "gap", gutter: "", text: "", oldIndex: -1, newIndex: -1 });
       output.push(context[context.length - 1]!);
     } else {
       output.push(...context);
@@ -986,6 +1062,12 @@ function collapseDiffContext(rows: DiffRow[]): DiffRow[] {
 }
 
 function StatusMark({ status, compact = false }: { status: ToolTrace["status"]; compact?: boolean }) {
+  return <ContentSwap inline className={`tool-status-swap is-${status}`} motionKey={status}>
+    <StatusMarkContent status={status} compact={compact} />
+  </ContentSwap>;
+}
+
+function StatusMarkContent({ status, compact = false }: { status: ToolTrace["status"]; compact?: boolean }) {
   if (status === "running") {
     return compact ? <ActivityIndicator /> : <span className="tool-spinner" role="status" aria-label={tr("运行中", "Running")} />;
   }
@@ -1016,6 +1098,7 @@ function KindIcon({ kind }: { kind: ToolKind }): ReactNode {
 
 function toolLabel(name: string, kind: ToolKind): string {
   if (name === "submit_plan") return tr("计划", "Plan");
+  if (name === "update_plan") return tr("执行清单", "Execution");
   if (name === "record_goal_validation") return tr("验证", "Validation");
   if (name === "update_goal") return tr("目标", "Goal");
   if (name === "complete_step") return tr("步骤", "Step");
@@ -1039,8 +1122,12 @@ function subjectOf(kind: ToolKind, activity: ToolActivity, name: string): { name
   }
   const path = activity.path?.trim();
   if (!path) {
+    if (name === "update_plan" && activity.plan?.length) {
+      return { name: activity.plan[0]!.text, dir: "" };
+    }
     if (
       name === "submit_plan" ||
+      name === "update_plan" ||
       name === "record_goal_validation" ||
       name === "update_goal" ||
       name === "complete_step"
@@ -1086,30 +1173,3 @@ function splitLines(text: string): string[] {
   return lines;
 }
 
-interface DiffRow {
-  kind: "add" | "del" | "ctx" | "gap";
-  gutter: string;
-  text: string;
-}
-
-/** Pi 的展示 diff 形如 `+ 12 new line`；中间省略的上下文是一行 `...`。 */
-function parseDiff(diff: string): DiffRow[] {
-  return diff
-    .split("\n")
-    .filter((line, index, all) => line.length > 0 || index < all.length - 1)
-    .map((line) => {
-      if (line.trim() === "..." || line.trim() === "…") return { kind: "gap", gutter: "", text: "…" };
-      if (line.startsWith("…")) return { kind: "gap", gutter: "", text: line };
-      const matched = /^([+\- ]) *(\d+) (.*)$/.exec(line);
-      if (matched) {
-        const sign = matched[1];
-        const kind = sign === "+" ? "add" : sign === "-" ? "del" : "ctx";
-        return { kind, gutter: matched[2] ?? "", text: matched[3] ?? "" };
-      }
-      if (line.startsWith("@@")) return { kind: "gap", gutter: "", text: line };
-      if (line.startsWith("+") && !line.startsWith("+++")) return { kind: "add", gutter: "", text: line.slice(1) };
-      if (line.startsWith("-") && !line.startsWith("---")) return { kind: "del", gutter: "", text: line.slice(1) };
-      if (line.startsWith(" ")) return { kind: "ctx", gutter: "", text: line.slice(1) };
-      return { kind: "ctx", gutter: "", text: line };
-    });
-}

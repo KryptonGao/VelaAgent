@@ -70,7 +70,7 @@ import materialXml from "material-icon-theme/icons/xml.svg";
 import materialYaml from "material-icon-theme/icons/yaml.svg";
 import type { FileIconTheme } from "../hooks/usePreferences";
 
-const FileIconThemeContext = createContext<FileIconTheme>("devicon");
+const FileIconThemeContext = createContext<FileIconTheme>("material");
 
 export function FileIconThemeProvider({ value, children }: { value: FileIconTheme; children: ReactNode }) {
   return <FileIconThemeContext.Provider value={value}>{children}</FileIconThemeContext.Provider>;

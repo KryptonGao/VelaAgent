@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import { CloseIcon, SkillIcon } from "../icons";
 import { skillOriginLabel, skillTitle } from "./skill-picker";
 import { localizeError, tr } from "../../locale";
+import { useReducedMotion } from "../../hooks/useMotionPresence";
 
 export function SkillToken({
   name,
@@ -43,16 +44,18 @@ export function SkillMenu({
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<HTMLButtonElement>(null);
+  const reduced = useReducedMotion();
 
   useEffect(() => {
     const row = activeRef.current;
     const list = listRef.current;
     if (!row || !list) return;
-    const top = row.offsetTop;
+    const top = row.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop;
     const bottom = top + row.offsetHeight;
-    if (top < list.scrollTop) list.scrollTop = top;
-    else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = bottom - list.clientHeight;
-  }, [activeIndex, skills]);
+    const target = Math.min(top, Math.max(list.scrollTop, bottom - list.clientHeight));
+    // Retarget rapid key repeats, including a reversal while a scroll is active.
+    list.scrollTo({ top: target, behavior: reduced ? "instant" : "smooth" });
+  }, [activeIndex, skills, reduced]);
 
   const empty = skills === null && !error
     ? tr("正在读取 Skill…", "Loading skills…")

@@ -14,6 +14,7 @@ import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type R
 import { useEscapeKey } from "../hooks/useDismissable";
 import type { LoginState } from "../hooks/useModels";
 import { modelKey } from "../hooks/usePreferences";
+import { PopoverPresence } from "./MotionPresence";
 import { SheetPresence } from "./Presence";
 import { localizeError, tr } from "../locale";
 
@@ -117,7 +118,7 @@ export function ModelControls(props: ModelControlsProps) {
           <span>{thinkingLabel(shownThinking)}</span>
           <Chevron />
         </button>
-        {menu === "thinking" ? (
+        <PopoverPresence present={menu === "thinking"}>
           <div id={thinkingPopoverId} className="dock-popover thinking-popover" role="group" aria-label={tr("思考强度", "Reasoning effort")}>
             <div className="thinking-popover-heading">
               <span className="thinking-level-value" aria-live="polite">{thinkingLabel(sliderThinking)}</span>
@@ -183,7 +184,7 @@ export function ModelControls(props: ModelControlsProps) {
               />
             </div>
           </div>
-        ) : null}
+        </PopoverPresence>
       </div>
 
       <div className="dock-menu">
@@ -199,7 +200,7 @@ export function ModelControls(props: ModelControlsProps) {
           <span className="model-pill-label">{props.modelLabel ?? tr("选择模型", "Choose a model")}</span>
           <Chevron />
         </button>
-        {menu === "model" ? (
+        <PopoverPresence present={menu === "model"}>
           <ModelMenu
             catalog={props.catalog}
             catalogError={props.catalogError}
@@ -220,7 +221,7 @@ export function ModelControls(props: ModelControlsProps) {
               setAccountsOpen(true);
             }}
           />
-        ) : null}
+        </PopoverPresence>
       </div>
 
       <SheetPresence present={accountsOpen}>
