@@ -56,7 +56,7 @@ window.vela = {
   hydrateAttachments: async () => ["first.txt", "second.txt", "third.txt"].map((name) => ({ path: `/workspace/Vela/${name}`, name, kind: "file", image: null })),
   pickAttachments: async () => ["first.txt", "second.txt", "third.txt"].map((name) => ({ path: `/workspace/Vela/${name}`, name, kind: "file", image: null })),
 } as unknown as VelaApi;
-const files = ["first.txt", "second.txt"].map((path) => ({ path, status: "modified", staged: false, oldPath: null, addedLines: 1, deletedLines: 1 }));
+const files = ["first.txt", "second.txt"].map((path) => ({ path, status: "modified", indexStatus: null, worktreeStatus: "modified", oldPath: null, addedLines: 1, deletedLines: 1, indexAddedLines: 0, indexDeletedLines: 0, worktreeAddedLines: 1, worktreeDeletedLines: 1 }));
 const project = { workspace: { current: "/workspace/Vela", recents: [] }, approval: null, environment: null,
   environments: [], sandboxMode: "ask", git: { repo: { root: "/workspace/Vela", name: "Vela" }, files, branch: "main", addedLines: 2, deletedLines: 2 },
   fileDiff: async (path: string) => { await pause(path === "second.txt" ? 90 : 30); return `@@ -1 +1 @@\n-${path} old\n+${path} new`; },

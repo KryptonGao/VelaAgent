@@ -75,11 +75,11 @@ const tsDiff = [
 ].join("\n");
 
 const files: GitFileChange[] = [
-  { path: "README.md", oldPath: null, status: "modified", staged: false, addedLines: 2, deletedLines: 1 },
-  { path: "apps/desktop/src/index.ts", oldPath: null, status: "modified", staged: false, addedLines: 3, deletedLines: 2 },
+  { path: "README.md", oldPath: null, status: "modified", indexStatus: null, worktreeStatus: "modified", addedLines: 2, deletedLines: 1, indexAddedLines: 0, indexDeletedLines: 0, worktreeAddedLines: 2, worktreeDeletedLines: 1 },
+  { path: "apps/desktop/src/index.ts", oldPath: null, status: "modified", indexStatus: null, worktreeStatus: "modified", addedLines: 3, deletedLines: 2, indexAddedLines: 0, indexDeletedLines: 0, worktreeAddedLines: 3, worktreeDeletedLines: 2 },
 ];
 
-const repo: GitRepoInfo = { root: "/tmp/vela-fixture", name: "VelaAgent", remoteUrl: null };
+const repo: GitRepoInfo = { root: "/tmp/vela-fixture", name: "VelaAgent", remoteUrl: null, subdir: null, empty: false };
 const git: GitStatusSnapshot = {
   repo,
   branch: "main",
@@ -90,6 +90,10 @@ const git: GitStatusSnapshot = {
   files,
   addedLines: 5,
   deletedLines: 3,
+  lastFetchAt: null,
+  operation: null,
+  identity: { name: "Fixture", email: "fixture@example.com", configured: true },
+  remotes: [],
 };
 
 const project = {

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import type { ProjectApi } from "../hooks/useProject";
 import type { SidebarResize } from "../hooks/useSidebarResize";
 import type { ToolDisplay } from "../hooks/usePreferences";
+import type { MessageStore } from "../hooks/message-store";
 import type { UiMessage } from "../hooks/useSession";
 import { useMotionPresence } from "../hooks/useMotionPresence";
 import { WorkbenchTabPanel } from "./MotionPresence";
@@ -46,7 +47,9 @@ interface WorkbenchPanelProps {
   onSelectedChangePath: (path: string | null) => void;
   onShowDiff: (path: string) => void;
   agents: readonly AgentInfo[];
-  getAgentMessages: (agentId: string) => UiMessage[];
+  getAgentMessages?: (agentId: string) => UiMessage[];
+  messageStore?: MessageStore;
+  conversationId?: string | null;
   toolDisplay?: ToolDisplay;
   ensureAgentMessages: (agentId: string) => void;
   onOpenAgent: (agentId: string) => void;
@@ -119,6 +122,8 @@ function WorkbenchPanelContent({
   onShowDiff,
   agents,
   getAgentMessages,
+  messageStore,
+  conversationId,
   toolDisplay,
   ensureAgentMessages,
   onOpenAgent,
@@ -149,7 +154,6 @@ function WorkbenchPanelContent({
   const startTabs = tabs.filter((tab): tab is Extract<WorkbenchTab, { kind: "start" }> => tab.kind === "start");
   const terminalTabs = tabs.filter((tab): tab is Extract<WorkbenchTab, { kind: "terminal" }> => tab.kind === "terminal");
   const filesTab = tabs.find((tab): tab is Extract<WorkbenchTab, { kind: "files" }> => tab.kind === "files") ?? null;
-  const [mountedAgentIds, setMountedAgentIds] = useState<Set<string>>(() => new Set());
   const tabButtons = useRef(new Map<string, HTMLButtonElement>());
   const tabListRef = useRef<HTMLElement | null>(null);
   const tabBarRef = useRef<HTMLDivElement | null>(null);
@@ -192,16 +196,6 @@ function WorkbenchPanelContent({
     if (!list) return;
     setPinnedTabWidth(measureTabWidth(list, tabs.length, null));
   }, [measureTabWidth, tabs.length]);
-
-  useEffect(() => {
-    if (activeTab?.kind !== "agent") return;
-    setMountedAgentIds((current) => {
-      if (current.has(activeTab.agent.id)) return current;
-      const next = new Set(current);
-      next.add(activeTab.agent.id);
-      return next;
-    });
-  }, [activeTab]);
 
   const tabPanelId = (tab: WorkbenchTab): string => {
     if (tab.kind === "file") return `${baseId}-panel-files`;
@@ -308,9 +302,6 @@ function WorkbenchPanelContent({
 
   const focusTab = (tab: WorkbenchTab): void => {
     activateTab(tab);
-    if (tab.kind === "agent") {
-      setMountedAgentIds((current) => new Set(current).add(tab.agent.id));
-    }
     requestAnimationFrame(() => tabButtons.current.get(tab.id)?.focus());
   };
 
@@ -321,14 +312,7 @@ function WorkbenchPanelContent({
       ? tabs[index + 1] ?? tabs[index - 1] ?? null
       : activeTab;
     const completeClose = () => {
-      if (tab.kind === "agent") {
-        setMountedAgentIds((current) => {
-          if (!current.has(tab.agent.id)) return current;
-          const nextIds = new Set(current);
-          nextIds.delete(tab.agent.id);
-          return nextIds;
-        });
-      } else if (tab.kind === "file") {
+      if (tab.kind === "file") {
         preview?.closeTab(tab.path);
       }
       onCloseTab(tab);
@@ -553,11 +537,12 @@ function WorkbenchPanelContent({
             hidden={activeTab?.id !== tab.id}
             key={tab.id}
           >
-            {mountedAgentIds.has(tab.agent.id) ? (
-              <AgentPane
+            <AgentPane
                 agent={tab.agent}
                 agents={agents}
-                messages={getAgentMessages(tab.agent.id)}
+                messages={getAgentMessages?.(tab.agent.id)}
+                messageStore={messageStore}
+                conversationId={conversationId}
                 toolDisplay={toolDisplay}
                 visible={activeTab?.id === tab.id}
                 onSwitch={(agentId) => {
@@ -566,8 +551,7 @@ function WorkbenchPanelContent({
                   else onOpenAgent(agentId);
                 }}
                 ensureMessages={ensureAgentMessages}
-              />
-            ) : null}
+            />
           </WorkbenchTabPanel>
         ))}
       </div>

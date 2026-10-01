@@ -1,5 +1,5 @@
 import type { AgentInfo, SubagentKind } from "@vela/shared";
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, useContext, useMemo, type ReactNode } from "react";
 import { ActivityIndicator } from "./ActivityIndicator";
 import { tr } from "../locale";
 
@@ -27,8 +27,10 @@ export function AgentWorkspaceProvider({
   closeAgent,
   children,
 }: AgentWorkspaceValue & { children: ReactNode }) {
+  const value = useMemo(() => ({ agents, activeAgentId, openAgent, closeAgent }),
+    [agents, activeAgentId, openAgent, closeAgent]);
   return (
-    <AgentWorkspaceContext.Provider value={{ agents, activeAgentId, openAgent, closeAgent }}>
+    <AgentWorkspaceContext.Provider value={value}>
       {children}
     </AgentWorkspaceContext.Provider>
   );

@@ -42,6 +42,7 @@ import {
   type ThinkingSummaryInput,
   type ToolActivity,
   type TranscriptMessage,
+  type AiTextResult,
 } from "@vela/shared";
 import { defaultToolNames } from "@vela/tools";
 import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
@@ -57,6 +58,7 @@ import {
   userMessageText,
 } from "./context-usage";
 import { clipTitle, normalizeManualConversationTitle, requestConversationTitle } from "./conversation-title";
+import { parseAiTextRequest, TextAssistService } from "./text-assist";
 import { ConversationStore } from "./conversation-store";
 import { legacyAgentTranscript, recoverLegacyAgents, type StoredAgent } from "./agent-history";
 import { createPersistedSession } from "./session-persistence";
@@ -245,6 +247,7 @@ export class AgentRuntime {
   private readonly agentToolArgs = new Map<string, unknown>();
   private readonly questions = new QuestionManager();
   private readonly thinkingSummaries = new ThinkingSummaryGenerator();
+  private readonly textAssist = new TextAssistService();
   private readonly initializePromise: Promise<void>;
   private readonly store: ConversationStore;
   private currentCwd: string;
@@ -952,6 +955,37 @@ export class AgentRuntime {
   }
 
   /**
+   * 生成 Commit Message / PR 文案。默认用当前对话选定的模型;
+   * 没有对话时用设置里的默认模型。结果是可编辑草稿,不执行任何 Git/GitHub 操作。
+   */
+  async generateTextAssist(raw: unknown): Promise<AiTextResult> {
+    const request = parseAiTextRequest(raw);
+    const directory = await this.readyDirectory();
+    const entry = this.activeConversation();
+    const model = entry?.session?.model ?? directory.modelForSelection();
+    if (!model || !directory.isAvailable(model)) throw new Error("先选择一个已登录或已配置密钥的模型");
+    return this.textAssist.generate(directory.runtime, model, request, entry?.id ?? null);
+  }
+
+  cancelTextAssist(requestId: unknown): void {
+    if (typeof requestId === "string" && requestId.length > 0 && requestId.length <= 100) {
+      this.textAssist.cancel(requestId);
+    }
+  }
+
+  /** 同一工作树上是否有 Agent 正在执行;用于限制暂存/提交等改动文件或索引的操作。 */
+  findRunningAgent(cwd: string | null): string | null {
+    const match = this.listConversations().find(
+      (conversation) => conversation.status === "streaming" && (!cwd || conversation.cwd === cwd),
+    );
+    return match?.id ?? null;
+  }
+
+  hasRunningAgent(cwd: string | null): boolean {
+    return this.findRunningAgent(cwd) !== null;
+  }
+
+  /**
    * 某个常驻 agent 自己的消息历史；右侧 Agent Pane 首次打开时用它回填。
    * agentId 等于对话 id 时返回主代理消息。
    */
@@ -975,6 +1009,7 @@ export class AgentRuntime {
 
   dispose(): void {
     this.thinkingSummaries.dispose();
+    this.textAssist.dispose();
     for (const trace of this.traces.values()) trace.dispose();
     this.directory?.cancelLogin();
     this.questions.cancelAll();

@@ -335,3 +335,57 @@ export function TrashIcon({ size = 13 }: IconProps) {
     </svg>
   );
 }
+
+export function SparkIcon({ size = 13 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="m12 3 1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2Z" />
+      <path d="m19 15 .8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8Z" />
+    </svg>
+  );
+}
+
+export function RefreshIcon({ size = 13 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M21 12a9 9 0 1 1-2.6-6.4" />
+      <path d="M21 3v6h-6" />
+    </svg>
+  );
+}
+
+export function CloudIcon({ size = 13 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M17.5 19a4.5 4.5 0 0 0 .5-9 6 6 0 0 0-11.6-1.6A4 4 0 0 0 6.5 19Z" />
+      <path d="M12 12v6M9.5 14.5 12 12l2.5 2.5" />
+    </svg>
+  );
+}
+
+export function AlertIcon({ size = 13 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
+      <path d="M12 9v4M12 17h.01" />
+    </svg>
+  );
+}
+
+export function CommitIcon({ size = 13 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M1.5 12h6.5M16 12h6.5" />
+    </svg>
+  );
+}
+
+export function TagIcon({ size = 13 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M20.6 13.4 12 22l-9-9V4a1 1 0 0 1 1-1h9Z" />
+      <circle cx="7.5" cy="7.5" r="1" />
+    </svg>
+  );
+}

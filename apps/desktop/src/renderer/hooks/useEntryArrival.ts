@@ -3,13 +3,15 @@ import { useReducedMotion } from "./useMotionPresence";
 
 /** Track the full data set, not just mounted rows, so virtualization and chunk
  * updates cannot replay arrivals. Animate only currently visible new entries. */
-export function useEntryArrival(scope: string, keys: readonly string[], stagger = 20) {
+export function useEntryArrival(scope: string, keys: readonly string[], stagger = 20, animateInitial = true) {
   const root = useRef<HTMLElement>(null);
   const seen = useRef(new Set<string>());
   const animations = useRef(new Set<Animation>());
   const reduced = useReducedMotion();
+  const primed = useRef(false);
   useLayoutEffect(() => {
     seen.current.clear();
+    primed.current = false;
     return () => {
       for (const animation of animations.current) animation.cancel();
       animations.current.clear();
@@ -22,6 +24,13 @@ export function useEntryArrival(scope: string, keys: readonly string[], stagger 
     }
   }, [reduced]);
   useLayoutEffect(() => {
+    const fresh = keys.some(key => !seen.current.has(key));
+    const first = !primed.current;
+    primed.current = true;
+    if ((first && !animateInitial) || !fresh || reduced) {
+      seen.current = new Set(keys);
+      return;
+    }
     const viewport = root.current?.getBoundingClientRect();
     let index = 0;
     const entering = new Set<HTMLElement>();
@@ -42,6 +51,6 @@ export function useEntryArrival(scope: string, keys: readonly string[], stagger 
       animation.finished.then(() => animations.current.delete(animation), () => animations.current.delete(animation));
     }
     seen.current = new Set(keys);
-  }, [keys, scope, reduced, stagger]);
+  }, [keys, scope, reduced, stagger, animateInitial]);
   return root;
 }

@@ -39,13 +39,13 @@ describe("durable UI storage", () => {
     const key = thinkingSummaryKey("chat-a", "zh-CN", thinkingDigest("检查持久化"));
     first.setItem("vela.thinkingSummary", "true");
     first.setItem("vela.thinkingSummaryStyle", "prose");
-    first.setItem("vela.thinkingSummaries.v1", serializeStoredSummaries({ [key]: { status: "done", text: "检查并修复保存逻辑。" } }));
+    first.setItem("vela.thinkingSummaries.v2", serializeStoredSummaries({ [key]: { status: "done", text: "检查并修复保存逻辑。" } }));
     const restarted = createUiStorage(bridge(new UiStorage(file)), () => browserStorage({
       "vela.thinkingSummary": "false", "vela.thinkingSummaryStyle": "inline",
     }));
     assert.equal(restarted.getItem("vela.thinkingSummary"), "true");
     assert.equal(restarted.getItem("vela.thinkingSummaryStyle"), "prose");
-    assert.deepEqual(parseStoredSummaries(restarted.getItem("vela.thinkingSummaries.v1"))[key], {
+    assert.deepEqual(parseStoredSummaries(restarted.getItem("vela.thinkingSummaries.v2"))[key], {
       status: "done", text: "检查并修复保存逻辑。",
     });
     assert.equal(readdirSync(join(file, "..")).some((name) => name.endsWith(".tmp")), false);
@@ -56,14 +56,14 @@ describe("durable UI storage", () => {
     const summary = serializeStoredSummaries({ [key]: { status: "done", text: "Existing summary" } });
     const store = new UiStorage(file);
     const migrated = createUiStorage(bridge(store), () => browserStorage({
-      "vela.thinkingSummary": "true", "vela.thinkingSummaryStyle": "headline", "vela.thinkingSummaries.v1": summary,
+      "vela.thinkingSummary": "true", "vela.thinkingSummaryStyle": "headline", "vela.thinkingSummaries.v2": summary,
     }));
     assert.equal(migrated.getItem("vela.thinkingSummary"), "true");
     assert.equal(migrated.getItem("vela.thinkingSummaryStyle"), "headline");
-    assert.equal(migrated.getItem("vela.thinkingSummaries.v1"), summary);
+    assert.equal(migrated.getItem("vela.thinkingSummaries.v2"), summary);
     store.setItem("vela.thinkingSummary", "false");
     assert.equal(migrated.getItem("vela.thinkingSummary"), "false");
-    assert.equal(new UiStorage(file).getItem("vela.thinkingSummaries.v1"), summary);
+    assert.equal(new UiStorage(file).getItem("vela.thinkingSummaries.v2"), summary);
   }));
 
   it("keeps explicit removals from importing stale browser values after restart", () => withStore((file) => {

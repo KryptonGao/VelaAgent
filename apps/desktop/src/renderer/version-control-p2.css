@@ -1,0 +1,457 @@
+/*
+ * 版本控制 P2 样式:历史操作、Reflog 恢复、高级同步与安全强推、
+ * Tag/Release 与发布说明、PR 评论审阅与合并关闭。
+ * 复用 version-control.css 的主题变量与基础控件类。
+ */
+
+/* ---------- P2 通用面板结构 ---------- */
+
+.vc-p2-history,
+.vc-p2-sync,
+.vc-p2-tagrelease,
+.vc-p2-review,
+.vc-p2-merge {
+  max-width: min(560px, 92vw);
+  max-height: min(72vh, 680px);
+  overflow: auto;
+}
+
+.vc-p2-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 8px 0;
+  flex-wrap: wrap;
+}
+
+.vc-p2-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.vc-p2-section {
+  padding: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  background: var(--bg-surface-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.vc-p2-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: none;
+  letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.vc-p2-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.vc-p2-meta b {
+  color: var(--text-secondary);
+  font-weight: 550;
+}
+
+.vc-p2-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.vc-p2-note {
+  padding: 5px 7px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.vc-p2-warn {
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  color: var(--warning);
+  font-size: 10px;
+  line-height: 1.55;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.vc-p2-danger {
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--danger) 38%, transparent);
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
+  font-size: 10px;
+  line-height: 1.55;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.vc-p2-danger b {
+  font-weight: 600;
+}
+
+.vc-p2-error {
+  padding: 6px 8px;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.vc-p2-textarea {
+  min-height: 84px;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.55;
+}
+
+.vc-p2-foot {
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.vc-p2-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.vc-p2-check input {
+  margin: 0;
+}
+
+/* ---------- 文件与提交列表 ---------- */
+
+.vc-p2-files {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.vc-p2-file {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: var(--radius-xs);
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.vc-p2-file:hover {
+  background: var(--bg-hover);
+}
+
+.vc-p2-file .vc-status {
+  text-align: center;
+}
+
+.vc-p2-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+.vc-p2-commit {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: var(--radius-xs);
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.vc-p2-commit .vc-sha {
+  flex: none;
+}
+
+.vc-p2-commit-subject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vc-p2-commit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 160px;
+  overflow: auto;
+}
+
+/* ---------- Reflog ---------- */
+
+.vc-p2-reflog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 260px;
+  overflow: auto;
+  margin-top: 6px;
+}
+
+.vc-p2-reflog {
+  display: grid;
+  grid-template-columns: auto auto auto;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  text-align: left;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.vc-p2-reflog:hover {
+  background: var(--bg-hover);
+}
+
+.vc-p2-reflog.selected {
+  border-color: var(--accent-blue);
+  background: color-mix(in srgb, var(--accent-blue) 9%, transparent);
+}
+
+.vc-p2-reflog-message {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.vc-p2-reflog-refs {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+/* ---------- Tag 与 Release ---------- */
+
+.vc-p2-tag-list,
+.vc-p2-release-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.vc-p2-tag,
+.vc-p2-release {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  background: var(--bg-elevated);
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.vc-p2-tag-head,
+.vc-p2-release-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.vc-p2-tag-name,
+.vc-p2-release-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.vc-p2-tag-body,
+.vc-p2-release-body {
+  margin: 0;
+  padding: 6px;
+  max-height: 160px;
+  overflow: auto;
+  border-radius: var(--radius-xs);
+  background: var(--bg-surface-subtle);
+  color: var(--text-secondary);
+  font: 10px var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.vc-p2-release-actions,
+.vc-p2-tag-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.vc-p2-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px;
+}
+
+/* ---------- 高级同步 ---------- */
+
+.vc-p2-strategy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.vc-p2-strategy-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 6px 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  background: var(--bg-elevated);
+  text-align: left;
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.vc-p2-strategy-row.active {
+  border-color: var(--accent-blue);
+  background: color-mix(in srgb, var(--accent-blue) 8%, transparent);
+}
+
+.vc-p2-strategy-row b {
+  display: block;
+  font-size: 11px;
+  color: var(--text-primary);
+  font-weight: 600;
+  margin-bottom: 1px;
+}
+
+/* ---------- PR 审阅与合并 ---------- */
+
+.vc-p2-review-item,
+.vc-p2-thread,
+.vc-p2-comment {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  background: var(--bg-elevated);
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.vc-p2-thread.resolved {
+  opacity: 0.72;
+}
+
+.vc-p2-comment {
+  background: var(--bg-surface-subtle);
+  border-color: transparent;
+}
+
+.vc-p2-comment.is-reply {
+  margin-left: 14px;
+}
+
+.vc-p2-comment-body,
+.vc-p2-review-body {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.vc-p2-hunk {
+  margin: 2px 0 0;
+  padding: 5px 6px;
+  max-height: 140px;
+  overflow: auto;
+  border-radius: var(--radius-xs);
+  background: var(--bg-chat);
+  color: var(--text-muted);
+  font: 10px var(--font-mono);
+  white-space: pre;
+}
+
+.vc-p2-thread-list,
+.vc-p2-review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.vc-p2-merge-methods {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.vc-p2-list {
+  margin: 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.vc-p2-kv {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 8px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.vc-p2-kv b {
+  color: var(--text-secondary);
+  font-weight: 550;
+  word-break: break-word;
+}
+
+/* PR 详情里的面板锚点:按钮与弹出的审阅/合并面板保持位置对齐。 */
+.vc-pr-panel-anchor {
+  position: relative;
+  display: inline-flex;
+}

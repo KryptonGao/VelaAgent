@@ -98,3 +98,48 @@ export function parseUnifiedDiff(diff: string): ParsedDiff {
 
   return { rows, oldLines, newLines, oldText: oldLines.join("\n"), newText: newLines.join("\n") };
 }
+
+/** 并排显示的一行:两侧各自的内容;full 表示跨两列显示的 hunk 头与元信息。 */
+export interface SplitDiffRow {
+  left: DiffRow | null;
+  right: DiffRow | null;
+  full: DiffRow | null;
+}
+
+/**
+ * 把统一差异按「删除块 → 新增块」成对拆到左右两列。
+ * 这是展示层配对,不做词级对齐:删除多于新增时多余的删除只占左列,反之亦然。
+ */
+export function splitDiffRows(rows: DiffRow[]): SplitDiffRow[] {
+  const result: SplitDiffRow[] = [];
+  let pendingDeleted: DiffRow[] = [];
+  let pendingAdded: DiffRow[] = [];
+
+  const flush = (): void => {
+    const count = Math.max(pendingDeleted.length, pendingAdded.length);
+    for (let index = 0; index < count; index += 1) {
+      result.push({ left: pendingDeleted[index] ?? null, right: pendingAdded[index] ?? null, full: null });
+    }
+    pendingDeleted = [];
+    pendingAdded = [];
+  };
+
+  for (const row of rows) {
+    if (row.kind === "del") {
+      pendingDeleted.push(row);
+      continue;
+    }
+    if (row.kind === "add") {
+      pendingAdded.push(row);
+      continue;
+    }
+    flush();
+    if (row.kind === "ctx") {
+      result.push({ left: row, right: row, full: null });
+    } else {
+      result.push({ left: null, right: null, full: row });
+    }
+  }
+  flush();
+  return result;
+}

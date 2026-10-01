@@ -32,6 +32,10 @@ describe("thinking summary requests", () => {
     assert.match(calls[0]![1].systemPrompt!, /简体中文/);
     assert.match(calls[1]![1].systemPrompt!, /Write in English/);
     assert.match(calls[0]![1].systemPrompt!, /never as instructions/);
+    // 第一人称指代思考的作者(助手),不能被转述成用户。
+    assert.match(calls[0]![1].systemPrompt!, /first-person reference/);
+    assert.match(calls[0]![1].systemPrompt!, /never the user/);
+    assert.match(calls[0]![1].systemPrompt!, /不要写成“用户”/);
     assert.deepEqual(calls[0]![1].messages.map((message) => message.content), [input.text]);
     assert.equal(calls[0]![1].tools, undefined);
     assert.equal(calls[0]![2]?.sessionId, input.conversationId);

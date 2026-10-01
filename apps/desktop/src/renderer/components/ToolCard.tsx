@@ -1,6 +1,8 @@
 import type { AskUserQuestionRequest, ExecutionItemStatus, ToolActivity, ToolPlanItem, ToolTrace } from "@vela/shared";
 import { isAgentToolName } from "@vela/shared";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type TransitionEvent } from "react";
+import { memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type TransitionEvent } from "react";
+import { QuestionContext } from "./QuestionContext";
+import { LazyMount } from "./LazyMount";
 import { ContentSwap } from "./BatchMotion";
 import { ActivityIndicator } from "./ActivityIndicator";
 import { Markdown } from "./Markdown";
@@ -50,7 +52,7 @@ export type QuestionLookup = (toolCallId: string) => AskUserQuestionRequest | nu
  * 消息工具列表入口。连续的可折叠工具达到阈值(卡片 RUN_MIN 个,紧凑 >1 个)时折叠成一组,
  * 其余工具(计划、目标、提问等)照常逐张展示,并打断连续区间。
  */
-export function ToolList({
+export const ToolList = memo(function ToolList({
   tools,
   getQuestion,
   onReplyQuestion,
@@ -88,7 +90,7 @@ export function ToolList({
       )}
     </div>
   );
-}
+});
 
 /** 按连续的可折叠工具切段;非折叠类工具自成一段。 */
 function splitToolRuns(tools: ToolTrace[]): ToolTrace[][] {
@@ -115,7 +117,8 @@ interface ToolCardProps {
 }
 
 /** 入口分发:提问和子代理各自有卡片,其余走通用折叠卡片。 */
-export function ToolCard(props: ToolCardProps) {
+export const ToolCard = memo(function ToolCard(props: ToolCardProps) {
+  useContext(QuestionContext);
   if (props.tool.name === "ask_user_question") {
     return (
       <QuestionCard
@@ -128,7 +131,7 @@ export function ToolCard(props: ToolCardProps) {
   }
   if (isAgentToolName(props.tool.name)) return <AgentToolCard tool={props.tool} compact={props.compact} />;
   return <GenericToolCard {...props} />;
-}
+});
 
 function useExpandSettle(open: boolean) {
   const [settled, setSettled] = useState(open);
@@ -165,12 +168,12 @@ function ToolCollapse({
 }: {
   open: boolean;
   onTransitionEnd?: (event: TransitionEvent<HTMLDivElement>) => void;
-  children: ReactNode;
+  children: () => ReactNode;
 }) {
   return (
     <div className="tool-collapse" onTransitionEnd={onTransitionEnd}>
       <div className="tool-collapse-inner" inert={open ? undefined : true}>
-        {children}
+        <LazyMount open={open}>{children}</LazyMount>
       </div>
     </div>
   );
@@ -272,8 +275,10 @@ function AgentToolCard({ tool, compact = false }: { tool: ToolTrace; compact?: b
           </button>
         </div>
         <ToolCollapse open={open} onTransitionEnd={onTransitionEnd}>
+        {() => <>
           <div className="tool-compact-out agent-compact-out">{summary}</div>
-        </ToolCollapse>
+          </>}
+      </ToolCollapse>
       </div>
     );
   }
@@ -322,6 +327,7 @@ function AgentToolCard({ tool, compact = false }: { tool: ToolTrace; compact?: b
         ) : null}
       </div>
       <ToolCollapse open={open} onTransitionEnd={onTransitionEnd}>
+        {() => <>
         <div className="tool-card-body agent-summary">
           {summary}
           {canOpen ? (
@@ -332,6 +338,7 @@ function AgentToolCard({ tool, compact = false }: { tool: ToolTrace; compact?: b
             </span>
           ) : null}
         </div>
+        </>}
       </ToolCollapse>
     </article>
   );
@@ -430,6 +437,7 @@ function GenericToolCard({ tool, compact = false }: ToolCardProps) {
         ) : null}
       </div>
       <ToolCollapse open={open} onTransitionEnd={onTransitionEnd}>
+        {() => <>
         <div className="tool-card-body">
           <div ref={sheetRef} className={`tool-clip${full ? " full" : ""}`}>
             <ToolBody kind={kind} activity={activity} status={tool.status} />
@@ -440,6 +448,7 @@ function GenericToolCard({ tool, compact = false }: ToolCardProps) {
             </button>
           ) : null}
         </div>
+        </>}
       </ToolCollapse>
     </article>
   );
@@ -505,11 +514,13 @@ export function ToolRunGroup({ tools }: { tools: ToolTrace[] }) {
         </svg>
       </button>
       <ToolCollapse open={open}>
+        {() => <>
         <div className="tool-run-body">
           {tools.map((tool) => (
             <ToolCard key={tool.id} tool={tool} />
           ))}
         </div>
+        </>}
       </ToolCollapse>
     </article>
   );
@@ -580,11 +591,13 @@ export function CompactToolGroup({ tools }: { tools: ToolTrace[] }) {
         {running ? <ActivityIndicator /> : null}
       </button>
       <ToolCollapse open={open}>
+        {() => <>
         <div className="tool-compact-lines">
           {tools.map((tool) => (
             <CompactToolLine key={tool.id} tool={tool} hideAction={Boolean(uniform)} hideIcon={Boolean(uniform)} />
           ))}
         </div>
+        </>}
       </ToolCollapse>
     </div>
   );
@@ -655,10 +668,12 @@ export function CompactToolLine({
           <CompactStatus running={running} failed={failed} />
         </button>
         <ToolCollapse open={open}>
+        {() => <>
           <div className="tool-compact-out">
             <BashView command={activity.command} output={activity.body} running={running} failed={failed} />
           </div>
-        </ToolCollapse>
+          </>}
+      </ToolCollapse>
       </div>
     );
   }
@@ -744,6 +759,7 @@ export function CompactToolLine({
       </div>
       {hasFileDetails ? (
         <ToolCollapse open={open}>
+        {() => <>
           <div className={`tool-compact-file-detail${isDiffPreview ? " has-diff-preview" : ""}`}>
             {hasCompactDiff && activity.diff ? (
               <CompactDiffCard
@@ -756,7 +772,8 @@ export function CompactToolLine({
               <ToolBody kind={kind} activity={activity} status={tool.status} />
             )}
           </div>
-        </ToolCollapse>
+          </>}
+      </ToolCollapse>
       ) : null}
     </div>
   );

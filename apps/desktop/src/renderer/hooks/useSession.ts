@@ -15,6 +15,7 @@ import type {
 } from "@vela/shared";
 import { agentStatuses } from "@vela/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createMessageStore, emptyMessages, messageScope } from "./message-store";
 import { applyPlanDraft, type PlanDraft } from "../plan-draft";
 import { localizeError, tr } from "../locale";
 
@@ -46,14 +47,14 @@ type StreamUpdate = Exclude<AgentStreamEvent, { type: "state" } | { type: "trace
 
 export function useSession() {
   const [state, setState] = useState<AppState | null>(null);
-  const [buckets, setBuckets] = useState<MessageBuckets>({});
+  const [messageStore] = useState(createMessageStore);
+  // Only restored history is needed by App to reconstruct legacy agent tabs.
+  const [agentHistory, setAgentHistory] = useState<MessageBuckets>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   /** conversationId -> 该对话当前待回答的问题(同一对话一次只有一个)。 */
   const [questions, setQuestions] = useState<Record<string, AskUserQuestionRequest>>({});
   /** conversationId -> 该对话的常驻 agent 树快照。 */
   const [agents, setAgents] = useState<Record<string, AgentInfo[]>>({});
-  /** conversationId -> agentId -> 子代理运行流。 */
-  const [agentBuckets, setAgentBuckets] = useState<AgentMessageBuckets>({});
   /** conversationId -> 正在流式接收的 <proposed_plan> 草稿。 */
   const [planDrafts, setPlanDrafts] = useState<Record<string, PlanDraft | null>>({});
   /** 当前对话开始生成新方案时指向它，用来打开 Plan Document。 */
@@ -67,9 +68,31 @@ export function useSession() {
   const turnStartedAtRef = useRef<Record<string, number>>({});
   const completionBlockedRef = useRef<Record<string, boolean>>({});
   activeIdRef.current = activeConversationId;
-  bucketsRef.current = buckets;
-  agentBucketsRef.current = agentBuckets;
   questionsRef.current = questions;
+
+  const setBuckets = useCallback((update: (current: MessageBuckets) => MessageBuckets) => {
+    const current = bucketsRef.current;
+    const next = update(current);
+    bucketsRef.current = next;
+    for (const id of Object.keys(next)) {
+      if (next[id] !== current[id]) messageStore.publish(messageScope(id), trimEmptyAssistant(next[id]!));
+    }
+  }, [messageStore]);
+
+  const setAgentBuckets = useCallback((update: (current: AgentMessageBuckets) => AgentMessageBuckets) => {
+    const current = agentBucketsRef.current;
+    const next = update(current);
+    agentBucketsRef.current = next;
+    for (const id of Object.keys(next)) {
+      if (next[id] === current[id]) continue;
+      const agentIds = new Set([...Object.keys(current[id] ?? {}), ...Object.keys(next[id] ?? {})]);
+      for (const agentId of agentIds) {
+        if (next[id]?.[agentId] !== current[id]?.[agentId]) {
+          messageStore.publish(messageScope(id, agentId), next[id]?.[agentId] ?? emptyMessages);
+        }
+      }
+    }
+  }, [messageStore]);
 
   /** 从主进程读取对话完整历史;本地已有消息(可能正在流式)时不覆盖。 */
   const loadTranscript = useCallback(async (id: string) => {
@@ -77,17 +100,20 @@ export function useSession() {
     if (!api || bucketsRef.current[id]?.length) return;
     try {
       const transcript = await api.getMessages(id);
+      const restored = transcript.map(toUiMessage);
+      if (restored.length && !bucketsRef.current[id]?.length) {
+        setAgentHistory(current => ({ ...current, [id]: restored }));
+      }
       setBuckets((current) => {
         if (current[id]?.length) return current;
         if (transcript.length === 0) return current;
-        const restored = transcript.map(toUiMessage);
         const startedAt = turnStartedAtRef.current[id];
         return { ...current, [id]: startedAt ? stampLastAssistant(restored, { startedAt }) : restored };
       });
     } catch {
       // 恢复失败时保持空列表,不影响新消息收发。
     }
-  }, []);
+  }, [setBuckets]);
 
   /** 从主进程读取某个子代理的消息历史;本地已有实时流时不覆盖。 */
   const loadAgentMessages = useCallback(async (conversationId: string, agentId: string) => {
@@ -108,7 +134,7 @@ export function useSession() {
     } catch {
       // 读取失败时保留实时流,不影响 Pane 展示。
     }
-  }, []);
+  }, [setAgentBuckets]);
 
   useEffect(() => {
     const api = window.vela;
@@ -119,6 +145,7 @@ export function useSession() {
     const acceptState = (next: AppState) => {
       const id = next.activeConversationId;
       if (id && next.agents) setAgents((current) => ({ ...current, [id]: sanitizeAgents(next.agents!) }));
+      let completedStream = false;
       // 后台对话也需要记录完成时间，否则切回时会把离开的时间算进用时。
       for (const conversation of next.conversations) {
         const timing = conversation.id === id ? next.session : conversation;
@@ -131,6 +158,7 @@ export function useSession() {
           completionBlockedRef.current[conversationId] = false;
           setBuckets((current) => updateLastAssistant(current, conversationId, { startedAt }));
         } else if (previous === "streaming" && status !== "streaming") {
+          completedStream = true;
           if (status === "ready" && !completionBlockedRef.current[conversationId]) {
             const completedAt = timing.turnCompletedAt ?? Date.now();
             const startedAt = timing.turnStartedAt ?? turnStartedAtRef.current[conversationId] ?? completedAt;
@@ -144,6 +172,8 @@ export function useSession() {
         }
         statusesRef.current[conversationId] = status;
       }
+      // Publish final text/timing before ready state can collapse or summarize it.
+      if (completedStream) messageStore.flush();
       setState(next);
     };
 
@@ -168,6 +198,7 @@ export function useSession() {
         completionBlockedRef.current[event.conversationId] = true;
         setErrors((current) => ({ ...current, [event.conversationId]: event.message }));
         setBuckets((current) => appendAssistantError(current, event.conversationId, event.message));
+        messageStore.flush();
         return;
       }
       if (event.type === "agents") {
@@ -218,8 +249,9 @@ export function useSession() {
       active = false;
       unsubscribe();
       unsubscribeQuestions();
+      messageStore.flush();
     };
-  }, [loadTranscript]);
+  }, [loadTranscript, messageStore, setAgentBuckets, setBuckets]);
 
   const send = useCallback(async (text: string, images?: ImageAttachment[]) => {
     const api = window.vela;
@@ -377,6 +409,7 @@ export function useSession() {
     const result = await api.rewindConversation(id, turnIndex);
     setState(result.state);
     const history = result.messages.map(toUiMessage);
+    setAgentHistory(current => ({ ...current, [id]: history }));
     completionBlockedRef.current[id] = false;
     delete turnStartedAtRef.current[id];
     delete statusesRef.current[id];
@@ -398,27 +431,6 @@ export function useSession() {
   }, []);
 
   const sendError = activeConversationId ? errors[activeConversationId] || null : null;
-  const messages = useMemo(() => {
-    const list = activeConversationId ? buckets[activeConversationId] ?? [] : [];
-    // 中止或模型空回复会在末尾留下没有内容的 assistant 块,渲染前裁掉。
-    const next = [...list];
-    while (next.length > 0) {
-      const last = next[next.length - 1];
-      if (
-        last.role === "assistant" &&
-        !last.text &&
-        !last.thinking &&
-        last.tools.length === 0 &&
-        (last.planIds?.length ?? 0) === 0
-      ) {
-        next.pop();
-      } else {
-        break;
-      }
-    }
-    return next;
-  }, [activeConversationId, buckets]);
-
   /** 按工具调用 id 找到对应的问题请求,消息流里的提问卡片用它判断是否可交互。 */
   const getQuestion = useCallback(
     (toolCallId: string): AskUserQuestionRequest | null => {
@@ -440,15 +452,6 @@ export function useSession() {
     }
   }, []);
 
-  /** 当前对话里某个 agent 的运行流；没有时返回空列表。 */
-  const getAgentMessages = useCallback(
-    (agentId: string | null): UiMessage[] => {
-      if (!agentId || !activeConversationId) return [];
-      return agentBuckets[activeConversationId]?.[agentId] ?? [];
-    },
-    [activeConversationId, agentBuckets],
-  );
-
   /** 右侧 Pane 首次展示某个 agent 时回填历史；已有实时流时跳过。 */
   const ensureAgentMessages = useCallback(
     (agentId: string) => {
@@ -467,7 +470,8 @@ export function useSession() {
   return {
     available: typeof window.vela !== "undefined",
     state,
-    messages,
+    messageStore,
+    agentHistory: activeConversationId ? agentHistory[activeConversationId] ?? emptyMessages : emptyMessages,
     conversations: state?.conversations ?? [],
     activeConversationId,
     agents: activeAgents,
@@ -482,7 +486,6 @@ export function useSession() {
         : null,
     getQuestion,
     replyQuestion,
-    getAgentMessages,
     ensureAgentMessages,
     send,
     edit,
@@ -708,7 +711,7 @@ function applyAgentToMessages(messages: UiMessage[], event: AgentRuntimeStreamEv
 
 function ensureAssistant(messages: UiMessage[], startedAt?: number): UiMessage[] {
   const last = messages[messages.length - 1];
-  if (last?.role === "assistant") return [...messages.slice(0, -1), { ...last, tools: [...last.tools] }];
+  if (last?.role === "assistant") return [...messages.slice(0, -1), { ...last }];
   return [
     ...messages,
     { id: crypto.randomUUID(), role: "assistant", text: "", thinking: "", tools: [], turnStartedAt: startedAt },
@@ -860,4 +863,15 @@ function appendToMessages(messages: UiMessage[], message: string): UiMessage[] {
   if (last.text.includes(message)) return next;
   last.text = last.text ? `${last.text}\n\n${message}` : message;
   return next;
+}
+
+/** Hide placeholder replies without reallocating completed history. */
+function trimEmptyAssistant(messages: UiMessage[]): UiMessage[] {
+  let end = messages.length;
+  while (end > 0) {
+    const last = messages[end - 1]!;
+    if (last.role !== "assistant" || last.text || last.thinking || last.tools.length || last.planIds?.length) break;
+    end -= 1;
+  }
+  return end === messages.length ? messages : messages.slice(0, end);
 }

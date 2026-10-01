@@ -10,10 +10,13 @@
 - 文档之间、文档与根 README 之间使用相对链接。
 - 与根 README 重复的内容只保留概览，细节放在本目录。
 
+需求文档存放于 `requirements/`，必须明确标注实现状态，并将当前实现与目标行为分开；未实现的级别不作为已实现功能的使用说明。
+
 ## 文档索引
 
 | 文档 | 受众 | 内容 |
 | --- | --- | --- |
+| [requirements/version-control.md](./requirements/version-control.md) | 产品与开发者 | 版本控制需求：Git/GH CLI 分工、Commit 与同步、提交关系图、PR、AI 文案辅助及验收标准；P0–P2 已实现，P3 尚未实现。 |
 | [plan-mode.md](./plan-mode.md) | 使用者 | Plan 模式的工作方式：规划流程、Plan Document、revision、批准与执行、只读限制和常见问题。 |
 | [plan-mode-architecture.md](./plan-mode-architecture.md) | 开发者 | Plan 模式的实现：数据模型、流式解析、运行时编排、持久化与迁移、界面状态和测试。 |
 | [motion-audit.md](./motion-audit.md) | 开发者 | 桌面端动效盘点：现有基建、各区域缺口、总优先级表、统一动效规范与落地批次。 |

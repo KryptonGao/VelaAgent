@@ -1,6 +1,6 @@
 import { uiStorage } from "../ui-storage";
 import type { AppLocale } from "@vela/shared";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import {
   ThinkingCompletionTracker,
   parseStoredSummaries,
@@ -19,8 +19,9 @@ export interface ThinkingSummariesApi {
   request(messageId: string, text: string): void;
 }
 
-/** 已完成的总结落盘保存,窗口重开后按思考内容哈希恢复,不再退回“总结”按钮。 */
-const storageKey = "vela.thinkingSummaries.v1";
+/** 已完成的总结落盘保存,窗口重开后按思考内容哈希恢复,不再退回“总结”按钮。
+ * 键名带版本号:总结提示词改变口径后递增,避免旧的错误总结继续命中缓存。 */
+const storageKey = "vela.thinkingSummaries.v2";
 
 function readStoredSummaries(): Record<string, ThinkingSummaryState> {
   try {
@@ -106,5 +107,5 @@ export function useThinkingSummaries({ conversationId, messages, streaming, mode
     return records[thinkingSummaryKey(conversationId, locale, digestFor(messageId, text))];
   }, [conversationId, locale, records, digestFor]);
 
-  return { enabled, style, get, request };
+  return useMemo(() => ({ enabled, style, get, request }), [enabled, style, get, request]);
 }

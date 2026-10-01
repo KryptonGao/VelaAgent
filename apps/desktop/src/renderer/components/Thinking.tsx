@@ -5,6 +5,7 @@ import { nextStreamFollow, releasesStreamFollow } from "./chat-scroll";
 import { localizeError, tr } from "../locale";
 import { thinkingSummaryLayout } from "../thinking-summary";
 import { ThinkingSummaryContext } from "./ThinkingSummaryContext";
+import { ThinkingEdgeBlur } from "./ThinkingEdgeBlur";
 
 /** 思考进行中默认展开,思考结束(出现新工具、开始回复或回合结束)时自动折叠;任意长度都能手动开合。 */
 export function Thinking({
@@ -12,11 +13,13 @@ export function Thinking({
   messageId,
   active,
   showActivityIndicator,
+  contentEdgeBlur = false,
 }: {
   text: string;
   messageId?: string;
   active: boolean;
   showActivityIndicator: boolean;
+  contentEdgeBlur?: boolean;
 }) {
   const summaries = useContext(ThinkingSummaryContext);
   const summaryAvailable = !active && summaries?.enabled && messageId !== undefined;
@@ -28,6 +31,8 @@ export function Thinking({
   const [open, setOpen] = useState(active);
   const [revealed, setRevealed] = useState(active);
   const [fadeEdges, setFadeEdges] = useState({ top: false, bottom: false });
+  const [viewportHeight, setViewportHeight] = useState(280);
+  const edgeFilterId = `${bodyId}-edge-blur`;
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const prevActive = useRef(active);
@@ -40,6 +45,7 @@ export function Thinking({
     const element = scrollRef.current;
     if (!element) return;
     const maxScroll = element.scrollHeight - element.clientHeight;
+    if (contentEdgeBlur) setViewportHeight(element.clientHeight);
     const next = {
       top: element.scrollTop > 2,
       bottom: maxScroll > 2 && element.scrollTop < maxScroll - 2,
@@ -221,9 +227,11 @@ export function Thinking({
               ) : <p className="thinking-summary-failed">{localizeError(summary.error)}</p>}
             </aside>
           ) : null}
-          <div className="thinking-scroll-shell">
+          <div className={`thinking-scroll-shell${contentEdgeBlur ? " has-content-edge-blur" : ""}`}>
+            {contentEdgeBlur ? <ThinkingEdgeBlur id={edgeFilterId} {...fadeEdges} height={viewportHeight} /> : null}
             <div
               className="thinking-scroll-viewport"
+              style={contentEdgeBlur && (fadeEdges.top || fadeEdges.bottom) ? { filter: `url("#${edgeFilterId}")` } : undefined}
               ref={scrollRef}
               onScroll={handleScroll}
               onWheel={handleWheel}

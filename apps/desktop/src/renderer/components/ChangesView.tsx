@@ -15,6 +15,7 @@ const statusLetters: Record<GitFileStatus, string> = {
   deleted: "D",
   renamed: "R",
   untracked: "U",
+  conflicted: "C",
 };
 
 function statusLabel(status: GitFileStatus): string {
@@ -24,6 +25,7 @@ function statusLabel(status: GitFileStatus): string {
     deleted: ["删除", "Deleted"],
     renamed: ["重命名", "Renamed"],
     untracked: ["未跟踪", "Untracked"],
+    conflicted: ["冲突", "Conflicted"],
   };
   const [chinese, english] = labels[status];
   return tr(chinese, english);
@@ -98,7 +100,7 @@ export function ChangesView({
     }
   }, [initialPath, initialPathRequestKey, files]);
 
-  const selectedKey = selected ? `${selected.status}-${selected.path}-${selected.staged}` : "";
+  const selectedKey = selected ? `${selected.status}-${selected.path}-${selected.indexStatus ?? ""}-${selected.worktreeStatus ?? ""}` : "";
   const diff = diffResult?.key === selectedKey ? diffResult.text : "";
   const diffLoading = Boolean(selected) && diffResult?.key !== selectedKey;
   const fileDiff = project.fileDiff;
@@ -110,7 +112,9 @@ export function ChangesView({
       return;
     }
     let active = true;
-    void fileDiff(selected.path, selected.staged)
+    // 同一文件同时有两部分改动时,快速面板展示工作区改动(索引内容在版本控制页)。
+    const scope = selected.worktreeStatus ? "worktree" : "index";
+    void fileDiff(selected.path, scope)
       .then((text) => {
         if (active) setDiffResult({ key: selectedKey, text });
       })
@@ -158,8 +162,6 @@ export function ChangesView({
 
   if (!git?.repo) return null;
 
-  const stagedFiles = files.filter((file) => file.staged);
-
   return (
       <div
         ref={contentRef}
@@ -180,8 +182,8 @@ export function ChangesView({
             <button
               type="button"
               className="changes-action"
-              disabled={stagedFiles.length === files.length || files.length === 0}
-              onClick={() => void project.stageFiles(files.filter((f) => !f.staged).map((f) => f.path))}
+              disabled={files.every((file) => file.indexStatus !== null) || files.length === 0}
+              onClick={() => void project.stageFiles(files.filter((f) => f.worktreeStatus !== null).map((f) => f.path))}
             >
               {tr("全部暂存", "Stage all")}
             </button>
@@ -201,7 +203,7 @@ export function ChangesView({
                   setConfirmDiscard(null);
                 }}
                 onToggleStage={() => {
-                  if (file.staged) void project.unstageFiles([file.path]);
+                  if (file.indexStatus !== null && file.worktreeStatus === null) void project.unstageFiles([file.path]);
                   else void project.stageFiles([file.path]);
                 }}
                 onDiscard={() => {
@@ -351,16 +353,16 @@ function FileRow({
         </span>
         {directory ? <span className="changes-file-dir">{directory}</span> : null}
       </div>
-      {file.staged ? <span className="changes-staged-tag">{tr("已暂存", "Staged")}</span> : null}
+      {file.indexStatus !== null ? <span className="changes-staged-tag">{tr("已暂存", "Staged")}</span> : null}
       <div className="changes-file-actions" onClick={(event) => event.stopPropagation()}>
         <button
           type="button"
           className="changes-file-btn"
-          title={file.staged ? tr("取消暂存", "Unstage") : tr("暂存", "Stage")}
-          aria-label={file.staged ? `${tr("取消暂存", "Unstage")} ${name}` : `${tr("暂存", "Stage")} ${name}`}
+          title={file.indexStatus !== null && file.worktreeStatus === null ? tr("取消暂存", "Unstage") : tr("暂存", "Stage")}
+          aria-label={file.indexStatus !== null && file.worktreeStatus === null ? `${tr("取消暂存", "Unstage")} ${name}` : `${tr("暂存", "Stage")} ${name}`}
           onClick={onToggleStage}
         >
-          {file.staged ? "−" : "+"}
+          {file.indexStatus !== null && file.worktreeStatus === null ? "−" : "+"}
         </button>
         <button type="button" className="changes-file-btn" title={tr("用默认应用打开", "Open with default app")} aria-label={`${tr("打开", "Open")} ${name}`} onClick={onOpen}>
           <ExternalIcon size={12} />

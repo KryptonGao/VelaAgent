@@ -105,6 +105,19 @@ describe("子代理运行流 reducer", () => {
     ]);
   });
 
+  it("文本片段保留历史消息和未变化工具的引用", () => {
+    let buckets: AgentMessageBuckets = {};
+    buckets = applyAgentStreamEvent(buckets, "conv-1", "a1", { type: "user_message", text: "任务" });
+    buckets = applyAgentStreamEvent(buckets, "conv-1", "a1", { type: "tool_start", toolCallId: "t", toolName: "read", activity: { path: "file.ts" } });
+    const before = buckets["conv-1"]!["a1"]!;
+    buckets = applyAgentStreamEvent(buckets, "conv-1", "a1", { type: "text_delta", delta: "输出" });
+    const after = buckets["conv-1"]!["a1"]!;
+    assert.equal(after[0], before[0]);
+    assert.notEqual(after[1], before[1]);
+    assert.equal(after[1]!.tools, before[1]!.tools);
+    assert.equal(before[1]!.text, "");
+  });
+
   it("assistant_start 会另起一块，不同 agent 互不串流", () => {
     let buckets: AgentMessageBuckets = {};
     buckets = applyAgentStreamEvent(buckets, "conv-1", "a1", { type: "assistant_start" });

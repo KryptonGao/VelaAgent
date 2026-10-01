@@ -1898,6 +1898,12 @@ code,
   backdrop-filter: blur(3px);
 }
 .thinking-scroll-fade.is-visible { opacity: 1; }
+.thinking-edge-filter { position: absolute; pointer-events: none; }
+.thinking-scroll-shell.has-content-edge-blur > .thinking-scroll-fade {
+  /* 模糊已由视口滤镜完成,这里只保留边缘背景的渐变淡出。 */
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
 .thinking-scroll-fade-top {
   top: 0;
   background: linear-gradient(
@@ -7692,17 +7698,7 @@ button.turn-changes-path:hover { color: var(--accent-blue); }
 /* 按需悬浮信息:卡片属于对话区域，固定右栏完全卸载。 */
 .floating-environment,
 .context-usage-popover {
-  /* 白色信息卡独立于窗口主题，保持实色表面与清晰文字。 */
-  color-scheme: light;
-  --bg-card-surface: #ffffff;
-  --bg-elevated: #ffffff;
-  --bg-surface-subtle: #f7f7f8;
-  --border-subtle: rgba(25, 28, 33, 0.09);
-  --text-primary: #202124;
-  --text-secondary: #484b50;
-  --text-muted: #686d75;
-  --text-dim: #a1a6ad;
-  --shadow-dock: 0 8px 24px rgba(20, 20, 20, 0.075), 0 1px 3px rgba(20, 20, 20, 0.035);
+  /* 跟随当前窗口主题，深色基底不再固定为白底卡片。 */
   color: var(--text-primary);
   background: var(--bg-card-surface);
 }

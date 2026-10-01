@@ -1,6 +1,8 @@
 import type {
   BranchSummary,
   ExecutionEnvironment,
+  GitChangeScope,
+  GitDiffOptions,
   GitStatusSnapshot,
   PullRequestInfo,
   SandboxApprovalRequest,
@@ -21,7 +23,7 @@ function getApi(): VelaApi {
 }
 
 /** Electron 把 IPC 错误包装成 "Error invoking remote method 'channel': Error: 原始消息",只展示可读部分。 */
-function cleanErrorMessage(error: unknown): string {
+export function cleanErrorMessage(error: unknown): string {
   const raw = error instanceof Error ? error.message : "";
   const readable = raw
     .replace(/^Error invoking remote method '[^']+':\s*/i, "")
@@ -177,9 +179,9 @@ export function useProject() {
     [guarded, loadGit],
   );
   const discardFiles = useCallback(
-    (paths: string[]) =>
+    (paths: string[], options?: { untracked?: boolean }) =>
       guarded(async () => {
-        await getApi().discardFiles(paths);
+        await getApi().discardFiles(paths, options);
         await loadGit(false);
       }),
     [guarded, loadGit],
@@ -189,9 +191,15 @@ export function useProject() {
     [guarded],
   );
   const fileDiff = useCallback(
-    (path: string, staged: boolean) => getApi().getFileDiff(path, staged),
+    (path: string, scope: GitChangeScope, options?: GitDiffOptions) =>
+      getApi().getFileDiff(path, scope, options),
     [],
   );
+  /** 分支重命名/删除或远程变化后重新读取分支列表。 */
+  const refreshBranches = useCallback(async () => {
+    if (!window.vela) return;
+    setBranches(await window.vela.listBranches().catch(() => []));
+  }, []);
 
   const refreshPullRequest = useCallback(
     () => guarded(async () => setPr(await getApi().getPullRequest())),
@@ -244,6 +252,7 @@ export function useProject() {
     discardFiles,
     openFile,
     fileDiff,
+    refreshBranches,
     refreshPullRequest,
     openPullRequest,
     createPullRequest,

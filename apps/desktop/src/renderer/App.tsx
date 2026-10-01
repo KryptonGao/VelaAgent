@@ -2,7 +2,7 @@ import { uiStorage } from "./ui-storage";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentInfo } from "@vela/shared";
 import { AgentWorkspaceProvider } from "./components/AgentPanel";
-import { ChatView } from "./components/ChatView";
+import { SessionChatView } from "./components/SessionChatView";
 import { ContextPanel } from "./components/ContextPanel";
 import { FileIconThemeProvider } from "./components/FileTypeIcon";
 import { OnboardingView } from "./components/OnboardingView";
@@ -21,7 +21,6 @@ import { isBoolean, useStoredState } from "./hooks/useStoredState";
 import { useProject } from "./hooks/useProject";
 import { useSession, type UiMessage } from "./hooks/useSession";
 import { useSidebarResize } from "./hooks/useSidebarResize";
-import { useThinkingSummaries } from "./hooks/useThinkingSummaries";
 import {
   emptyPlanDocumentState,
   planDocumentReducer,
@@ -96,22 +95,13 @@ function findAgentInMessages(messages: UiMessage[], agentId: string): AgentInfo 
 export function App() {
   const session = useSession();
   const [renamingConversation, setRenamingConversation] = useState<{ id: string; title: string } | null>(null);
-  const openRenameConversation = (id: string) => {
+  const openRenameConversation = useCallback((id: string) => {
     const conversation = session.conversations.find(item => item.id === id);
     if (conversation) setRenamingConversation({ id, title: conversation.title });
-  };
+  }, [session.conversations]);
   const models = useModels(session.setAppState);
   const project = useProject();
   const preferences = usePreferences();
-  const thinkingSummaries = useThinkingSummaries({
-    conversationId: session.state?.activeConversationId ?? null,
-    messages: session.messages,
-    streaming: session.state?.session.status === "streaming",
-    modelReady: session.state?.session.modelReady ?? false,
-    enabled: preferences.thinkingSummary,
-    style: preferences.thinkingSummaryStyle,
-    locale: preferences.locale,
-  });
   setActiveLocale(preferences.locale);
   const [leftCollapsed, setLeftCollapsed] = useStoredState("vela.leftCollapsed", false, isBoolean);
   // Keep the conversation as the default focus; open the inspector when a tool
@@ -152,6 +142,9 @@ export function App() {
   const [onboardingComplete, setOnboardingComplete] = useState(readOnboardingComplete);
   const [onboardingStep, setOnboardingStep] = useState(readOnboardingStep);
   const platform = window.vela?.platform ?? "darwin";
+  const toggleLeft = useCallback(() => setLeftCollapsed(value => !value), [setLeftCollapsed]);
+  const replyQuestion = useCallback((id: string, answer: string | null) => { void session.replyQuestion(id, answer); }, [session.replyQuestion]);
+  const branchTurn = useCallback((index: number) => { void session.branch(index); }, [session.branch]);
   const dispatchPlanDocument = useCallback((action: PlanDocumentAction) => {
     setPlanDocuments((current) => ({
       ...current,
@@ -164,16 +157,16 @@ export function App() {
     for (const agent of session.agents) {
       if (agent.kind !== "root") byId.set(agent.id, agent);
     }
-    for (const message of session.messages) {
+    for (const message of session.agentHistory) {
       for (const tool of message.tools) {
         const id = tool.activity?.agentId;
         if (!id || byId.has(id)) continue;
-        const restored = findAgentInMessages(session.messages, id);
+        const restored = findAgentInMessages(session.agentHistory, id);
         if (restored) byId.set(id, restored);
       }
     }
     return [...byId.values()];
-  }, [session.agents, session.messages]);
+  }, [session.agents, session.agentHistory]);
 
   const openPlan = useCallback((planId: string) => {
     dispatchPlanDocument({ type: "open", planId });
@@ -377,6 +370,8 @@ export function App() {
     setSelectedChangePaths(adopt);
   }, [workspaceKey]);
 
+  const openAllChanges = useCallback(() => openChanges(), [openChanges]);
+
   const closeActiveAgent = useCallback(() => {
     if (activeWorkbenchTab?.kind === "agent") {
       setDismissedAgentsByConversation((current) => ({
@@ -565,13 +560,13 @@ export function App() {
                         openAgent={openAgentPane}
                         closeAgent={closeActiveAgent}
                       >
-                        <ChatView
-                          messages={session.messages}
+                        <SessionChatView
+                          messageStore={session.messageStore}
                           state={session.state}
                           sendError={session.sendError}
                           platform={platform}
                           leftCollapsed={leftCollapsed}
-                          onToggleLeft={() => setLeftCollapsed((value) => !value)}
+                          onToggleLeft={toggleLeft}
                           onRenameConversation={openRenameConversation}
                           rightCollapsed={floatingInfo ? environmentCollapsed : rightCollapsed}
                           onToggleRight={toggleInfo}
@@ -581,21 +576,24 @@ export function App() {
                           project={project}
                           toolDisplay={preferences.toolDisplay}
                           toolFold={preferences.toolFold}
-                          thinkingSummaries={thinkingSummaries}
+                          summaryEnabled={preferences.thinkingSummary}
+                          summaryStyle={preferences.thinkingSummaryStyle}
+                          locale={preferences.locale}
                           hiddenModels={preferences.hiddenModels}
                           onSend={session.send}
                           onEdit={session.edit}
                           onAbort={session.abort}
                           onMode={session.setMode}
                           models={models}
+                          question={session.question}
                           getQuestion={session.getQuestion}
-                          onReplyQuestion={(id, answer) => void session.replyQuestion(id, answer)}
-                          onBranch={(turnIndex) => void session.branch(turnIndex)}
+                          onReplyQuestion={replyQuestion}
+                          onBranch={branchTurn}
                           // 工作面板自己没开(没有标签页)时,或右侧栏收起时,顶栏补一个新建标签页入口;
                           // 工作面板和右侧栏都在时它自己标签栏里的 + 已经够用,不再重复。
                           showNewTab={workbenchTabs.length === 0 || !contextSidebarOpen}
                           onNewTab={openStartTab}
-                          onOpenChanges={() => openChanges()}
+                          onOpenChanges={openAllChanges}
                         />
                       </AgentWorkspaceProvider>
                       <WorkbenchPanel
@@ -618,7 +616,8 @@ export function App() {
                         }))}
                         onShowDiff={openChanges}
                         agents={allAgents}
-                        getAgentMessages={session.getAgentMessages}
+                        messageStore={session.messageStore}
+                        conversationId={session.activeConversationId}
                         toolDisplay={preferences.toolDisplay}
                         ensureAgentMessages={session.ensureAgentMessages}
                         onOpenAgent={openAgentPane}
@@ -639,7 +638,7 @@ export function App() {
                         onOpenPlan={openPlan}
                         onResumeGoal={() => void session.resumeGoal()}
                         changesActive={activeWorkbenchTab?.kind === "changes"}
-                        onOpenChanges={() => openChanges()}
+                        onOpenChanges={openAllChanges}
                       /> : null}
                     </PlanDocumentProvider>
                   </Presence>

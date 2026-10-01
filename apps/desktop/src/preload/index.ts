@@ -4,6 +4,8 @@ import {
   type AppLocale,
   type AgentStreamEvent,
   type AppState,
+  type AiTextRequest,
+  type AiTextResult,
   type AskUserQuestionEvent,
   type AttachmentPickKind,
   type AuthMethodType,
@@ -11,12 +13,99 @@ import {
   type CustomModelInput,
   type ExecutionEnvironment,
   type FileAttachmentPayload,
+  type GitBranchDeleteInput,
+  type GitBranchDeleteResult,
+  type GitBranchDetail,
+  type GitBranchAtInput,
+  type GitBranchAtResult,
+  type GitChangeScope,
+  type GitCommitDetail,
+  type GitCommitInput,
+  type GitCommitResult,
+  type GitCommitSearchResult,
+  type GitCompareResult,
+  type GitConflictFile,
+  type GitConflictResolveInput,
+  type GitConflictResolveResult,
+  type GitDiffOptions,
+  type GitFetchResult,
+  type GitForcePushInput,
+  type GitForcePushPreview,
+  type GitForcePushResult,
+  type GitGraphQuery,
+  type GitGraphScope,
+  type GitGraphSlice,
+  type GitGuardState,
+  type GitHistoryOpInput,
+  type GitHistoryOpPreview,
+  type GitHistoryOpResult,
+  type GitHunkApplyInput,
+  type GitOperationControlAction,
+  type GitOperationControlResult,
+  type GitOperationQuery,
+  type GitOperationRecord,
+  type GitOperationSnapshot,
+  type GitPullInput,
+  type GitPullResult,
+  type GitPushInput,
+  type GitRecoveryPreview,
+  type GitRecoveryPreviewInput,
+  type GitRecoveryResult,
+  type GitReflogQuery,
+  type GitReflogSnapshot,
+  type GitReleaseCreateInput,
+  type GitReleaseCreateResult,
+  type GitReleaseListResult,
+  type GitReleaseNotesScope,
+  type GitRemoteChange,
+  type GitRemoteInput,
+  type GitRewriteInput,
+  type GitRewritePreview,
+  type GitRewritePreviewInput,
+  type GitRewriteResult,
+  type GitStashApplyInput,
+  type GitStashApplyResult,
+  type GitStashCreateInput,
+  type GitStashCreateResult,
+  type GitStashEntry,
   type GitStatusSnapshot,
+  type GitSyncResult,
+  type GitTagCreateInput,
+  type GitTagCreateResult,
+  type GitTagListResult,
+  type GitUndoCommitInput,
+  type GitUndoCommitResult,
+  type GitUpstreamInput,
+  type GitWorktreeCreateInput,
+  type GitWorktreeCreateResult,
+  type GitWorktreeInfo,
+  type GitWorktreePruneResult,
+  type GitWorktreeRemoveInput,
+  type GitWorktreeRemoveResult,
   type InteractionMode,
   type LoginResult,
   type ModelAuthEvent,
   type ModelCatalog,
   type OpenTarget,
+  type PrCloseInput,
+  type PrCloseResult,
+  type PrCommentInput,
+  type PrCompareScope,
+  type PrCreateInput,
+  type PrCreateResult,
+  type PrEditOptions,
+  type PrIssueLinkInput,
+  type PrMergeInput,
+  type PrMergePreview,
+  type PrMergeResult,
+  type PrReviewInput,
+  type PrReviewMutationResult,
+  type PrReviewThreadsResult,
+  type PrTemplateInfo,
+  type PrThreadResolveInput,
+  type PrThreadResolveResult,
+  type PrUpdateInput,
+  type PrUpdateResult,
   type PromptInput,
   type PullRequestInfo,
   type SandboxApprovalEvent,
@@ -119,15 +208,84 @@ const api: VelaApi = {
     ipcRenderer.invoke(IpcChannel.envSet, kind) as Promise<ExecutionEnvironment>,
   getGitStatus: () => ipcRenderer.invoke(IpcChannel.gitGetStatus) as Promise<GitStatusSnapshot | null>,
   listBranches: () => ipcRenderer.invoke(IpcChannel.gitListBranches) as Promise<BranchSummary[]>,
-  switchBranch: (name: string) =>
-    ipcRenderer.invoke(IpcChannel.gitSwitchBranch, name) as Promise<GitStatusSnapshot | null>,
-  createBranch: (name: string) =>
-    ipcRenderer.invoke(IpcChannel.gitCreateBranch, name) as Promise<GitStatusSnapshot | null>,
-  getFileDiff: (path: string, staged: boolean) =>
-    ipcRenderer.invoke(IpcChannel.gitFileDiff, path, staged) as Promise<string>,
+  switchBranch: (name: string, options?: { createTracking?: boolean }) =>
+    ipcRenderer.invoke(IpcChannel.gitSwitchBranch, name, options ?? null) as Promise<GitStatusSnapshot | null>,
+  createBranch: (name: string, startPoint?: string | null) =>
+    ipcRenderer.invoke(IpcChannel.gitCreateBranch, name, startPoint ?? null) as Promise<GitStatusSnapshot | null>,
+  getFileDiff: (path: string, scope: GitChangeScope, options?: GitDiffOptions) =>
+    ipcRenderer.invoke(IpcChannel.gitFileDiff, path, scope, options ?? null) as Promise<string>,
+  applyHunks: (input: GitHunkApplyInput) =>
+    ipcRenderer.invoke(IpcChannel.gitApplyHunks, input) as Promise<GitStatusSnapshot | null>,
+  undoLastCommit: (input: GitUndoCommitInput) =>
+    ipcRenderer.invoke(IpcChannel.gitUndoCommit, input) as Promise<GitUndoCommitResult>,
+  getBranchDetail: (name: string) =>
+    ipcRenderer.invoke(IpcChannel.gitBranchDetail, name) as Promise<GitBranchDetail>,
+  renameBranch: (name: string, nextName: string) =>
+    ipcRenderer.invoke(IpcChannel.gitRenameBranch, name, nextName) as Promise<GitStatusSnapshot | null>,
+  deleteBranch: (input: GitBranchDeleteInput) =>
+    ipcRenderer.invoke(IpcChannel.gitDeleteBranch, input) as Promise<GitBranchDeleteResult>,
+  compareRefs: (base: string, head: string, options?: GitDiffOptions) =>
+    ipcRenderer.invoke(IpcChannel.gitCompareRefs, base, head, options ?? null) as Promise<GitCompareResult>,
+  addRemote: (input: GitRemoteInput) =>
+    ipcRenderer.invoke(IpcChannel.gitRemoteAdd, input) as Promise<GitRemoteChange>,
+  setRemoteUrl: (name: string, url: string, pushUrl?: string | null) =>
+    ipcRenderer.invoke(IpcChannel.gitRemoteSetUrl, name, url, pushUrl ?? null) as Promise<GitRemoteChange>,
+  removeRemote: (name: string) =>
+    ipcRenderer.invoke(IpcChannel.gitRemoteRemove, name) as Promise<GitRemoteChange>,
+  renameRemote: (name: string, nextName: string) =>
+    ipcRenderer.invoke(IpcChannel.gitRemoteRename, name, nextName) as Promise<GitRemoteChange>,
+  setUpstream: (input: GitUpstreamInput) =>
+    ipcRenderer.invoke(IpcChannel.gitSetUpstream, input) as Promise<GitStatusSnapshot | null>,
+  getConflictFile: (path: string) =>
+    ipcRenderer.invoke(IpcChannel.gitConflictFile, path) as Promise<GitConflictFile>,
+  resolveConflict: (input: GitConflictResolveInput) =>
+    ipcRenderer.invoke(IpcChannel.gitConflictResolve, input) as Promise<GitConflictResolveResult>,
+  controlGitOperation: (action: GitOperationControlAction) =>
+    ipcRenderer.invoke(IpcChannel.gitOperationControl, action) as Promise<GitOperationControlResult>,
+  listStashes: () => ipcRenderer.invoke(IpcChannel.gitStashList) as Promise<GitStashEntry[]>,
+  createStash: (input: GitStashCreateInput) =>
+    ipcRenderer.invoke(IpcChannel.gitStashCreate, input) as Promise<GitStashCreateResult>,
+  applyStash: (input: GitStashApplyInput) =>
+    ipcRenderer.invoke(IpcChannel.gitStashApply, input) as Promise<GitStashApplyResult>,
+  dropStash: (id: string) =>
+    ipcRenderer.invoke(IpcChannel.gitStashDrop, id) as Promise<{ ok: boolean; message: string; stashes: GitStashEntry[] }>,
+  getStashDiff: (id: string) =>
+    ipcRenderer.invoke(IpcChannel.gitStashDiff, id) as Promise<string>,
+  listWorktrees: () => ipcRenderer.invoke(IpcChannel.gitWorktreeList) as Promise<GitWorktreeInfo[]>,
+  createWorktree: (input: GitWorktreeCreateInput) =>
+    ipcRenderer.invoke(IpcChannel.gitWorktreeCreate, input) as Promise<GitWorktreeCreateResult>,
+  removeWorktree: (input: GitWorktreeRemoveInput) =>
+    ipcRenderer.invoke(IpcChannel.gitWorktreeRemove, input) as Promise<GitWorktreeRemoveResult>,
+  pruneWorktrees: () => ipcRenderer.invoke(IpcChannel.gitWorktreePrune) as Promise<GitWorktreePruneResult>,
+  getStagedDiff: () => ipcRenderer.invoke(IpcChannel.gitStagedDiff) as Promise<string>,
+  setGitIdentity: (name: string, email: string) =>
+    ipcRenderer.invoke(IpcChannel.gitSetIdentity, name, email) as Promise<void>,
   stageFiles: (paths: string[]) => ipcRenderer.invoke(IpcChannel.gitStage, paths) as Promise<GitStatusSnapshot | null>,
   unstageFiles: (paths: string[]) => ipcRenderer.invoke(IpcChannel.gitUnstage, paths) as Promise<GitStatusSnapshot | null>,
-  discardFiles: (paths: string[]) => ipcRenderer.invoke(IpcChannel.gitDiscard, paths) as Promise<GitStatusSnapshot | null>,
+  discardFiles: (paths: string[], options?: { untracked?: boolean }) =>
+    ipcRenderer.invoke(IpcChannel.gitDiscard, paths, options ?? null) as Promise<GitStatusSnapshot | null>,
+  commit: (input: GitCommitInput) => ipcRenderer.invoke(IpcChannel.gitCommit, input) as Promise<GitCommitResult>,
+  getGitGuard: () => ipcRenderer.invoke(IpcChannel.gitGuard) as Promise<GitGuardState>,
+  fetchRemote: (remote?: string | null) =>
+    ipcRenderer.invoke(IpcChannel.gitFetch, remote ?? null) as Promise<GitFetchResult>,
+  pullLatest: () => ipcRenderer.invoke(IpcChannel.gitPull) as Promise<GitPullResult>,
+  pushBranch: (input: GitPushInput) => ipcRenderer.invoke(IpcChannel.gitPush, input) as Promise<GitSyncResult>,
+  commitAndPush: (input: GitCommitInput, target: GitPushInput) =>
+    ipcRenderer.invoke(IpcChannel.gitCommitAndPush, input, target) as Promise<{ commit: GitCommitResult; push: GitSyncResult | null }>,
+  getCommitGraph: (query: GitGraphQuery) =>
+    ipcRenderer.invoke(IpcChannel.gitGraph, query) as Promise<GitGraphSlice>,
+  getCommitDetail: (sha: string, parentSha?: string | null, options?: GitDiffOptions) =>
+    ipcRenderer.invoke(IpcChannel.gitCommitDetail, sha, parentSha ?? null, options ?? null) as Promise<GitCommitDetail>,
+  searchCommits: (query: string, scope: GitGraphScope, limit?: number) =>
+    ipcRenderer.invoke(IpcChannel.gitSearchCommits, query, scope, limit ?? 100) as Promise<GitCommitSearchResult>,
+  getOperationRecords: (query?: GitOperationQuery) =>
+    ipcRenderer.invoke(IpcChannel.gitOperations, query ?? null) as Promise<GitOperationSnapshot>,
+  refreshOperation: (id: string) =>
+    ipcRenderer.invoke(IpcChannel.gitOperationRefresh, id) as Promise<GitOperationRecord | null>,
+  generateTextAssist: (input: AiTextRequest) =>
+    ipcRenderer.invoke(IpcChannel.aiText, input) as Promise<AiTextResult>,
+  cancelTextAssist: (requestId: string) =>
+    ipcRenderer.invoke(IpcChannel.aiTextCancel, requestId) as Promise<void>,
   openFile: (absolutePath: string) => ipcRenderer.invoke(IpcChannel.gitOpenFile, absolutePath) as Promise<void>,
   readWorkspaceFile: (path: string) =>
     ipcRenderer.invoke(IpcChannel.workspaceFileRead, path) as Promise<WorkspaceFileContent>,
@@ -135,6 +293,66 @@ const api: VelaApi = {
   searchWorkspaceCode: (query: string) =>
     ipcRenderer.invoke(IpcChannel.workspaceSearch, query) as Promise<WorkspaceSearchResult>,
   getPullRequest: () => ipcRenderer.invoke(IpcChannel.prGet) as Promise<PullRequestInfo>,
+  getPullRequestDetail: () => ipcRenderer.invoke(IpcChannel.prDetail) as Promise<PullRequestInfo>,
+  listPrTemplates: () => ipcRenderer.invoke(IpcChannel.prTemplates) as Promise<PrTemplateInfo[]>,
+  getPrScope: (base: string, head?: string | null) =>
+    ipcRenderer.invoke(IpcChannel.prScope, base, head ?? null) as Promise<PrCompareScope>,
+  createPullRequestNative: (input: PrCreateInput) =>
+    ipcRenderer.invoke(IpcChannel.prCreateNative, input) as Promise<PrCreateResult>,
+  updatePullRequest: (input: PrUpdateInput) =>
+    ipcRenderer.invoke(IpcChannel.prUpdate, input) as Promise<PrUpdateResult>,
+  markPullRequestReady: (number: number) =>
+    ipcRenderer.invoke(IpcChannel.prReady, number) as Promise<PrUpdateResult>,
+  linkPullRequestIssues: (input: PrIssueLinkInput) =>
+    ipcRenderer.invoke(IpcChannel.prLinkIssues, input) as Promise<PrUpdateResult>,
+  getPullRequestEditOptions: () =>
+    ipcRenderer.invoke(IpcChannel.prEditOptions) as Promise<PrEditOptions>,
+  getPullRequestReviewThreads: (number?: number | null) =>
+    ipcRenderer.invoke(IpcChannel.prReviewThreads, number ?? null) as Promise<PrReviewThreadsResult>,
+  commentPullRequest: (input: PrCommentInput) =>
+    ipcRenderer.invoke(IpcChannel.prComment, input) as Promise<PrReviewMutationResult>,
+  reviewPullRequest: (input: PrReviewInput) =>
+    ipcRenderer.invoke(IpcChannel.prReview, input) as Promise<PrReviewMutationResult>,
+  resolvePullRequestThread: (input: PrThreadResolveInput) =>
+    ipcRenderer.invoke(IpcChannel.prResolveThread, input) as Promise<PrThreadResolveResult>,
+  getPullRequestMergePreview: (number?: number | null) =>
+    ipcRenderer.invoke(IpcChannel.prMergePreview, number ?? null) as Promise<PrMergePreview>,
+  mergePullRequest: (input: PrMergeInput) =>
+    ipcRenderer.invoke(IpcChannel.prMerge, input) as Promise<PrMergeResult>,
+  closePullRequest: (input: PrCloseInput) =>
+    ipcRenderer.invoke(IpcChannel.prClose, input) as Promise<PrCloseResult>,
+  createBranchAt: (input: GitBranchAtInput) =>
+    ipcRenderer.invoke(IpcChannel.gitCreateBranchAt, input) as Promise<GitBranchAtResult>,
+  previewHistoryOp: (input: GitHistoryOpInput) =>
+    ipcRenderer.invoke(IpcChannel.gitHistoryOpPreview, input) as Promise<GitHistoryOpPreview>,
+  runHistoryOp: (input: GitHistoryOpInput) =>
+    ipcRenderer.invoke(IpcChannel.gitHistoryOp, input) as Promise<GitHistoryOpResult>,
+  previewRewrite: (input: GitRewritePreviewInput) =>
+    ipcRenderer.invoke(IpcChannel.gitRewritePreview, input) as Promise<GitRewritePreview>,
+  runRewrite: (input: GitRewriteInput) =>
+    ipcRenderer.invoke(IpcChannel.gitRewrite, input) as Promise<GitRewriteResult>,
+  getReflog: (query?: GitReflogQuery) =>
+    ipcRenderer.invoke(IpcChannel.gitReflog, query ?? null) as Promise<GitReflogSnapshot>,
+  previewRecovery: (input: GitRecoveryPreviewInput) =>
+    ipcRenderer.invoke(IpcChannel.gitRecoveryPreview, input) as Promise<GitRecoveryPreview>,
+  runRecovery: (input: GitRecoveryPreviewInput) =>
+    ipcRenderer.invoke(IpcChannel.gitRecovery, input) as Promise<GitRecoveryResult>,
+  pullWithStrategy: (input: GitPullInput) =>
+    ipcRenderer.invoke(IpcChannel.gitPullWithStrategy, input) as Promise<GitPullResult>,
+  previewForcePush: (remote: string, branch: string) =>
+    ipcRenderer.invoke(IpcChannel.gitForcePush, remote, branch) as Promise<GitForcePushPreview>,
+  forcePushBranch: (input: GitForcePushInput) =>
+    ipcRenderer.invoke(IpcChannel.gitForcePush, input) as Promise<GitForcePushResult>,
+  listTags: () => ipcRenderer.invoke(IpcChannel.gitTagList) as Promise<GitTagListResult>,
+  createTag: (input: GitTagCreateInput) =>
+    ipcRenderer.invoke(IpcChannel.gitTagCreate, input) as Promise<GitTagCreateResult>,
+  deleteTag: (name: string, remote?: string | null) =>
+    ipcRenderer.invoke(IpcChannel.gitTagDelete, name, remote ?? null) as Promise<GitTagCreateResult>,
+  listReleases: () => ipcRenderer.invoke(IpcChannel.gitReleaseList) as Promise<GitReleaseListResult>,
+  createRelease: (input: GitReleaseCreateInput) =>
+    ipcRenderer.invoke(IpcChannel.gitReleaseCreate, input) as Promise<GitReleaseCreateResult>,
+  getReleaseNotesScope: (baseTag: string | null, targetTag: string) =>
+    ipcRenderer.invoke(IpcChannel.gitReleaseScope, baseTag, targetTag) as Promise<GitReleaseNotesScope>,
   openPullRequest: (url: string) => ipcRenderer.invoke(IpcChannel.prOpen, url) as Promise<void>,
   createPullRequest: () => ipcRenderer.invoke(IpcChannel.prCreate) as Promise<void>,
   getSandboxMode: () => ipcRenderer.invoke(IpcChannel.sandboxGetMode) as Promise<SandboxMode>,

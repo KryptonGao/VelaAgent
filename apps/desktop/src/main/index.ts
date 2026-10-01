@@ -1,6 +1,7 @@
 import { AgentRuntime } from "@vela/agent";
 import {
   ExecutionEnvironmentManager,
+  GitOperationLog,
   GitService,
   PullRequestService,
   SandboxPermissionManager,
@@ -76,12 +77,34 @@ function createWindow(): BrowserWindow {
     // 测试钩子:VELA_CAPTURE=<路径> 时渲染稳定后截图退出。
     const capturePath = process.env.VELA_CAPTURE;
     if (capturePath) {
+      const captureView = process.env.VELA_CAPTURE_VIEW;
+      if (captureView) {
+        const [view, page] = captureView.split(":");
+        const tab = view === "trace" ? 1 : view === "version-control" ? 2 : 0;
+        const subTab = page === "history" ? 1 : page === "pr" ? 2 : page === "changes" ? 0 : -1;
+        setTimeout(() => {
+          void win.webContents
+            .executeJavaScript(`document.querySelectorAll('.conversation-view-tabs button')[${tab}]?.click()`)
+            .then(() => {
+              if (subTab < 0) return;
+              setTimeout(() => {
+                void win.webContents
+                  .executeJavaScript(`(() => { const buttons = document.querySelectorAll('.vc-subtabs button'); buttons[${subTab}]?.click(); return buttons.length; })()`)
+                  .then((count) => {
+                    if (process.env.VELA_DEBUG) console.log(`[vela] capture sub-tab ${subTab}, buttons=${String(count)}`);
+                  })
+                  .catch(() => undefined);
+              }, 400);
+            })
+            .catch(() => undefined);
+        }, 2500);
+      }
       setTimeout(() => {
         void win.webContents.capturePage().then((image) => {
           writeFileSync(capturePath, image.toPNG());
           app.quit();
         });
-      }, 3500);
+      }, 5000);
     }
   });
 
@@ -137,7 +160,9 @@ async function start(): Promise<void> {
 
   const workspaceManager = new WorkspaceManager(join(home, "workspaces.json"));
   const envManager = new ExecutionEnvironmentManager(fallbackCwd, join(home, "worktrees"));
-  const git = new GitService();
+  const git = new GitService({ worktreeRoot: join(home, "worktrees") });
+  const operations = new GitOperationLog(join(home, "git-operations.json"));
+  await operations.init();
   const files = new WorkspaceFileService();
   const pr = new PullRequestService(
     () => git.getSnapshot(),
@@ -170,6 +195,7 @@ async function start(): Promise<void> {
     sandbox,
     env: envManager,
     runtime,
+    operations,
     fallbackCwd,
   });
   project.register();

@@ -1,8 +1,11 @@
 import type { AgentInfo } from "@vela/shared";
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { useDismissable } from "../hooks/useDismissable";
 import { useEntryArrival } from "../hooks/useEntryArrival";
 import type { ToolDisplay } from "../hooks/usePreferences";
+import { useFrameTask } from "../hooks/useFrameTask";
+import { emptyMessages, type MessageStore } from "../hooks/message-store";
+import { useMessages } from "../hooks/useMessages";
 import type { UiMessage } from "../hooks/useSession";
 import { tr } from "../locale";
 import { ActivityIndicator } from "./ActivityIndicator";
@@ -15,9 +18,11 @@ import { BranchIcon } from "./icons";
 interface AgentPaneProps {
   agent: AgentInfo;
   agents: readonly AgentInfo[];
-  messages: UiMessage[];
+  messages?: UiMessage[];
+  messageStore?: MessageStore;
+  conversationId?: string | null;
   toolDisplay?: ToolDisplay;
-  /** 宿主切换标签时隐藏但保持挂载，保留各 agent 独立的跟随与滚动位置。 */
+  /** 隐藏时卸载内容与订阅，外壳保留滚动位置。 */
   visible?: boolean;
   onSwitch: (agentId: string) => void;
   /** 首次展示某个 agent 时回填历史消息。 */
@@ -28,67 +33,77 @@ interface AgentPaneProps {
  * 右侧 Agent Pane：展示选中子代理自己的完整运行流（消息、thinking、工具调用、
  * 状态与最终结论），主对话保持独立滚动互不影响。宽度由共享的拖拽条调整。
  */
-export function AgentPane({
-  agent,
-  agents,
-  messages,
-  toolDisplay,
-  visible = true,
-  onSwitch,
-  ensureMessages,
-}: AgentPaneProps) {
+type AgentFollow = { pinned: boolean; scrollTop: number };
+export function AgentPane(props: AgentPaneProps) {
+  const follow = useRef<AgentFollow>({ pinned: true, scrollTop: 0 });
+  const scope = JSON.stringify([props.conversationId, props.agent.id]);
+  const previousScope = useRef(scope);
+  if (previousScope.current !== scope) {
+    previousScope.current = scope;
+    follow.current = { pinned: true, scrollTop: 0 };
+  }
+  if (props.visible === false) return null;
+  return <VisibleAgentPane {...props} follow={follow} />;
+}
+
+function VisibleAgentPane({
+  agent, agents, messages: providedMessages, messageStore, conversationId = null,
+  toolDisplay, onSwitch, ensureMessages, follow,
+}: AgentPaneProps & { follow: MutableRefObject<AgentFollow> }) {
+  const storedMessages = useMessages(messageStore, conversationId, agent.id);
+  const messages = messageStore ? storedMessages : providedMessages ?? emptyMessages;
   const agentId = agent.id;
   const scrollRef = useRef<HTMLDivElement>(null);
-  /** agentId -> 滚动位置与是否贴底跟随；切换 agent 时各自恢复。 */
-  const followRef = useRef<Record<string, { pinned: boolean; scrollTop: number }>>({});
   const streaming = agent.status === "running";
-  const arrivalKeys = messages.flatMap((message) => [message.id,
+  const arrivalKeys = useMemo(() => messages.flatMap((message) => [message.id,
     ...(message.thinking ? [`${message.id}:thinking`] : []),
     ...(message.tools.length ? [`${message.id}:tools`] : []),
     ...(message.text ? [`${message.id}:text`] : []),
-  ]);
+  ]), [messages]);
 
   useEffect(() => {
     ensureMessages(agentId);
   }, [agentId, ensureMessages]);
 
-  // 切换 agent：恢复它自己的滚动位置；仍在贴底就继续跟随。
+  // Restore before painting; save on unmount so tab switching keeps the viewport.
+  const scheduleFollow = useFrameTask(() => {
+    const node = scrollRef.current;
+    if (node && follow.current.pinned) node.scrollTop = node.scrollHeight;
+  });
   useLayoutEffect(() => {
-    if (!visible) return;
     const node = scrollRef.current;
     if (!node) return;
-    const state = (followRef.current[agentId] ??= { pinned: true, scrollTop: 0 });
-    node.scrollTop = state.pinned
-      ? node.scrollHeight
-      : Math.min(state.scrollTop, Math.max(0, node.scrollHeight - node.clientHeight));
-  }, [agentId, visible]);
+    node.scrollTop = follow.current.pinned ? node.scrollHeight
+      : Math.min(follow.current.scrollTop, Math.max(0, node.scrollHeight - node.clientHeight));
+    const observer = new ResizeObserver(scheduleFollow);
+    const observeContent = () => { for (const child of node.children) observer.observe(child); };
+    observeContent();
+    const mutations = new MutationObserver(observeContent);
+    mutations.observe(node, { childList: true });
+    observer.observe(node);
+    return () => {
+      follow.current.scrollTop = node.scrollTop;
+      observer.disconnect();
+      mutations.disconnect();
+    };
+  }, [follow, scheduleFollow]);
 
-  // 内容更新（流式文本、工具步骤）：只有贴底时才跟随。
-  useLayoutEffect(() => {
-    const node = scrollRef.current;
-    if (!node) return;
-    const state = followRef.current[agentId];
-    if (state?.pinned) node.scrollTop = node.scrollHeight;
-  }, [agentId, messages]);
+  useLayoutEffect(scheduleFollow, [scheduleFollow, messages]);
 
   const onScroll = (): void => {
     const node = scrollRef.current;
     if (!node) return;
-    const state = (followRef.current[agentId] ??= { pinned: true, scrollTop: 0 });
     const distance = node.scrollHeight - node.scrollTop - node.clientHeight;
-    state.pinned = distance <= 32;
-    state.scrollTop = node.scrollTop;
+    follow.current.pinned = distance <= 32;
+    follow.current.scrollTop = node.scrollTop;
   };
 
-  const arrivalRef = useEntryArrival(agentId, arrivalKeys, 0);
+  const arrivalRef = useEntryArrival(agentId, arrivalKeys, 0, false);
   return (
     <section
       ref={arrivalRef}
       className="agent-pane"
       aria-label={`${tr("子代理", "Subagent")} ${agent.path}`}
-      aria-hidden={!visible}
-      inert={!visible ? true : undefined}
-      style={{ display: visible ? undefined : "none" }}
     >
       <header className="agent-pane-header">
         <div className="agent-pane-title">
@@ -252,7 +267,7 @@ function AgentRosterMenu({
   );
 }
 
-function AgentStreamMessage({
+const AgentStreamMessage = memo(function AgentStreamMessage({
   message,
   streaming,
   toolDisplay,
@@ -278,6 +293,7 @@ function AgentStreamMessage({
           text={message.thinking}
           active={thinkingActive}
           showActivityIndicator={thinkingActive && toolDisplay === "compact"}
+          contentEdgeBlur
         /></div>
       ) : null}
       {message.tools.length > 0 ? <div data-arrival-key={`${message.id}:tools`}><ToolList tools={message.tools} display={toolDisplay} /></div> : null}
@@ -288,4 +304,4 @@ function AgentStreamMessage({
       ) : null}
     </article>
   );
-}
+});

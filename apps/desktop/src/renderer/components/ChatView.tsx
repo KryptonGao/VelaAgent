@@ -1,6 +1,10 @@
+import { QuestionContext } from "./QuestionContext";
+import { LazyMount } from "./LazyMount";
+import { useFrameTask } from "../hooks/useFrameTask";
+import { VersionControlView } from "./version-control/VersionControlView";
 import { TraceView } from "./trace/TraceView";
-import type { AppState, InteractionMode } from "@vela/shared";
-import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import type { AppState, AskUserQuestionRequest, InteractionMode } from "@vela/shared";
+import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useAgentWorkspace } from "./AgentPanel";
 import { modKeyLabel } from "../platform";
 import { BranchIcon, CheckIcon, CopyIcon, FolderIcon, PlusIcon, StackIcon } from "./icons";
@@ -26,7 +30,7 @@ import { SkillToken } from "./composer/SkillMenu";
 import { parseSkillPrompt } from "./composer/skill-picker";
 import { useFilePreview } from "./preview/FilePreviewContext";
 import { nextStreamFollow, releasesStreamFollow, shouldResumeFollowForMessages } from "./chat-scroll";
-import { changesByFinalMessage, type TurnChanges } from "./turn-changes";
+import { summarizeTurnChanges, type TurnChanges } from "./turn-changes";
 import { chatLaneDefaultMaxWidth, planChatLane } from "../chat-lane";
 import { UserMessageFrame } from "./UserMessageFrame";
 import { ImageViewer, type ImageViewerRequest } from "./ImageViewer";
@@ -68,7 +72,7 @@ interface MessageTurn {
   assistants: UiMessage[];
 }
 
-function groupMessagesIntoTurns(messages: UiMessage[]): MessageTurn[] {
+function groupMessagesIntoTurns(messages: UiMessage[], previous: MessageTurn[]): MessageTurn[] {
   const turns: MessageTurn[] = [];
   let current: MessageTurn | null = null;
   for (const message of messages) {
@@ -83,7 +87,12 @@ function groupMessagesIntoTurns(messages: UiMessage[]): MessageTurn[] {
       current.assistants.push(message);
     }
   }
-  return turns;
+  const old = new Map(previous.map(turn => [turn.id, turn]));
+  return turns.map(turn => {
+    const before = old.get(turn.id);
+    return before && before.user === turn.user && before.assistants.length === turn.assistants.length &&
+      before.assistants.every((message, index) => message === turn.assistants[index]) ? before : turn;
+  });
 }
 
 function formatElapsedTime(startedAt: number | undefined, completedAt: number | undefined): string | null {
@@ -118,7 +127,7 @@ function TurnProgressHeader({ startedAt }: { startedAt: number }) {
   );
 }
 
-interface ChatViewProps {
+export interface ChatViewProps {
   messages: UiMessage[];
   state: AppState | null;
   sendError: string | null;
@@ -142,6 +151,7 @@ interface ChatViewProps {
   onAbort: () => Promise<void>;
   onMode: (mode: import("@vela/shared").InteractionMode) => void;
   models: ReturnType<typeof useModels>;
+  question?: AskUserQuestionRequest | null;
   getQuestion: QuestionLookup;
   onReplyQuestion: (id: string, answer: string | null) => void;
   /** 从某一轮回复处分支出新对话;参数是可见用户消息的序号。 */
@@ -175,6 +185,7 @@ export function ChatView({
   onAbort,
   onMode,
   models,
+  question = null,
   getQuestion,
   onReplyQuestion,
   onBranch,
@@ -182,13 +193,17 @@ export function ChatView({
   onNewTab,
   onOpenChanges,
 }: ChatViewProps) {
-  const [views, setViews] = useState<Record<string, "chat" | "trace">>({});
+  const [views, setViews] = useState<Record<string, "chat" | "trace" | "versionControl">>({});
+  const [vcMounted, setVcMounted] = useState(false);
   const [imageView, setImageView] = useState<ImageViewerRequest | null>(null);
   // 换会话时收起全屏查看器:里面是上一条对话的图片。
   useEffect(() => { setImageView(null); }, [state?.activeConversationId]);
   const viewKey = state?.activeConversationId ?? "empty";
   const view = views[viewKey] ?? "chat";
-  const setView = (next: "chat" | "trace") => setViews(current => ({ ...current, [viewKey]: next }));
+  const setView = (next: "chat" | "trace" | "versionControl") => {
+    if (next === "versionControl") setVcMounted(true);
+    setViews(current => ({ ...current, [viewKey]: next }));
+  };
   const pendingInteraction = Boolean(project.approval) || messages.some(message => message.tools.some(tool => getQuestion(tool.id)));
   const session = state?.session;
   const streaming = session?.status === "streaming";
@@ -206,6 +221,16 @@ export function ChatView({
     userMessageId: undefined,
   });
 
+  const scheduleLayout = useFrameTask(() => {
+    const scroller = scrollerRef.current;
+    const dock = dockRef.current;
+    const root = scroller?.parentElement;
+    if (!scroller || !dock || !root || view !== "chat") return;
+    const height = dock.getBoundingClientRect().height;
+    if (height > 0) root.style.setProperty("--composer-clearance", `${Math.ceil(height + 36)}px`);
+    if (followRef.current.pinned) scrollFollowToEnd(scroller, followRef.current);
+  });
+
   useLayoutEffect(() => {
     const scroller = scrollerRef.current;
     const dock = dockRef.current;
@@ -219,14 +244,6 @@ export function ChatView({
       scrollbarHideTimer = window.setTimeout(() => {
         scroller.classList.remove("is-scrolling");
       }, 800);
-    };
-
-    const syncClearance = () => {
-      const height = dock.getBoundingClientRect().height;
-      if (height < 1) return;
-      // 给输入框顶部的渐变遮罩留出空间,让滚动视口在输入框上方结束。
-      root.style.setProperty("--composer-clearance", `${Math.ceil(height + 36)}px`);
-      if (followRef.current.pinned) scrollFollowToEnd(scroller, followRef.current);
     };
 
     const onScroll = () => {
@@ -246,7 +263,7 @@ export function ChatView({
         previousScrollTop: follow.lastScrollTop,
         distanceFromBottom,
       });
-      if (!wasPinned && follow.pinned) scrollFollowToEnd(scroller, follow);
+      if (!wasPinned && follow.pinned) scheduleLayout();
       else follow.lastScrollTop = scrollTop;
     };
 
@@ -266,14 +283,12 @@ export function ChatView({
       touchY = y;
     };
 
-    syncClearance();
-    const observer = new ResizeObserver(syncClearance);
+    scheduleLayout();
+    const observer = new ResizeObserver(scheduleLayout);
     observer.observe(dock);
     // 展开思考或工具差异会改变消息高度,即使消息本身没有更新,贴底时也要跟随到底部,
     // 否则新增内容会被固定在底部的输入框挡住。
-    const contentObserver = new ResizeObserver(() => {
-      if (followRef.current.pinned) scrollFollowToEnd(scroller, followRef.current);
-    });
+    const contentObserver = new ResizeObserver(scheduleLayout);
     const observedContent = new Set<Element>();
     const syncObservedContent = () => {
       const content = new Set(Array.from(scroller.children));
@@ -309,7 +324,7 @@ export function ChatView({
       scroller.removeEventListener("touchmove", onTouchMove);
       root.style.removeProperty("--composer-clearance");
     };
-  }, []);
+  }, [scheduleLayout]);
 
   // 流式输出时只有贴着底部才跟随;用户向上滚之后保持当前位置。
   useLayoutEffect(() => {
@@ -329,8 +344,8 @@ export function ChatView({
     }
     follow.conversationId = conversationId;
     follow.userMessageId = userMessageId;
-    if (follow.pinned) scrollFollowToEnd(scroller, follow);
-  }, [messages, state?.activeConversationId]);
+    if (follow.pinned) scheduleLayout();
+  }, [messages, state?.activeConversationId, scheduleLayout, view]);
 
   const messageSurfaceKey = JSON.stringify([project.workspace?.current ?? null, state?.activeConversationId ?? null]);
   const messageSurfaceRef = useContentArrival(messageSurfaceKey, 180, 6);
@@ -402,11 +417,27 @@ export function ChatView({
     )[0];
     if (target) openAgent(target.id);
   };
-  const turnChanges = useMemo(
-    () => changesByFinalMessage(messages, streaming, project.workspace?.current ?? null),
-    [messages, streaming, project.workspace?.current],
-  );
-  const turns = useMemo(() => groupMessagesIntoTurns(messages), [messages]);
+  const previousTurns = useRef<MessageTurn[]>([]);
+  const turns = useMemo(() => groupMessagesIntoTurns(messages, previousTurns.current), [messages]);
+  useLayoutEffect(() => { previousTurns.current = turns; }, [turns]);
+  const changesCache = useRef(new Map<MessageTurn, { root: string | null; changes: TurnChanges | null }>());
+  const turnChanges = useMemo(() => {
+    const root = project.workspace?.current ?? null;
+    const cache = new Map<MessageTurn, { root: string | null; changes: TurnChanges | null }>();
+    const cards = new Map<string, TurnChanges>();
+    turns.forEach((turn, index) => {
+      if (streaming && index === turns.length - 1) return;
+      const old = changesCache.current.get(turn);
+      const entry = old?.root === root ? old : {
+        root, changes: summarizeTurnChanges(turn.assistants.flatMap(message => message.tools), root),
+      };
+      cache.set(turn, entry);
+      const last = turn.assistants.at(-1);
+      if (last && entry.changes) cards.set(last.id, entry.changes);
+    });
+    changesCache.current = cache;
+    return cards;
+  }, [turns, streaming, project.workspace?.current]);
   // 分支按轮次定位:数到回复所在轮的用户消息序号,与 runtime 重建的历史一致。
   const userOrdinalById = useMemo(() => {
     const ordinal = new Map<string, number>();
@@ -420,6 +451,7 @@ export function ChatView({
   }, [messages]);
 
   return (
+    <QuestionContext.Provider value={question}>
     <ThinkingSummaryContext.Provider value={thinkingSummaries ?? null}>
     <main className="main-chat-view" tabIndex={-1}>
       <header className="main-chat-header">
@@ -496,8 +528,18 @@ export function ChatView({
       <nav className="conversation-view-tabs" role="tablist" aria-label={tr("会话视图", "Conversation view")}>
         <button role="tab" aria-selected={view === "chat"} onClick={() => setView("chat")}>{tr("对话", "Conversation")}</button>
         <button role="tab" aria-selected={view === "trace"} onClick={() => setView("trace")}>{tr("轨迹", "Trace")}</button>
+        <button role="tab" aria-selected={view === "versionControl"} onClick={() => setView("versionControl")}>{tr("版本控制", "Version Control")}</button>
       </nav>
       {view === "trace" ? <TraceView key={viewKey} state={state} onConversation={() => setView("chat")} onAbort={onAbort} pendingInteraction={pendingInteraction} /> : null}
+      {vcMounted ? <VersionControlView
+        project={project}
+        session={session ?? null}
+        hidden={view !== "versionControl"}
+        pendingInteraction={pendingInteraction}
+        onOpenConversation={() => setView("chat")}
+        onAbort={onAbort}
+        onOpenFile={(absolutePath) => void project.openFile(absolutePath)}
+      /> : null}
       <div className="chat-conversation-pane" hidden={view !== "chat"} inert={view !== "chat" ? true : undefined}>
       {floatingInfo && !environmentCollapsed ? (
         <div className="floating-environment">
@@ -540,7 +582,7 @@ export function ChatView({
             return (
               <Fragment key={turn.id}>
                 {turn.user ? (
-                  <Message
+                  <UserTurnMessage
                     message={turn.user}
                     thinkingActive={false}
                     entering={entering.has(turn.user.id)}
@@ -551,7 +593,8 @@ export function ChatView({
                     onReplyQuestion={onReplyQuestion}
                     onOpenImage={setImageView}
                     editDisabled={session?.status !== "ready" || subagents.some(agent => agent.status === "running")}
-                    onEdit={onEdit && branchTurn !== null ? text => onEdit(branchTurn, text, turn.user?.images) : undefined}
+                    editTurn={branchTurn}
+                    onEditTurn={onEdit}
                   />
                 ) : null}
                 {canCollapse && finalReply && lastAssistant ? (
@@ -655,6 +698,7 @@ export function ChatView({
       {imageView ? <ImageViewer request={imageView} onClose={() => setImageView(null)} /> : null}
     </main>
     </ThinkingSummaryContext.Provider>
+    </QuestionContext.Provider>
   );
 }
 
@@ -712,7 +756,14 @@ function UserText({ text }: { text: string }) {
   );
 }
 
-function Message({
+const UserTurnMessage = memo(function UserTurnMessage({ editTurn, onEditTurn, ...props }:
+  Omit<Parameters<typeof Message>[0], "onEdit"> & { editTurn: number | null; onEditTurn?: ChatViewProps["onEdit"] }) {
+  const edit = useCallback((text: string) => onEditTurn!(editTurn!, text, props.message.images),
+    [onEditTurn, editTurn, props.message.images]);
+  return <Message {...props} onEdit={onEditTurn && editTurn !== null ? edit : undefined} />;
+});
+
+const Message = memo(function Message({
   message,
   thinkingActive,
   streaming = false,
@@ -805,7 +856,7 @@ function Message({
       />
     </article>
   );
-}
+});
 
 function AssistantMessageContent({
   message,
@@ -949,7 +1000,7 @@ function ToolSequence({
   return <>{output}</>;
 }
 
-function CompletedAssistantTurn({
+const CompletedAssistantTurn = memo(function CompletedAssistantTurn({
   messages,
   finalReply,
   elapsed,
@@ -1013,8 +1064,9 @@ function CompletedAssistantTurn({
         ) : (
           <span className="time-spent-trigger assistant-turn-trigger">{triggerContent}</span>
         )}
-        <div id={processId} className="time-spent-body" aria-hidden={!expanded}>
+        <div id={processId} className="time-spent-body" aria-hidden={!expanded} inert={!expanded}>
           <div className="time-spent-body-inner">
+            <LazyMount open={expanded}>{() => <>
             {toolFold === "position" ? (
               <article className="assistant-block assistant-turn-process-item">
                 <ToolSequence
@@ -1044,6 +1096,7 @@ function CompletedAssistantTurn({
                 </article>
               ))
             )}
+            </>}</LazyMount>
           </div>
         </div>
       </div>
@@ -1061,7 +1114,7 @@ function CompletedAssistantTurn({
       {changes ? <TurnChangesCard changes={changes} onOpenChanges={onOpenChanges} canManageChanges={canManageChanges} /> : null}
     </article>
   );
-}
+});
 
 /** 回复下方的操作行:左侧复制与分支,右侧显示回复完成的时间点。 */
 function ReplyActions({
