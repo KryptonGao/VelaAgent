@@ -1,4 +1,4 @@
-import type { TraceNode, TraceRequest, TraceSnapshot } from "@vela/shared";
+import type { TraceNode, TraceRequest, TraceSnapshot, TraceSummaryRequest } from "@vela/shared";
 export interface TraceState extends TraceSnapshot {
   requestVersions: Record<string, number>;
   resetVersion?: number;
@@ -7,6 +7,7 @@ export const emptyTrace: TraceState = {
   version: 0,
   nodes: [],
   requests: [],
+  summaries: [],
   warning: null,
   requestVersions: {},
 };
@@ -31,10 +32,18 @@ export function mergeTrace(
     version: Math.max(current.version, next.version),
     nodes: [...nodes.values()].sort((a, b) => a.sequence - b.sequence),
     requests: [...requests.values()].sort((a, b) => a.number - b.number),
+    summaries: mergeSummaries(current.summaries, next.summaries),
     requestVersions,
     resetVersion: current.resetVersion,
     warning: next.version >= current.version ? next.warning : current.warning,
   };
+}
+/** Summary usage records are append-only; incoming copies replace same-id entries. */
+function mergeSummaries(current: TraceSummaryRequest[], next: TraceSummaryRequest[]): TraceSummaryRequest[] {
+  if (next.length === 0) return current;
+  const summaries = new Map(current.map((summary) => [summary.id, summary]));
+  for (const summary of next) summaries.set(summary.id, summary);
+  return [...summaries.values()];
 }
 export type TimelineMode = "sequence" | "duration" | "turn" | "request";
 export interface TraceBar {
@@ -46,13 +55,13 @@ export interface TraceBar {
   lane: number;
   row: number;
 }
-/** Narrower bars collapse into unreadable squares, so every event keeps this width. */
+/** Nominal marker width; scales down with the timeline when fitting the viewport. */
 const minBarWidth = 10;
 const sequenceBarWidth = 36;
 const sequenceBarGap = 2;
 /**
- * `zoom` multiplies the horizontal scale. Insets and minimum bar widths scale
- * with it, so every mode stays proportional and can be compared across zooms.
+ * `zoom` multiplies the horizontal scale, starting at `viewportWidth` when given.
+ * Insets and minimum bar widths scale with it so fitting preserves proportions.
  */
 export function traceTimeline(
   nodes: TraceNode[],
@@ -60,9 +69,9 @@ export function traceTimeline(
   mode: TimelineMode,
   now: number,
   zoom = 1,
+  viewportWidth?: number,
 ) {
-  const scale = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
-  const barMin = minBarWidth * scale;
+  const magnification = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
   const responseByRequest = new Map<string, TraceNode[]>();
   for (const node of nodes) {
     if (
@@ -160,6 +169,25 @@ export function traceTimeline(
     ? times.reduce((max, t) => Math.max(max, t), -Infinity)
     : 1;
   const duration = Math.max(1, end - start);
+  const groups =
+    mode === "request"
+      ? Math.max(1, requests.length)
+      : nodes.reduce((max, n) => Math.max(max, n.turn), 1);
+  const naturalWidth = mode === "sequence"
+    ? Math.max(1, visible.length) * (sequenceBarWidth + sequenceBarGap)
+    : Math.max(
+        900,
+        mode === "duration"
+          ? Math.min(200000, Math.max(visible.length * 12, (duration / 1000) * 20))
+          : groups * 200,
+      );
+  const width = (
+    viewportWidth !== undefined && Number.isFinite(viewportWidth) && viewportWidth > 0
+      ? viewportWidth
+      : naturalWidth
+  ) * magnification;
+  const scale = width / naturalWidth;
+  const barMin = minBarWidth * scale;
   if (mode === "sequence") {
     // Equal event slots express recorded order, including prompt/input events.
     // They deliberately ignore elapsed time and concurrency; raw timings remain
@@ -181,21 +209,10 @@ export function traceTimeline(
     }));
     return {
       bars,
-      width: Math.max(1, bars.length) * pitch,
+      width,
       rows: [1, 1, 1], start, duration, groups: Math.max(1, bars.length),
     };
   }
-  const groups =
-    mode === "request"
-      ? Math.max(1, requests.length)
-      : nodes.reduce((max, n) => Math.max(max, n.turn), 1);
-  const width =
-    Math.max(
-      900,
-      mode === "duration"
-        ? Math.min(200000, Math.max(visible.length * 12, (duration / 1000) * 20))
-        : groups * 200,
-    ) * scale;
   const bounds = new Map<number, { start: number; end: number }>();
   const groupOf = (n: TraceNode) =>
     mode === "turn"

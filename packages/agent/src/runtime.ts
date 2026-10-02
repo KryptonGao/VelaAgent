@@ -1,6 +1,6 @@
 import { TurnCheckpoints, type TurnCheckpoint } from "./turn-checkpoints";
 import { TraceRecorder } from "./trace";
-import type { TraceUpdate } from "@vela/shared";
+import type { TraceSummaryRequest, TraceUpdate } from "@vela/shared";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -294,6 +294,7 @@ export class AgentRuntime {
         id: entry.id,
         title: entry.snapshot.title,
         status: entry.snapshot.status,
+        messageCount: this.store.get(entry.id)?.messageCount ?? 0,
         cwd: entry.snapshot.cwd,
         createdAt: entry.createdAt,
         updatedAt: entry.updatedAt,
@@ -930,6 +931,12 @@ export class AgentRuntime {
     return this.trace(conversationId).snapshot();
   }
 
+  /** Trace bookkeeping must never block a summary; narrow test harnesses may omit the trace map. */
+  private recordSummaryUsage(conversationId: string, summary: Omit<TraceSummaryRequest, "id">): void {
+    if (!this.traces) return;
+    this.trace(conversationId).recordSummary(summary);
+  }
+
   getTraceDetails(conversationId: string, nodeId: string) {
     if (!this.conversations.has(conversationId)) throw new Error("对话不存在或已结束");
     return this.trace(conversationId).details(nodeId);
@@ -944,14 +951,18 @@ export class AgentRuntime {
     return transcriptFromProjection(manager.buildSessionProjection(), entry.plans, readTurnTimings(manager.getBranch()));
   }
 
-  /** 捕获指定对话当前选定的模型；独立调用，不进入 drive 或修改会话消息。 */
+  /** 使用指定总结模型或捕获对话当前模型；独立调用，不修改会话消息和模型选择。 */
   async summarizeThinking(input: ThinkingSummaryInput): Promise<string> {
     const entry = this.conversations.get(input.conversationId);
     if (!entry) throw new Error("对话不存在或已结束");
-    const model = entry.session?.model;
+    const chatModel = entry.session?.model;
+    const selection = input.model ? { ...input.model } : undefined;
     const directory = await this.readyDirectory();
+    const model = selection ? directory.requireAvailable(selection.provider, selection.id) : chatModel;
     if (!model || !directory.isAvailable(model)) throw new Error("先选择一个已登录或已配置密钥的模型");
-    return this.thinkingSummaries.generate(directory.runtime, model, input);
+    return this.thinkingSummaries.generate(directory.runtime, model, input, (request) => {
+      this.recordSummaryUsage(input.conversationId, request);
+    });
   }
 
   /**
@@ -1078,6 +1089,7 @@ export class AgentRuntime {
       for (const listener of this.authListeners) listener(event);
     });
     this.directory = directory;
+    directory.refreshCatalogFromNetwork();
     const active = this.activeConversation();
     if (active) this.syncFromSession(active);
   }

@@ -19,6 +19,8 @@ import {
 } from "./TraceInspector";
 
 const rowHeight = 30;
+// Reserve the lane labels (52px) and the right gutter (8px) outside the scale.
+const timelinePadding = 60;
 const zoomLabel = (zoom: number) =>
   `${Number.isInteger(zoom) ? zoom : zoom.toFixed(1)}×`;
 export function TraceView({
@@ -65,8 +67,11 @@ export function TraceView({
     [nodes],
   );
   const geometry = useMemo(
-    () => traceTimeline(trace.nodes, trace.requests, mode, now, zoom),
-    [trace.nodes, trace.requests, mode, now, zoom],
+    () => traceTimeline(
+      trace.nodes, trace.requests, mode, now, zoom,
+      Math.max(1, timelineWindow.width - timelinePadding),
+    ),
+    [trace.nodes, trace.requests, mode, now, zoom, timelineWindow.width],
   );
   const arrivalKeys = useMemo(() => [
     ...nodes.map((node) => `row:${node.id}`),
@@ -84,10 +89,12 @@ export function TraceView({
     const element = list.current,
       chart = timeline.current;
     if (!element || !chart) return;
-    const observer = new ResizeObserver(() => {
+    const measure = () => {
       setScroll((s) => ({ ...s, height: element.clientHeight }));
       setTimelineWindow({ left: chart.scrollLeft, width: chart.clientWidth });
-    });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
     observer.observe(element);
     observer.observe(chart);
     return () => observer.disconnect();
@@ -97,7 +104,10 @@ export function TraceView({
   useLayoutEffect(() => {
     const chart = timeline.current;
     if (!chart) return;
-    if (zoomAnchor.current !== null) {
+    if (zoom === 1) {
+      chart.scrollLeft = 0;
+      zoomAnchor.current = null;
+    } else if (zoomAnchor.current !== null) {
       chart.scrollLeft = Math.max(
         0,
         zoomAnchor.current * geometry.width - chart.clientWidth / 2,
@@ -258,8 +268,8 @@ export function TraceView({
             <button
               className="trace-scale-value"
               disabled={zoom === 1}
-              title={tr("重置比例尺", "Reset scale")}
-              aria-label={tr("重置比例尺", "Reset scale")}
+              title={tr("适应宽度，展示完整过程", "Fit width to show the full trace")}
+              aria-label={tr("适应宽度，展示完整过程", "Fit width to show the full trace")}
               onClick={() => applyZoom(1)}
             >
               {zoomLabel(zoom)}
@@ -312,11 +322,16 @@ export function TraceView({
       >
         <div
           className="trace-timeline-canvas"
-          style={{ width: geometry.width + 60 }}
+          style={{ width: geometry.width + timelinePadding }}
         >
           {mode !== "sequence" ? <div className="trace-ruler">
             {ticks.map((t, i) => (
-              <span key={i} style={{ left: t.x + 52 }}>
+              <span key={i} style={{
+                left: t.x + 52,
+                transform: mode === "duration" && i === ticks.length - 1
+                  ? "translateX(-100%)"
+                  : undefined,
+              }}>
                 {t.label}
               </span>
             ))}

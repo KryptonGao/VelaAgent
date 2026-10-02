@@ -110,6 +110,25 @@ export class ModelDirectory {
     return directory;
   }
 
+  /**
+   * 异步拉取 Pi 的远程模型目录（https://pi.dev/api/models/providers/<id>）。
+   * 不阻塞启动：先用内置快照 + 本地 models.json 让界面立即可用，拉到新模型后再通知界面重读。
+   * 只有已经配好凭据的提供方会真的发请求，结果缓存在 models-store.json，离线也能复用。
+   * 由宿主在订阅完事件后调用，避免刷新完成早于订阅时丢掉通知。
+   */
+  refreshCatalogFromNetwork(): void {
+    // PI_OFFLINE 是 Pi 的全局离线开关，设了就完全不联网。
+    if (process.env.PI_OFFLINE !== undefined) return;
+    void this.runtime
+      .refresh({ allowNetwork: true })
+      .then(() => {
+        this.emit({ type: "catalog" });
+      })
+      .catch(() => {
+        // 远程目录不可用时保留内置快照，不影响正常使用。
+      });
+  }
+
   subscribeAuth(listener: (event: ModelAuthEvent) => void): () => void {
     this.authListeners.add(listener);
     return () => {

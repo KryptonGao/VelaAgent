@@ -3,6 +3,7 @@ import { LazyMount } from "./LazyMount";
 import { useFrameTask } from "../hooks/useFrameTask";
 import { VersionControlView } from "./version-control/VersionControlView";
 import { TraceView } from "./trace/TraceView";
+import { UsageView } from "./usage/UsageView";
 import type { AppState, AskUserQuestionRequest, InteractionMode } from "@vela/shared";
 import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useAgentWorkspace } from "./AgentPanel";
@@ -35,6 +36,7 @@ import { useFilePreview } from "./preview/FilePreviewContext";
 import { nextStreamFollow, releasesStreamFollow, shouldResumeFollowForMessages } from "./chat-scroll";
 import { summarizeTurnChanges, type TurnChanges, type TurnReviewRequest } from "./turn-changes";
 import { chatLaneDefaultMaxWidth, planChatLane } from "../chat-lane";
+import { ConversationViewTabs, type ConversationViewKey } from "./ConversationViewTabs";
 import { UserMessageFrame } from "./UserMessageFrame";
 import { ImageViewer, type ImageViewerRequest } from "./ImageViewer";
 import { isEnglish, localizeError, tr } from "../locale";
@@ -202,14 +204,14 @@ export function ChatView({
   planDraft = null,
   onOpenPlan,
 }: ChatViewProps) {
-  const [views, setViews] = useState<Record<string, "chat" | "trace" | "versionControl">>({});
+  const [views, setViews] = useState<Record<string, ConversationViewKey>>({});
   const [vcMounted, setVcMounted] = useState(false);
   const [imageView, setImageView] = useState<ImageViewerRequest | null>(null);
   // 换会话时收起全屏查看器:里面是上一条对话的图片。
   useEffect(() => { setImageView(null); }, [state?.activeConversationId]);
   const viewKey = state?.activeConversationId ?? "empty";
   const view = views[viewKey] ?? "chat";
-  const setView = (next: "chat" | "trace" | "versionControl") => {
+  const setView = (next: ConversationViewKey) => {
     if (next === "versionControl") setVcMounted(true);
     setViews(current => ({ ...current, [viewKey]: next }));
   };
@@ -539,12 +541,9 @@ export function ChatView({
         </div>
       </header>
 
-      <nav className="conversation-view-tabs" role="tablist" aria-label={tr("会话视图", "Conversation view")}>
-        <button role="tab" aria-selected={view === "chat"} onClick={() => setView("chat")}>{tr("对话", "Conversation")}</button>
-        <button role="tab" aria-selected={view === "trace"} onClick={() => setView("trace")}>{tr("轨迹", "Trace")}</button>
-        <button role="tab" aria-selected={view === "versionControl"} onClick={() => setView("versionControl")}>{tr("版本控制", "Version Control")}</button>
-      </nav>
+      <ConversationViewTabs view={view} onChange={setView} />
       {view === "trace" ? <TraceView key={viewKey} state={state} onConversation={() => setView("chat")} onAbort={onAbort} pendingInteraction={pendingInteraction} /> : null}
+      {view === "usage" ? <UsageView key={viewKey} conversationId={state?.activeConversationId ?? null} providers={models.catalog?.providers ?? []} /> : null}
       {vcMounted ? <VersionControlView
         project={project}
         session={session ?? null}
@@ -698,6 +697,7 @@ export function ChatView({
         ref={dockRef}
         disabled={session?.status !== "ready" && session?.status !== "streaming"}
         streaming={Boolean(streaming)}
+        showSetupControls={messages.length === 0 && !streaming && (state?.context.turnCount ?? 0) === 0}
         model={session?.model}
         modelProvider={session?.modelProvider ?? null}
         modelId={session?.modelId ?? null}

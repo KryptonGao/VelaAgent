@@ -151,7 +151,7 @@ const api: VelaApi = {
     ipcRenderer.invoke(IpcChannel.sessionExecutePlan, conversationId ?? null, strategy ?? "continue") as Promise<AppState>,
   resumeGoal: (conversationId) =>
     ipcRenderer.invoke(IpcChannel.sessionResumeGoal, conversationId ?? null) as Promise<AppState>,
-  createConversation: () => ipcRenderer.invoke(IpcChannel.sessionCreate) as Promise<AppState>,
+  createConversation: (cwd?: string) => ipcRenderer.invoke(IpcChannel.sessionCreate, cwd) as Promise<AppState>,
   switchConversation: (id: string) =>
     ipcRenderer.invoke(IpcChannel.sessionSwitch, id) as Promise<AppState>,
   renameConversation: (id: string, title: string) =>
@@ -486,7 +486,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 function isModelEvent(value: unknown): value is ModelAuthEvent {
   if (!isRecord(value)) return false;
   const type = value.type;
-  return type === "notice" || type === "prompt" || type === "cleared";
+  return type === "notice" || type === "prompt" || type === "cleared" || type === "catalog";
 }
 
 function isStreamEvent(value: unknown): value is AgentStreamEvent {

@@ -29,6 +29,8 @@ import { localizeError, tr } from "../locale";
 export interface ComposerProps {
   disabled: boolean;
   streaming: boolean;
+  /** 工作区、执行环境和分支仅在当前聊天第一轮开始前显示。 */
+  showSetupControls: boolean;
   model: string | null | undefined;
   modelProvider: string | null;
   modelId: string | null;
@@ -52,6 +54,7 @@ export interface ComposerProps {
 export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Composer({
   disabled,
   streaming,
+  showSetupControls,
   model,
   modelProvider,
   modelId,
@@ -284,16 +287,22 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
       >
         <ApprovalSlot approval={project.approval} onReply={project.replyApproval} />
 
-        <div className="composer-status-bar">
-          <WorkspaceChip project={project} />
-          <EnvironmentChip project={project} />
-          <BranchChip project={project} />
-          {showError ? (
-            <span className="composer-status-notice" role="alert" title={showError}>
-              {showError}
-            </span>
-          ) : null}
-        </div>
+        {showSetupControls || showError ? (
+          <div className="composer-status-bar">
+            {showSetupControls ? (
+              <>
+                <WorkspaceChip project={project} />
+                <EnvironmentChip project={project} />
+                <BranchChip project={project} />
+              </>
+            ) : null}
+            {showError ? (
+              <span className="composer-status-notice" role="alert" title={showError}>
+                {showError}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
 
         <PopoverPresence present={menuOpen}>
           <div className="skill-menu-anchor" ref={menuRef}>

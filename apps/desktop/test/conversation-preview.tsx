@@ -30,11 +30,16 @@ const project = {
   workspace: { current: "/projects/VelaAgent", recents: [] }, approval: null, environment: null, environments: [],
   sandboxMode: "ask", git: null, openWorkspaceDialog: async () => {}, replyApproval() {}, listBranches: async () => [],
 } as unknown as ProjectApi;
+const now = Date.now();
 const initial: ConversationSummary[] = [
-  { id: "a", title: "更强的会话整理与检索", cwd: "/projects/VelaAgent", updatedAt: 5, archivedAt: null, status: "ready" },
-  { id: "b", title: "修复登录页面", cwd: "/projects/VelaAgent", updatedAt: 3, archivedAt: null, status: "streaming" },
-  { id: "c", title: "Release notes", cwd: "/projects/StudyPulse", updatedAt: 4, archivedAt: null, status: "ready" },
-  { id: "d", title: "已经归档的检索讨论", cwd: "/projects/VelaAgent", updatedAt: 6, archivedAt: 6, status: "ready" },
+  { id: "a", title: "更强的会话整理与检索", cwd: "/projects/VelaAgent", createdAt: now, updatedAt: now, archivedAt: null, status: "ready", turnCompletedAt: now },
+  { id: "b", title: "修复登录页面", cwd: "/projects/VelaAgent", createdAt: now, updatedAt: now - 60_000, archivedAt: null, status: "streaming" },
+  { id: "c", title: "Release notes", cwd: "/projects/StudyPulse", createdAt: now, updatedAt: now - 120_000, archivedAt: null, status: "ready" },
+  { id: "d", title: "已经归档的检索讨论", cwd: "/projects/VelaAgent", createdAt: now, updatedAt: now, archivedAt: now, status: "ready" },
+  { id: "waiting", title: "确认发布范围", cwd: "/projects/StudyPulse", createdAt: now, updatedAt: now - 180_000, archivedAt: null, status: "streaming" },
+  { id: "error", title: "检查构建失败", cwd: "/projects/VelaAgent", createdAt: now, updatedAt: now - 240_000, archivedAt: null, status: "error" },
+  { id: "yesterday", title: "评估 Windows x86 支持与安装流程", cwd: "C:\\projects\\Desktop", createdAt: now, updatedAt: now - 86_400_000, archivedAt: null, status: "ready" },
+  { id: "earlier", title: "优化 README", cwd: "/projects/VelaAgent", createdAt: now, updatedAt: now - 3 * 86_400_000, archivedAt: null, status: "ready" },
 ];
 function Fixture() {
   const [conversations, setConversations] = useState(initial);
@@ -54,7 +59,7 @@ function Fixture() {
   } as AppState;
   return <div className="vela-window platform-darwin right-collapsed" style={{ height: "100vh" }}>
     <Sidebar collapsed={false} platform="darwin" resize={{ widths: { left: 248, right: 300, workbench: 500 }, startResize() {}, nudge() {}, reset() {} }}
-      conversations={conversations} activeConversationId={activeId} settingsOpen={false} settingsLabel="设置"
+      conversations={conversations} waitingConversationIds={["waiting"]} activeConversationId={activeId} settingsOpen={false} settingsLabel="设置"
       onToggle={() => {}} onOpenSettings={() => {}} onNewChat={() => {}} onSwitchConversation={setActiveId}
       onArchiveConversation={id => setConversations(items => items.map(item => item.id === id ? { ...item, archivedAt: Date.now() } : item))}
       onRenameConversation={openRename} />

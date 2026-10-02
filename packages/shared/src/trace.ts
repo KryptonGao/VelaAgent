@@ -42,6 +42,16 @@ export interface TraceRequest {
   generationMs: number | null;
   usage: TraceUsage | null;
 }
+/** A standalone model request outside the turn flow, such as a thinking summary. */
+export interface TraceSummaryRequest {
+  id: string;
+  model: string;
+  status: "Completed" | "Failed";
+  startedAt: number | null;
+  completedAt: number | null;
+  durationMs: number | null;
+  usage: TraceUsage | null;
+}
 export interface TraceNode {
   id: string;
   sequence: number;
@@ -75,6 +85,7 @@ export interface TraceSnapshot {
   version: number;
   nodes: TraceNode[];
   requests: TraceRequest[];
+  summaries: TraceSummaryRequest[];
   warning: string | null;
 }
 export interface TraceUpdate extends TraceSnapshot {

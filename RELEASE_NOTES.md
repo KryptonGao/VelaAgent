@@ -1,32 +1,44 @@
-# Vela 0.1.2
+# Vela 0.1.3
 
-This release turns the inline "Review" toggle into a full change-review workspace and adds optional process durations and fold memory to compact tool rows. It also fixes plan attachment for plan-only turns and a plan-stream flush order that could drop the completed revision.
+This release adds a cross-workspace activity view and usage statistics, lets the thinking-summary model be chosen independently of the current chat, and keeps empty drafts out of the conversation list.
 
 ## New
 
-- **Turn change review**: the Review button on a turn's change summary now opens a dedicated workbench tab instead of expanding inline. The panel reads the edit records saved by that turn's tool calls, so the review is independent of later Git workspace edits.
-  - Split before/after diff with line numbers, grouped by file edit when a file was changed more than once.
-  - File tree sidebar with filter, per-file added/removed stats, collapsible directories, sticky file headers, and a highlight that follows scrolling.
-  - In a narrow panel the file list becomes an overlay drawer; `Esc` closes the drawer first and the tab second.
-  - The review snapshot is frozen when the button is clicked and is isolated per workspace and conversation.
-- **Process durations & fold memory** (Settings → Appearance, off by default): in compact tool display, each finished call shows its duration and the turn trigger shows the turn total, taken from the existing execution trace. Expanded or collapsed rows and tool groups are remembered per conversation across restarts. Chats with no recorded timing simply show no label; malformed or unavailable local storage falls back to in-memory state for the session.
+- **Activity view**: the sidebar now has an Activity / Workspaces switch and opens on Activity. It aggregates conversations across every workspace into Priority, Today, Yesterday, and Earlier groups, ordered by most recent activity within each group.
+  - Star a conversation to pin it to the Priority group; the mark survives restarts.
+  - Conversations waiting on you (questions or approvals), finishing with an error, or actively replying or starting are moved to the top with a Waiting answer / Error / Replying status label.
+- **Usage statistics** (Settings → Usage statistics): aggregates model requests and token usage across all conversations, archived ones included.
+  - Filter by provider and by range (all available history, 30 days, 7 days, or a custom start and end date), refresh manually, and see which dates are missing or failed to load.
+  - A daily activity heatmap covers the last year, darker for more requests, and expands to per-day request and token details.
+- **Per-conversation usage tab**: conversation tabs now include Usage statistics with the current chat's overview, per-model and per-provider usage, cache hit rate, coverage detail, and separate usage for the thinking-summary model.
+- **Separate thinking-summary model** (Settings → Appearance → Thinking summaries): default to the current chat's model or pick any configured model, including custom models from Models & accounts. The choice survives restarts and only affects newly generated summaries.
+- **New chat per workspace**: each workspace group in the sidebar has a new-chat button that creates the conversation in that workspace; without a workspace it still uses the current one.
+- **Shared sliding tab indicator**: the conversation tabs and the version-control tabs now use the same underline that slides between tabs and stretches on hover.
+- **Background model catalog refresh**: providers with configured credentials fetch the remote Pi model catalog in the background and update the model lists without a restart. `PI_OFFLINE` disables all network access.
 
 ## Improved
 
-- Plan cards now distinguish **Writing a plan** from **Plan submitted**, and show an explicit **Overview** heading above the summary.
-- The floating environment card shows the current plan with its title; clicking it opens the plan document. The plan preview is no longer capped at 560px.
-- Split diffs can display file line numbers, and omitted unchanged lines are labeled instead of appearing blank.
+- The execution trace always fits the timeline to the visible width, so a long trace no longer overflows horizontally. The scale control reads **Fit width, show the whole process**, and resetting zoom returns to the left edge and fits the width.
+- The workspace, environment, and branch chips appear only before the first turn starts and collapse once the conversation is under way; error notices are still shown. The composer's minimum height is larger.
+- New **Composer option backgrounds** appearance toggle (off by default) controls whether the attachment, chat mode, permissions, reasoning effort, and model controls get capsule backgrounds.
+- Tool durations moved to the right of the expand arrow and are right-aligned.
+- The sidebar scrollbar appears while scrolling and fades out about a second after you stop.
+- Expanding a file diff preview no longer collapses the tool group rail.
+- Code blocks and diffs wrap and can break anywhere, avoiding horizontal overflow at narrow widths.
+- Usage is counted more accurately: history copied into a branch is counted once, archived conversations are included in the settings totals, and missing usage is no longer shown as zero.
 
 ## Fixed
 
-- A turn whose only output is a plan no longer attaches that plan to the previous turn's reply; plan-only turns create their own assistant message, and an empty assistant block that already carries plan IDs is not reused.
-- Plan streaming now flushes and persists the final revision before clearing the pending stream, so the completed plan is emitted for tags that are unclosed, split across deltas, or completed normally. Stopping a turn still discards the unfinished draft.
-- The execution trace panel no longer briefly renders the previous chat's trace while switching conversations.
-- The workbench panel divider is no longer covered by the panel body background.
+- New conversations that have not sent a message no longer appear in the sidebar or search, even after creating several, renaming, or restarting. They are listed as soon as the first message is sent, including image-only messages, and branched conversations appear immediately because they already carry history.
+- A chosen thinking-summary model no longer follows the chat's model or changes the chat's model selection, and summaries can use the dedicated model even when the current chat has no available model.
+- Thinking-summary requests are recorded in usage statistics separately, with their own token usage, instead of being mixed with normal requests.
+- Added localized errors for an invalid thinking-summary model selection, and the summary button now describes using the configured summary model.
+- Fixed trace timeline rendering in narrow windows, where zoomed bars were squashed into squares or overflowed the container and ruler labels overflowed.
+- Unified the version-control sub-tab styling, which previously mixed a border with a background.
 
 ## Upgrade
 
-Quit Vela completely, replace the application with this version, and reopen it. Keep your existing `~/.vela` directory (or the directory specified by `VELA_USER_DATA`); no data reset is needed. Process durations and fold memory remain off until enabled in Settings → Appearance.
+Quit Vela completely, replace the application with this version, and reopen it. Keep your existing `~/.vela` directory (or the directory specified by `VELA_USER_DATA`); no data reset is needed. Usage statistics are computed from existing conversation data, and the thinking-summary model defaults to following the current chat.
 
 The macOS build is not notarized. If macOS blocks first launch, use **Open Anyway** in System Settings → Privacy & Security.
 
@@ -34,15 +46,16 @@ The macOS build is not notarized. If macOS blocks first launch, use **Open Anywa
 
 | File | Platform |
 | --- | --- |
-| `Vela-0.1.2-arm64.dmg` | macOS Apple Silicon installer |
-| `Vela-0.1.2-arm64.zip` | macOS Apple Silicon application bundle (`.app`) |
+| `Vela-0.1.3-arm64.dmg` | macOS Apple Silicon installer |
+| `Vela-0.1.3-arm64.zip` | macOS Apple Silicon application bundle (`.app`) |
 | `SHA256SUMS.txt` | SHA-256 checksums for both packages |
 
-Package version: `0.1.2`. macOS bundle and download version: `0.1.2`.
+Package version: `0.1.3`. macOS bundle and download version: `0.1.3`.
 
 ## Validation
 
 - All workspace type checks passed.
-- 176 agent tests passed, including new plan-stream coverage for unclosed, split-close, and stopped plan output.
-- 113 targeted desktop tests passed: 55 for turn review, tool diff, tool duration, and fold state; 33 for the execution trace; 25 for persistence and UI storage.
+- 184 agent tests passed, including new coverage for the dedicated thinking-summary model, per-request summary usage, and retained usage after reopening and rewinding.
+- 304 desktop tests passed, including 23 new cases for activity grouping, empty-conversation listing, per-workspace session creation, and usage statistics.
+- 95 workspace tests passed.
 - Production DMG and ZIP builds, packaged-app startup, bundle and packaged version metadata, DMG mounting, archive integrity, and SHA-256 checksums were verified.

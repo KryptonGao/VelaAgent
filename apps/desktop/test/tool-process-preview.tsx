@@ -44,7 +44,7 @@ window.vela = {
   getAgentSettings: async () => ({ provider: null, modelId: null, thinkingLevel: "medium", newConversationSelection: "default", instructions: "" }),
   onWorkspaceEvent: () => noop, onGitEvent: () => noop,
   onEvent: listener => { eventListeners.add(listener); return () => { eventListeners.delete(listener); }; },
-  getTrace: async sessionId => { traceReads++; return { version: 1, nodes: recordedNodes(sessionId), requests: [], warning: null }; },
+  getTrace: async sessionId => { traceReads++; return { version: 1, nodes: recordedNodes(sessionId), requests: [], summaries: [], warning: null }; },
   pickAttachments: async () => [], hydrateAttachments: async () => [],
 } as unknown as VelaApi;
 const models = { catalog: { models: [], providers: [] }, login: { active: false }, select: noop, setThinking: noop } as unknown as ReturnType<typeof useModels>;
@@ -170,6 +170,10 @@ async function runChecks() {
     assert(summary().textContent?.includes("3.1s"), "Sequence sums recorded calls");
     assert(command().querySelector(".tool-duration")?.textContent === "· 2.3s", "Call joins trace timing by ID");
     assert(Array.from(document.querySelectorAll(".tool-duration")).some(label => label.textContent === "· 1m40s"), "Long duration fits compact label");
+    // 展开箭头始终紧跟在左侧内容之后,只有耗时段靠右。
+    const follows = (first: Element, second: Element) => Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
+    assert(follows(command().querySelector(".tool-compact-chevron")!, command().querySelector(".tool-duration")!), "Command chevron stays left of the right-aligned duration");
+    assert(follows(summary().querySelector(".tool-compact-chevron")!, summary().querySelector(".tool-compact-steps")!), "Sequence chevron stays left of the steps and duration block");
     click(command());
     assert(expanded(command()), "Command opens");
     passed.push("recorded durations");

@@ -1,7 +1,7 @@
 {
   "name": "@vela/desktop",
-  "version": "0.1.2",
-  "shortVersion": "0.1.2",
+  "version": "0.1.3",
+  "shortVersion": "0.1.3",
   "private": true,
   "main": "./out/main/index.mjs",
   "scripts": {
@@ -14,7 +14,8 @@
     "test:diff": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --test test/diff-rows.test.ts",
     "test:turn-review": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --test test/tool-diff.test.ts test/turn-review-state.test.ts test/turn-changes.test.ts test/diff-rows.test.ts",
     "test:version-control": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --test test/version-control-graph.test.ts test/version-control-hunks.test.ts test/version-control-p2.test.ts test/diff-rows.test.ts",
-    "test:conversations": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --test test/conversation-search.test.ts ../../packages/agent/test/conversation-rename.test.ts",
+    "test:conversations": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --test test/conversation-search.test.ts test/conversation-activity.test.ts test/conversation-list.test.ts ../../packages/agent/test/conversation-rename.test.ts",
+    "test:session-create": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --experimental-test-module-mocks --test test/session-create.test.ts",
     "test:image-viewer": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --test test/image-viewer.test.ts",
     "test:trace:preview": "node test/trace-preview-server.mjs",
     "build": "electron-vite build",

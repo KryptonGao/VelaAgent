@@ -1,5 +1,5 @@
 import { uiStorage } from "../ui-storage";
-import type { AppLocale } from "@vela/shared";
+import type { AppLocale, ThinkingSummaryModel } from "@vela/shared";
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import {
   ThinkingCompletionTracker,
@@ -35,7 +35,7 @@ function writeStoredSummaries(records: Record<string, ThinkingSummaryState>) {
   }
 }
 
-export function useThinkingSummaries({ conversationId, messages, streaming, modelReady, enabled, style = "inline", locale }: {
+export function useThinkingSummaries({ conversationId, messages, streaming, modelReady, enabled, style = "inline", locale, model = null }: {
   conversationId: string | null;
   messages: UiMessage[];
   streaming: boolean;
@@ -43,6 +43,7 @@ export function useThinkingSummaries({ conversationId, messages, streaming, mode
   enabled: boolean;
   style?: ThinkingSummaryStyle;
   locale: AppLocale;
+  model?: ThinkingSummaryModel | null;
 }): ThinkingSummariesApi {
   const [records, setRecords] = useState<Record<string, ThinkingSummaryState>>(readStoredSummaries);
   const recordsRef = useRef(records);
@@ -79,7 +80,7 @@ export function useThinkingSummaries({ conversationId, messages, streaming, mode
       if (value.status === "done") writeStoredSummaries(recordsRef.current);
     };
     save(pending);
-    void api.summarizeThinking({ conversationId, text, locale }).then(
+    void api.summarizeThinking({ conversationId, text, locale, ...(model ? { model } : {}) }).then(
       (summary) => {
         if (recordsRef.current[key] === pending) save({ status: "done", text: summary });
       },
@@ -90,7 +91,7 @@ export function useThinkingSummaries({ conversationId, messages, streaming, mode
         });
       },
     );
-  }, [conversationId, enabled, locale, digestFor]);
+  }, [conversationId, enabled, locale, digestFor, model]);
 
   useEffect(() => {
     if (!conversationId) return;

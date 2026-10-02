@@ -179,6 +179,7 @@ window.vela = {
     version,
     nodes: [...nodes],
     requests,
+    summaries: [],
     warning: null,
   }),
   getTraceDetails: async (_c: string, id: string) => {
@@ -248,6 +249,7 @@ function Fixture() {
               version,
               nodes: [node],
               requests: [],
+              summaries: [],
               warning: null,
             };
             listeners.forEach((fn) => fn(event));

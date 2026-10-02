@@ -328,11 +328,11 @@ export function useSession() {
   }, []);
 
   /** 新建一个对话并切换过去;当前对话保留在侧边栏里。 */
-  const newChat = useCallback(async () => {
+  const newChat = useCallback(async (cwd?: string) => {
     const api = window.vela;
     if (!api) return;
     try {
-      setState(await api.createConversation());
+      setState(await api.createConversation(cwd));
     } catch (error) {
       const id = activeIdRef.current;
       const message = error instanceof Error ? error.message : "新建对话失败";
@@ -466,6 +466,7 @@ export function useSession() {
     () => (activeConversationId ? agents[activeConversationId] ?? state?.agents ?? [] : []),
     [activeConversationId, agents, state?.agents],
   );
+  const waitingConversationIds = useMemo(() => Object.keys(questions), [questions]);
 
   return {
     available: typeof window.vela !== "undefined",
@@ -474,6 +475,7 @@ export function useSession() {
     agentHistory: activeConversationId ? agentHistory[activeConversationId] ?? emptyMessages : emptyMessages,
     conversations: state?.conversations ?? [],
     activeConversationId,
+    waitingConversationIds,
     agents: activeAgents,
     /** 当前对话正在流式生成的方案草稿；没有时为 null。 */
     planDraft: activeConversationId ? planDrafts[activeConversationId] ?? null : null,

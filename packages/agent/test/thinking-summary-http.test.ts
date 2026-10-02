@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { describe, it, type TestContext } from "node:test";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { ThinkingSummaryGenerator } from "../src/thinking-summary.ts";
+import { AgentRuntime } from "../src/runtime.ts";
+import { ModelDirectory } from "../src/model-directory.ts";
 
 const summary = "先检查运行时，再决定是否修改界面。";
 const input = { conversationId: "chat-a", text: "Inspect the runtime before deciding whether to change the UI.", locale: "zh-CN" as const };
@@ -54,6 +56,19 @@ async function endpoint(t: TestContext, provider: string) {
 }
 
 describe("thinking summary HTTP session routing", () => {
+  it("dispatches the configured summary model through the real SDK without a chat model", async (t) => {
+    const { runtime, model, generator, requests } = await endpoint(t, "opencode-go");
+    const directory = Object.assign(Object.create(ModelDirectory.prototype), { runtime, isAvailable: () => true });
+    const agent = Object.assign(Object.create(AgentRuntime.prototype), {
+      conversations: new Map([[input.conversationId, { session: { model: undefined } }]]),
+      thinkingSummaries: generator,
+      readyDirectory: async () => directory,
+    }) as AgentRuntime;
+    assert.equal(await agent.summarizeThinking({ ...input, model: { provider: model.provider, id: model.id } }), summary);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0]!["x-opencode-session"], input.conversationId);
+  });
+
   it("reproduces MissingSessionID and sends a stable conversation header through the real OpenCode SDK path", async (t) => {
     const { runtime, model, generator, requests } = await endpoint(t, "opencode-go");
     const missing = await runtime.completeSimple(model, { messages: [{ role: "user", content: input.text, timestamp: 1 }] }, { maxTokens: 32 });

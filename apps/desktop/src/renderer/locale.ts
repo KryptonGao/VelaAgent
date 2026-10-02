@@ -29,6 +29,7 @@ export function isEnglish(): boolean {
 const knownErrors: Record<string, string> = {
   "思考总结参数不正确": "Invalid thinking summary request.",
   "思考总结语言不正确": "Unsupported thinking summary language.",
+  "思考总结模型不正确": "Invalid thinking summary model.",
   "思考内容不能为空": "Thinking content cannot be empty.",
   "思考内容过长": "Thinking content is too long.",
   "无法生成思考总结": "Could not generate a thinking summary.",

@@ -12,6 +12,20 @@ const conversations: ConversationSummary[] = [
 ];
 
 describe("sidebar conversation search", () => {
+  it("lists a new chat only after its first message is sent, including image-only messages", () => {
+    const draft: ConversationSummary = { id: "draft", title: "新对话", cwd: "/new/workspace", createdAt: 10,
+      updatedAt: 10, archivedAt: null, status: "ready", messageCount: 0 };
+    const pending = [...conversations, draft, { ...draft, id: "another-draft", status: "starting" as const }];
+    assert.deepEqual(searchActiveConversations(pending, "", "新对话"), searchActiveConversations(conversations, "", "新对话"));
+    assert.deepEqual(groupActiveConversations(pending, "", "新对话"), groupActiveConversations(conversations, "", "新对话"));
+    assert.deepEqual(searchActiveConversations(pending, "/new/workspace", "新对话"), []);
+    // The count, rather than the title or assistant's first reply, controls visibility.
+    const sent = { ...draft, messageCount: 1, status: "streaming" as const };
+    assert.equal(searchActiveConversations([...conversations, sent], "", "新对话")[0]?.id, "draft");
+    assert.equal(groupActiveConversations([...conversations, sent], "", "新对话")[0]?.cwd, draft.cwd);
+    assert.deepEqual(searchActiveConversations([{ ...sent, archivedAt: 11 }], "", "新对话"), []);
+  });
+
   it("orders dialog results globally by recency and filters titles and workspace paths", () => {
     const original = structuredClone(conversations);
     assert.deepEqual(searchActiveConversations(conversations, "", "新对话").map(item => item.id), ["recent", "other", "empty", "old"]);

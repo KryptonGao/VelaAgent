@@ -159,11 +159,18 @@ export const IpcChannel = {
 export const appLocales = ["zh-CN", "en"] as const;
 export type AppLocale = (typeof appLocales)[number];
 
+export interface ThinkingSummaryModel {
+  provider: string;
+  id: string;
+}
+
 /** 独立总结一段已完成的思考，不写入聊天上下文。 */
 export interface ThinkingSummaryInput {
   conversationId: string;
   text: string;
   locale: AppLocale;
+  /** 不指定时使用该对话当前选定的模型。 */
+  model?: ThinkingSummaryModel;
 }
 
 export const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
@@ -381,7 +388,9 @@ export interface AuthPromptRequest {
 export type ModelAuthEvent =
   | { type: "notice"; notice: AuthNotice }
   | { type: "prompt"; request: AuthPromptRequest }
-  | { type: "cleared" };
+  | { type: "cleared" }
+  /** 后台从 Pi 远程目录拉到了新的模型清单,界面需要重新读取 catalog。 */
+  | { type: "catalog" };
 
 export interface LoginResult {
   state: AppState;
@@ -527,6 +536,8 @@ export interface ConversationSummary {
   id: string;
   title: string;
   status: SessionStatus;
+  /** 0 表示尚未发送消息，不加入侧边栏；旧数据缺省时仍显示。 */
+  messageCount?: number;
   cwd: string;
   createdAt: number;
   updatedAt: number;
@@ -2445,7 +2456,7 @@ export interface VelaApi {
   /** 把暂停中的目标重新设为进行中，并自动续跑。 */
   resumeGoal(conversationId?: string): Promise<AppState>;
   /** 新建一个对话并切换过去;原对话保留在侧边栏列表里。 */
-  createConversation(): Promise<AppState>;
+  createConversation(cwd?: string): Promise<AppState>;
   switchConversation(id: string): Promise<AppState>;
   /** 手动名称持久化，并优先于自动标题。 */
   renameConversation(id: string, title: string): Promise<AppState>;

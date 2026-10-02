@@ -28,8 +28,9 @@ import { SkillMigrationDialog } from "./SkillMigrationDialog";
 import { TrashIcon } from "./icons";
 import { settingsCopy, type SettingsCopy } from "./settings-copy";
 import { localizeError, tr } from "../locale";
+import { SettingsUsageView } from "./usage/SettingsUsageView";
 
-type SettingsSection = "agent" | "archived" | "models" | "permissions" | "workspace" | "appearance";
+type SettingsSection = "agent" | "archived" | "models" | "usage" | "permissions" | "workspace" | "appearance";
 type ModelsApi = ReturnType<typeof useModels>;
 
 interface SettingsViewProps {
@@ -42,7 +43,7 @@ interface SettingsViewProps {
   onClose: () => void;
 }
 
-const sections: SettingsSection[] = ["agent", "archived", "models", "permissions", "workspace", "appearance"];
+const sections: SettingsSection[] = ["agent", "archived", "models", "usage", "permissions", "workspace", "appearance"];
 
 export function SettingsView({
   preferences,
@@ -81,6 +82,7 @@ export function SettingsView({
           ))}
         </nav>
         <div className="settings-content">
+          {section === "usage" ? <SettingsUsageView conversations={conversations} providers={models.catalog?.providers ?? []} /> : null}
           <div hidden={section !== "agent"}>
             <AgentSection copy={copy} catalog={models.catalog} workspacePath={project.workspace?.current ?? null} />
           </div>
@@ -102,7 +104,7 @@ export function SettingsView({
             <WorkspaceSection copy={copy} project={project} />
           </div>
           <div hidden={section !== "appearance"}>
-            <AppearanceSection copy={copy} preferences={preferences} mod={mod} />
+            <AppearanceSection copy={copy} preferences={preferences} catalog={models.catalog} mod={mod} />
           </div>
         </div>
       </div>
@@ -979,10 +981,12 @@ function WorkspaceSection({ copy, project }: { copy: SettingsCopy; project: Proj
 function AppearanceSection({
   copy,
   preferences,
+  catalog,
   mod,
 }: {
   copy: SettingsCopy;
   preferences: PreferencesApi;
+  catalog: ModelCatalog | null;
   mod: string;
 }) {
   const {
@@ -998,7 +1002,10 @@ function AppearanceSection({
     toolProcessDetails,
     thinkingSummary,
     thinkingSummaryStyle,
+    thinkingSummaryModel,
     fileIconTheme,
+    composerCapsules,
+    setComposerCapsules,
     setAppearance,
     setLocale,
     setToolDisplay,
@@ -1006,9 +1013,14 @@ function AppearanceSection({
     setToolProcessDetails,
     setThinkingSummary,
     setThinkingSummaryStyle,
+    setThinkingSummaryModel,
     setFileIconTheme,
   } = preferences;
   const text = copy.appearance;
+  const summaryModelGroups = useMemo(() => groupAvailable(catalog), [catalog]);
+  const summaryModelMissing = Boolean(thinkingSummaryModel && !catalog?.models.some(model =>
+    model.provider === thinkingSummaryModel.provider && model.id === thinkingSummaryModel.id && model.available,
+  ));
   // 固定为另一种明暗时,点选主题顺带切过去,否则点了看不到效果。
   const pickTheme = (scheme: ColorScheme, id: ThemeId) => {
     if (scheme === "light") preferences.setLightTheme(id as LightTheme);
@@ -1095,6 +1107,17 @@ function AppearanceSection({
       <SettingsBlock title={text.infoLayout} hint={text.infoLayoutHint}>
         <Segmented label={text.infoLayout} value={infoLayout} options={infoLayoutOptions} onChange={setInfoLayout} />
       </SettingsBlock>
+      <SettingsBlock title={text.composerCapsules} hint={text.composerCapsulesHint}>
+        <Segmented
+          label={text.composerCapsules}
+          value={composerCapsules ? "on" : "off"}
+          options={[
+            { id: "off", label: text.composerCapsulesOff },
+            { id: "on", label: text.composerCapsulesOn },
+          ]}
+          onChange={(value) => setComposerCapsules(value === "on")}
+        />
+      </SettingsBlock>
       <SettingsBlock title={text.toolDisplay} hint={text.toolDisplayHint}>
         <Segmented
           label={text.toolDisplay}
@@ -1132,6 +1155,37 @@ function AppearanceSection({
           ]}
           onChange={(value) => setThinkingSummary(value === "on")}
         />
+      </SettingsBlock>
+      <SettingsBlock title={text.thinkingSummaryModel} hint={text.thinkingSummaryModelHint}>
+        <select
+          className="settings-select"
+          aria-label={text.thinkingSummaryModel}
+          aria-describedby="thinking-summary-model-hint"
+          value={thinkingSummaryModel ? modelValue(thinkingSummaryModel.provider, thinkingSummaryModel.id) : ""}
+          onChange={(event) => {
+            const { provider, modelId } = parseModelValue(event.target.value);
+            setThinkingSummaryModel(provider && modelId ? { provider, id: modelId } : null);
+          }}
+        >
+          <option value="">{text.thinkingSummaryModelCurrent}</option>
+          {summaryModelMissing && thinkingSummaryModel ? (
+            <option value={modelValue(thinkingSummaryModel.provider, thinkingSummaryModel.id)} disabled>
+              {thinkingSummaryModel.provider} / {thinkingSummaryModel.id} — {text.thinkingSummaryModelUnavailable}
+            </option>
+          ) : null}
+          {summaryModelGroups.map((group) => (
+            <optgroup key={group.provider} label={group.name}>
+              {group.models.map((model) => (
+                <option key={modelValue(model.provider, model.id)} value={modelValue(model.provider, model.id)}>
+                  {model.name}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+        <p className="settings-note" id="thinking-summary-model-hint">
+          {summaryModelMissing ? text.thinkingSummaryModelMissing : text.thinkingSummaryModelConfigure}
+        </p>
       </SettingsBlock>
       <SettingsBlock title={text.thinkingSummaryStyle} hint={text.thinkingSummaryStyleHint}>
         <Segmented

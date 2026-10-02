@@ -46,7 +46,7 @@ const node = (i: number): TraceNode => ({ id: `trace-${i}`, sequence: i, kind: i
 let traceNodes = Array.from({ length: 120 }, (_, i) => node(i));
 let version = 120;
 const listeners = new Set<(event: TraceUpdate) => void>();
-const snapshot = () => ({ version, nodes: traceNodes, requests: [], warning: null });
+const snapshot = () => ({ version, nodes: traceNodes, requests: [], summaries: [], warning: null });
 window.vela = {
   onEvent: (callback: any) => { listeners.add(callback); return () => listeners.delete(callback); },
   getTrace: async () => snapshot(),

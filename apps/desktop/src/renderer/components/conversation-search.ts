@@ -11,6 +11,11 @@ export function workspaceName(cwd: string): string {
   return trimmed.split(/[\\/]/).pop() || cwd;
 }
 
+/** 首条消息发送后才进入列表；兼容未提供计数的旧会话摘要。 */
+export function isListedConversation(conversation: ConversationSummary): boolean {
+  return conversation.archivedAt === null && conversation.messageCount !== 0;
+}
+
 /** 所有关键词均可在标题或工作区路径中命中，保留全局最近使用排序。 */
 export function searchActiveConversations(
   conversations: ConversationSummary[],
@@ -19,7 +24,7 @@ export function searchActiveConversations(
 ): ConversationSummary[] {
   const keywords = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
   return conversations.filter(conversation => {
-    if (conversation.archivedAt !== null) return false;
+    if (!isListedConversation(conversation)) return false;
     const searchable = `${conversation.title || untitledLabel}\n${conversation.cwd}`.toLocaleLowerCase();
     return keywords.every(keyword => searchable.includes(keyword));
   }).sort((a, b) => b.updatedAt - a.updatedAt);

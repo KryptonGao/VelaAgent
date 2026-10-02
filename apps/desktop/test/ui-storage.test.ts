@@ -98,12 +98,15 @@ describe("durable UI storage", () => {
     const key = thinkingSummaryKey("chat-a", "zh-CN", thinkingDigest("检查持久化"));
     first.setItem("vela.thinkingSummary", "true");
     first.setItem("vela.thinkingSummaryStyle", "prose");
+    const model = JSON.stringify({ provider: "custom-provider", id: "org/summary-model" });
+    first.setItem("vela.thinkingSummaryModel", model);
     first.setItem("vela.thinkingSummaries.v2", serializeStoredSummaries({ [key]: { status: "done", text: "检查并修复保存逻辑。" } }));
     const restarted = createUiStorage(bridge(new UiStorage(file)), () => browserStorage({
       "vela.thinkingSummary": "false", "vela.thinkingSummaryStyle": "inline",
     }));
     assert.equal(restarted.getItem("vela.thinkingSummary"), "true");
     assert.equal(restarted.getItem("vela.thinkingSummaryStyle"), "prose");
+    assert.equal(restarted.getItem("vela.thinkingSummaryModel"), model);
     assert.deepEqual(parseStoredSummaries(restarted.getItem("vela.thinkingSummaries.v2"))[key], {
       status: "done", text: "检查并修复保存逻辑。",
     });

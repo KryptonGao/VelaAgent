@@ -494,6 +494,7 @@
   display: flex;
   gap: 18px;
   height: 100%;
+  position: relative;
 }
 
 .vc-subtabs button {
@@ -501,16 +502,18 @@
   height: 100%;
   padding: 0 1px;
   border: 0;
-  border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--text-muted);
   font-size: 12px;
 }
 
+.vc-subtabs button:not(.active):hover {
+  color: var(--text-primary);
+}
+
 .vc-subtabs button.active {
   color: var(--text-primary);
   font-weight: 600;
-  border-bottom-color: var(--accent-blue);
 }
 
 .vc-pill {

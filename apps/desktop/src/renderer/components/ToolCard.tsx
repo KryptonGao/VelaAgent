@@ -259,7 +259,6 @@ function AgentToolCard({ tool, compact = false }: { tool: ToolTrace; compact?: b
           >
             {title}
           </button>
-          <ToolDurationLabel tool={tool} />
           <button
             className="agent-compact-toggle is-tail"
             type="button"
@@ -276,6 +275,8 @@ function AgentToolCard({ tool, compact = false }: { tool: ToolTrace; compact?: b
               <CompactStatus running={tool.status === "running"} failed={tool.status === "error"} />
             )}
           </button>
+          {/* 耗时排在箭头之后靠右,箭头才不会被耗时的 auto 外边距推到右边。 */}
+          <ToolDurationLabel tool={tool} />
         </div>
         <ToolCollapse open={open} onTransitionEnd={onTransitionEnd}>
         {() => <>
@@ -421,10 +422,11 @@ function GenericToolCard({ tool, compact = false }: ToolCardProps) {
           ) : lines !== null ? (
             <span className="tool-lines">{tr(`${lines} 行`, `${lines} lines`)}</span>
           ) : null}
-          {compact ? <ToolDurationLabel tool={tool} /> : <StatusMark status={tool.status} />}
+          {compact ? null : <StatusMark status={tool.status} />}
           <svg className="tool-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
             <polyline points="9 18 15 12 9 6" />
           </svg>
+          {compact ? <ToolDurationLabel tool={tool} /> : null}
           {compact ? <StatusMark status={tool.status} compact /> : null}
         </button>
         {canPreview ? (
@@ -581,11 +583,6 @@ export function CompactToolGroup({ tools, sequenceId = tools[0]?.id }: { tools: 
             {stat.removed > 0 ? <span className="tool-stat-del">−{stat.removed}</span> : null}
           </span>
         ) : null}
-        {details ? (
-          <span className="tool-compact-steps">
-            {tr(`${tools.length} 步`, `${tools.length} steps`)}<DurationLabel duration={duration} />
-          </span>
-        ) : null}
         <svg
           className="tool-compact-chevron"
           width="12"
@@ -598,6 +595,11 @@ export function CompactToolGroup({ tools, sequenceId = tools[0]?.id }: { tools: 
         >
           <polyline points="9 18 15 12 9 6" />
         </svg>
+        {details ? (
+          <span className="tool-compact-steps">
+            {tr(`${tools.length} 步`, `${tools.length} steps`)}<DurationLabel duration={duration} />
+          </span>
+        ) : null}
         {running ? <ActivityIndicator /> : null}
       </button>
       <ToolCollapse open={open}>
@@ -663,7 +665,6 @@ export function CompactToolLine({
           ) : null}
           {!hideAction ? <span className="tool-compact-action">{tr("已运行", "Ran")}</span> : null}
           <span className="tool-compact-cmd">{subject.name}</span>
-          <ToolDurationLabel tool={tool} />
           <svg
             className="tool-compact-chevron"
             width="12"
@@ -676,6 +677,7 @@ export function CompactToolLine({
           >
             <polyline points="9 18 15 12 9 6" />
           </svg>
+          <ToolDurationLabel tool={tool} />
           <CompactStatus running={running} failed={failed} />
         </button>
         <ToolCollapse open={open}>

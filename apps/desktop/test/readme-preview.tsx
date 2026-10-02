@@ -24,7 +24,7 @@ window.vela = {
   getAgentSettings: async () => ({ provider: null, modelId: null, thinkingLevel: "high", newConversationSelection: "default", instructions: "" }),
   onWorkspaceEvent: noopSubscription, onGitEvent: noopSubscription, onEvent: noopSubscription,
   pickAttachments: async () => [], hydrateAttachments: async () => [],
-  getTrace: async () => ({ version: nodes.length, nodes, requests, warning: null }),
+  getTrace: async () => ({ version: nodes.length, nodes, requests, summaries: [], warning: null }),
   getTraceDetails: async (_conversationId: string, id: string) => {
     const node = nodes.find(node => node.id === id);
     return node ? traceDetails(node) : null;

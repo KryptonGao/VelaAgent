@@ -122,12 +122,14 @@ describe("trace renderer model", () => {
       version: 10,
       nodes: [node("a", 1, { version: 10, summary: "new" })],
       requests: [request("r1", { durationMs: 999 })],
+      summaries: [],
       warning: null,
     });
     const merged = mergeTrace(live, {
       version: 2,
       nodes: [node("a", 1, { version: 2 }), node("b", 2)],
       requests: [request(), request("r2", { number: 2 })],
+      summaries: [],
       warning: null,
     });
     assert.equal(merged.nodes[0]?.summary, "new");
@@ -415,6 +417,54 @@ describe("trace renderer model", () => {
       fallback.width,
     );
   });
+  it("fits the full trace to the available width in every mode, including long traces", () => {
+    const events = Array.from({ length: 240 }, (_, i) => node(`n${i}`, i, {
+      kind: i === 0 ? "system" : i % 3 === 0 ? "tool-result" : "assistant",
+      turn: Math.floor(i / 4) + 1,
+      startedAt: 1000 + i * 60000,
+      completedAt: 1000 + i * 60000 + (i % 3 === 0 ? 0 : 30000),
+    }));
+    for (const mode of ["sequence", "duration", "turn", "request"] as const) {
+      for (const count of [0, 1, events.length]) {
+        const nodes = events.slice(0, count);
+        const natural = traceTimeline(nodes, [request()], mode, 15000000);
+        for (const width of [260, 840, 1600]) {
+          const fitted = traceTimeline(nodes, [request()], mode, 15000000, 1, width);
+          assert.equal(fitted.width, width, mode);
+          assert.deepEqual(fitted.bars.map((b) => b.node.id), natural.bars.map((b) => b.node.id));
+          assert.ok(fitted.bars.every((b) =>
+            b.x >= 0 && b.width > 0 && b.x + b.width <= width + 1e-9), mode);
+        }
+      }
+    }
+  });
+  it("keeps the full trace fitted as events arrive and zooms relative to the viewport", () => {
+    const events = [node("first", 1), node("last", 2, {
+      turn: 2, startedAt: 1000000, completedAt: 1000200,
+    })];
+    for (const mode of ["sequence", "duration", "turn", "request"] as const) {
+      const initial = traceTimeline(events.slice(0, 1), [request()], mode, 1000300, 1, 500);
+      const updated = traceTimeline(events, [request()], mode, 1000300, 1, 500);
+      const zoomed = traceTimeline(events, [request()], mode, 1000300, 3, 500);
+      assert.equal(initial.width, 500, mode);
+      assert.equal(updated.width, 500, mode);
+      assert.equal(zoomed.width, 1500, mode);
+      assert.equal(updated.bars.length, 2, mode);
+      updated.bars.forEach((bar, i) => {
+        assert.ok(Math.abs(zoomed.bars[i]!.x - bar.x * 3) < 1e-9, mode);
+        assert.ok(Math.abs(zoomed.bars[i]!.width - bar.width * 3) < 1e-9, mode);
+      });
+    }
+  });
+  it("uses the natural width when a viewport measurement is unavailable or invalid", () => {
+    const events = [node("first", 1)];
+    for (const mode of ["sequence", "duration", "turn", "request"] as const) {
+      const natural = traceTimeline(events, [], mode, 2000);
+      for (const width of [undefined, 0, -1, NaN, Infinity]) {
+        assert.equal(traceTimeline(events, [], mode, 2000, 1, width).width, natural.width);
+      }
+    }
+  });
   it("aggregates request-level metrics and locates the slowest measured step", () => {
     const requests = [
       request(),
@@ -490,10 +540,21 @@ describe("trace code segmentation", () => {
 });
 
 it("replaces abandoned nodes and requests when a rewind reset arrives", () => {
-  const previous = mergeTrace(emptyTrace, { version: 2, nodes: [node("old", 1), node("abandoned", 2)], requests: [request("r1"), request("r2")], warning: null });
-  const rewound = mergeTrace(previous, { version: 3, reset: true, nodes: [node("old", 1)], requests: [request("r1")], warning: null });
+  const previous = mergeTrace(emptyTrace, { version: 2, nodes: [node("old", 1), node("abandoned", 2)], requests: [request("r1"), request("r2")], summaries: [], warning: null });
+  const rewound = mergeTrace(previous, { version: 3, reset: true, nodes: [node("old", 1)], requests: [request("r1")], summaries: [], warning: null });
   assert.deepEqual(rewound.nodes.map(item => item.id), ["old"]);
   assert.deepEqual(rewound.requests.map(item => item.id), ["r1"]);
   assert.equal(rewound.version, 3);
   assert.deepEqual(mergeTrace(rewound, previous), rewound);
+});
+
+it("merges standalone summary usage by id and keeps it through an empty patch", () => {
+  const summary = (id: string, tokens: number) => ({ id, model: "opencode-go/deepseek", status: "Completed" as const,
+    startedAt: 1000, completedAt: 2000, durationMs: 1000,
+    usage: { input: tokens, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: tokens } });
+  let trace = mergeTrace(emptyTrace, { version: 1, nodes: [], requests: [], summaries: [summary("summary-1", 10)], warning: null });
+  trace = mergeTrace(trace, { version: 2, nodes: [], requests: [], summaries: [summary("summary-1", 20), summary("summary-2", 30)], warning: null });
+  assert.deepEqual(trace.summaries.map((item) => [item.id, item.usage?.totalTokens]), [["summary-1", 20], ["summary-2", 30]]);
+  trace = mergeTrace(trace, { version: 3, nodes: [], requests: [], summaries: [], warning: null });
+  assert.equal(trace.summaries.length, 2);
 });

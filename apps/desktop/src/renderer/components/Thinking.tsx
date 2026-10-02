@@ -208,7 +208,7 @@ export function Thinking({
               {!summary || summary.status === "error" ? (
                 <>
                   {summary ? <span className="thinking-summary-failed" role="status" title={localizeError(summary.error)}>{tr("总结失败", "Summary failed")}</span> : null}
-                  <button className="thinking-summary-action" type="button" onClick={summarize} title={tr("使用当前聊天选定的模型生成总结", "Summarize with the model selected in this chat")}>
+                  <button className="thinking-summary-action" type="button" onClick={summarize} title={tr("使用设置中的思考总结模型生成总结", "Summarize with the thinking summary model configured in settings")}>
                     {summary ? tr("重试", "Retry") : tr("总结", "Summarize")}
                   </button>
                 </>

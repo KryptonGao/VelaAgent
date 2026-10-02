@@ -48,6 +48,10 @@ export function useModels(setAppState: (state: AppState) => void) {
     if (!api) return;
     void reload();
     return api.onModelEvent((event) => {
+      if (event.type === "catalog") {
+        void reload();
+        return;
+      }
       setLogin((current) => applyLoginEvent(current, event));
     });
   }, [reload]);
@@ -155,6 +159,7 @@ export function useModels(setAppState: (state: AppState) => void) {
 }
 
 function applyLoginEvent(state: LoginState, event: ModelAuthEvent): LoginState {
+  if (event.type === "catalog") return state;
   if (event.type === "cleared") {
     if (!state.active) return state;
     return { ...state, prompt: null };

@@ -536,14 +536,15 @@ export function App() {
                 resize={resize}
                 platform={platform}
                 conversations={session.conversations}
+                waitingConversationIds={session.waitingConversationIds}
                 activeConversationId={session.activeConversationId}
                 settingsOpen={settingsOpen}
                 settingsLabel={tr("设置", "Settings")}
                 onToggle={() => setLeftCollapsed((value) => !value)}
                 onOpenSettings={() => setSettingsOpen((open) => !open)}
-                onNewChat={() => {
+                onNewChat={(cwd) => {
                   setSettingsOpen(false);
-                  void session.newChat();
+                  void session.newChat(cwd);
                 }}
                 onSwitchConversation={(id) => {
                   setSettingsOpen(false);
@@ -593,6 +594,7 @@ export function App() {
                           toolProcessDetails={preferences.toolProcessDetails}
                           summaryEnabled={preferences.thinkingSummary}
                           summaryStyle={preferences.thinkingSummaryStyle}
+                          summaryModel={preferences.thinkingSummaryModel}
                           locale={preferences.locale}
                           hiddenModels={preferences.hiddenModels}
                           onSend={session.send}

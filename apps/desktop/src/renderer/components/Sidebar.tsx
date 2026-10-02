@@ -1,12 +1,21 @@
 import type { ConversationSummary } from "@vela/shared";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { isBooleanRecord, useStoredState } from "../hooks/useStoredState";
 import { modKeyLabel } from "../platform";
-import { tr } from "../locale";
+import { tr, useAppLocale } from "../locale";
 import type { SidebarResize } from "../hooks/useSidebarResize";
 import { MotionList } from "./BatchMotion";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
-import { groupActiveConversations } from "./conversation-search";
+import { groupActiveConversations, workspaceName } from "./conversation-search";
+import {
+  activityDay,
+  activityReason,
+  groupActivityConversations,
+  isSidebarView,
+  type ActivityGroupId,
+  type ActivityReason,
+  type SidebarView,
+} from "./conversation-activity";
 import { ConversationSearchDialog } from "./ConversationSearchDialog";
 
 interface SidebarProps {
@@ -14,12 +23,13 @@ interface SidebarProps {
   resize: SidebarResize;
   platform: string;
   conversations: ConversationSummary[];
+  waitingConversationIds?: readonly string[];
   activeConversationId: string | null;
   settingsOpen: boolean;
   settingsLabel: string;
   onToggle: () => void;
   onOpenSettings: () => void;
-  onNewChat: () => void;
+  onNewChat: (cwd?: string) => void;
   onSwitchConversation: (id: string) => void;
   onArchiveConversation: (id: string) => void;
   onRenameConversation?: (id: string) => void;
@@ -30,6 +40,7 @@ export function Sidebar({
   resize,
   platform,
   conversations: allConversations,
+  waitingConversationIds,
   activeConversationId,
   settingsOpen,
   settingsLabel,
@@ -41,11 +52,77 @@ export function Sidebar({
   onRenameConversation,
 }: SidebarProps) {
   const [searchOpen, setSearchOpen] = useState(false);
+  const [view, setView] = useStoredState<SidebarView>("vela.sidebarView", "activity", isSidebarView);
+  const [priorityConversations, setPriorityConversations] = useStoredState<Record<string, boolean>>(
+    "vela.priorityConversations", {}, isBooleanRecord,
+  );
+  const sidebarRef = useRef<HTMLElement>(null);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const scroller = scrollAreaRef.current;
+    if (!scroller) return;
+    let hideTimer: number | undefined;
+    const showScrollbar = () => {
+      scroller.classList.add("is-scrolling");
+      window.clearTimeout(hideTimer);
+      hideTimer = window.setTimeout(() => {
+        scroller.classList.remove("is-scrolling");
+      }, 1000);
+    };
+    scroller.addEventListener("scroll", showScrollbar, { passive: true });
+    return () => {
+      window.clearTimeout(hideTimer);
+      scroller.classList.remove("is-scrolling");
+      scroller.removeEventListener("scroll", showScrollbar);
+    };
+  }, []);
+  const priorityFocusRef = useRef<string | null>(null);
+  // 优先标记会让行跨分组移动，重新挂载后恢复按钮焦点以便继续键盘操作。
+  useEffect(() => {
+    const id = priorityFocusRef.current;
+    if (!id) return;
+    priorityFocusRef.current = null;
+    const buttons = sidebarRef.current?.querySelectorAll<HTMLButtonElement>(".subchat-priority") ?? [];
+    [...buttons].find(button => button.dataset.conversationId === id && !button.closest("[inert]"))?.focus();
+  }, [priorityConversations]);
+  const [today, setToday] = useState(() => activityDay(Date.now()));
+  const locale = useAppLocale();
+  useEffect(() => {
+    if (view !== "activity") return;
+    const refresh = () => setToday(activityDay(Date.now()));
+    refresh();
+    const timer = window.setInterval(refresh, 60_000);
+    window.addEventListener("focus", refresh);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", refresh); };
+  }, [view]);
   const searchId = useId();
   const untitledLabel = tr("新对话", "New chat");
   const groups = useMemo(
     () => groupActiveConversations(allConversations, "", untitledLabel),
     [allConversations, untitledLabel],
+  );
+  const activityOptions = useMemo(() => ({ priorityConversations, waitingConversationIds }), [priorityConversations, waitingConversationIds]);
+  const activityGroups = useMemo(
+    () => groupActivityConversations(allConversations, activityOptions, today),
+    [allConversations, activityOptions, today],
+  );
+  const togglePriority = (id: string) => {
+    if (document.activeElement instanceof HTMLElement && document.activeElement.dataset.conversationId === id) {
+      priorityFocusRef.current = id;
+    }
+    setPriorityConversations(current => {
+      const next = { ...current };
+      if (next[id]) delete next[id];
+      else next[id] = true;
+      return next;
+    });
+  };
+  const renderConversation = (conversation: ConversationSummary) => (
+    <ConversationRow conversation={conversation} active={conversation.id === activeConversationId}
+      activity={view === "activity"} reason={activityReason(conversation, activityOptions)}
+      priority={Boolean(priorityConversations[conversation.id])} locale={locale} today={today}
+      onSelect={onSwitchConversation} onTogglePriority={togglePriority}
+      onRename={onRenameConversation} onArchive={onArchiveConversation} />
   );
 
   const [collapsedWorkspaces, setCollapsedWorkspaces] = useStoredState<Record<string, boolean>>(
@@ -66,7 +143,7 @@ export function Sidebar({
   const mod = modKeyLabel(platform);
 
   return (
-    <aside className={`sidebar-left${collapsed ? " collapsed" : ""}`} inert={collapsed ? true : undefined}>
+    <aside ref={sidebarRef} className={`sidebar-left${collapsed ? " collapsed" : ""}`} inert={collapsed ? true : undefined}>
       <SidebarResizeHandle target="left" resize={resize} />
       <div className="sidebar-left-header">
         <div className="titlebar-drag-row">
@@ -84,23 +161,31 @@ export function Sidebar({
           <div className="workspace-dropdown-trigger">
             <span>Vela</span>
           </div>
-          <button
-            className="icon-btn-ghost sidebar-search-trigger"
-            type="button"
-            title={tr("搜索会话", "Search chats")}
-            aria-label={tr("搜索会话", "Search chats")}
-            aria-expanded={searchOpen}
-            aria-haspopup="dialog"
-            aria-controls={searchId}
-            onClick={() => setSearchOpen(true)}
-          >
-            <SearchIcon />
-          </button>
+          <div className="sidebar-header-actions">
+            <button className="icon-btn-ghost sidebar-activity-trigger" type="button"
+              title={tr("活动视图：按优先级排布对话", "Activity view: chats ordered by priority")}
+              aria-label={tr("活动视图", "Activity view")} aria-pressed={view === "activity"}
+              onClick={() => setView(current => current === "activity" ? "workspaces" : "activity")}>
+              <ActivityIcon />
+            </button>
+            <button
+              className="icon-btn-ghost sidebar-search-trigger"
+              type="button"
+              title={tr("搜索会话", "Search chats")}
+              aria-label={tr("搜索会话", "Search chats")}
+              aria-expanded={searchOpen}
+              aria-haspopup="dialog"
+              aria-controls={searchId}
+              onClick={() => setSearchOpen(true)}
+            >
+              <SearchIcon />
+            </button>
+          </div>
         </div>
       </div>
 
       <div className="sidebar-quick-actions">
-        <button className="quick-action-item" type="button" onClick={onNewChat}>
+        <button className="quick-action-item" type="button" onClick={() => onNewChat()}>
           <span className="quick-action-item-left">
             <ComposeIcon />
             <span>{tr("新对话", "New chat")}</span>
@@ -108,73 +193,63 @@ export function Sidebar({
         </button>
       </div>
 
-      <div className="sidebar-scroll-area">
-        <div className="sidebar-section-title">{tr("会话", "Chats")}</div>
-        <MotionList className="session-groups" items={groups} keyOf={(group) => group.cwd}>{(group) => {
-          const isCollapsed = Boolean(collapsedWorkspaces[group.cwd]);
-          return (
-            <div className={`session-group${isCollapsed ? " collapsed" : ""}`} key={group.cwd}>
-              <button
-                className="session-group-header"
-                type="button"
-                title={group.cwd}
-                aria-expanded={!isCollapsed}
-                onClick={() =>
-                  setCollapsedWorkspaces((current) => ({ ...current, [group.cwd]: !isCollapsed }))
-                }
-              >
-                <span className="session-group-chevron">
-                  <ChevronIcon />
-                </span>
-                <span className="session-group-name">{group.name}</span>
-                <span className="session-group-count">{group.conversations.length}</span>
-              </button>
-              {isCollapsed ? null : (
-                <MotionList className="subchat-list" items={group.conversations} keyOf={(conversation) => conversation.id}>
-                  {(conversation) => (
-                    <div className="subchat-row" key={conversation.id}>
-                      <button
-                        className={`subchat-item${conversation.id === activeConversationId ? " active" : ""}`}
-                        type="button"
-                        title={conversation.title || tr("新对话", "New chat")}
-                        aria-current={conversation.id === activeConversationId ? "page" : undefined}
-                        onClick={() => onSwitchConversation(conversation.id)}
-                      >
-                        <span className="subchat-title">
-                          {conversation.title || tr("新对话", "New chat")}
-                        </span>
-                        {conversation.status === "streaming" ? (
-                          <span className="subchat-streaming-dot" role="img" aria-label={tr("正在回复", "Replying")} title={tr("正在回复", "Replying")} />
-                        ) : null}
-                      </button>
-                      {onRenameConversation ? <button
-                        className="subchat-action subchat-rename"
-                        type="button"
-                        title={tr("重命名对话", "Rename chat")}
-                        aria-label={`${tr("重命名", "Rename")} “${conversation.title || untitledLabel}”`}
-                        onClick={() => onRenameConversation(conversation.id)}
-                      >
-                        <RenameIcon />
-                      </button> : null}
-                      <button
-                        className="subchat-action subchat-archive"
-                        type="button"
-                        title={tr("归档对话", "Archive chat")}
-                        aria-label={`${tr("归档", "Archive")} “${conversation.title || tr("新对话", "New chat")}”`}
-                        onClick={() => onArchiveConversation(conversation.id)}
-                      >
-                        <ArchiveIcon />
-                      </button>
-                    </div>
-                  )}
-                </MotionList>
-              )}
-            </div>
-          );
-        }}</MotionList>
-        {groups.length === 0 ? (
-          <div className="sidebar-empty-hint" role="status">{tr("还没有会话", "No chats yet")}</div>
-        ) : null}
+      <div ref={scrollAreaRef} className="sidebar-scroll-area">
+        {view === "activity" ? <div className="sidebar-activity-view">
+          <MotionList items={activityGroups} keyOf={group => group.id}>{group => (
+            <section className="activity-group" aria-label={activityGroupLabel(group.id)}>
+              {group.id !== "priority" ? <div className="activity-group-header">
+                <span>{activityGroupLabel(group.id)}</span>
+                <span className="activity-group-count">{group.conversations.length}</span>
+              </div> : null}
+              <MotionList className="activity-list" items={group.conversations} keyOf={conversation => conversation.id}>
+                {renderConversation}
+              </MotionList>
+            </section>
+          )}</MotionList>
+          {activityGroups.length === 0 ? <div className="sidebar-empty-hint" role="status">{tr("还没有会话", "No chats yet")}</div> : null}
+        </div> : <>
+          <MotionList className="session-groups" items={groups} keyOf={(group) => group.cwd}>{(group) => {
+            const isCollapsed = Boolean(collapsedWorkspaces[group.cwd]);
+            return (
+              <div className={`session-group${isCollapsed ? " collapsed" : ""}`} key={group.cwd}>
+                <div className="session-group-row">
+                  <button
+                    className="session-group-header"
+                    type="button"
+                    title={group.cwd}
+                    aria-expanded={!isCollapsed}
+                    onClick={() =>
+                      setCollapsedWorkspaces((current) => ({ ...current, [group.cwd]: !isCollapsed }))
+                    }
+                  >
+                    <span className="session-group-chevron">
+                      <ChevronIcon />
+                    </span>
+                    <span className="session-group-name">{group.name}</span>
+                    <span className="session-group-count">{group.conversations.length}</span>
+                  </button>
+                  <button
+                    className="subchat-action session-group-new-chat"
+                    type="button"
+                    title={tr("新建对话", "New chat")}
+                    aria-label={`${tr("新建对话", "New chat")} · ${group.name}`}
+                    onClick={() => onNewChat(group.cwd)}
+                  >
+                    <ComposeIcon />
+                  </button>
+                </div>
+                {isCollapsed ? null : (
+                  <MotionList className="subchat-list" items={group.conversations} keyOf={(conversation) => conversation.id}>
+                    {renderConversation}
+                  </MotionList>
+                )}
+              </div>
+            );
+          }}</MotionList>
+          {groups.length === 0 ? (
+            <div className="sidebar-empty-hint" role="status">{tr("还没有会话", "No chats yet")}</div>
+          ) : null}
+        </>}
       </div>
 
       <div className="sidebar-left-footer">
@@ -204,6 +279,82 @@ export function Sidebar({
       /> : null}
     </aside>
   );
+}
+
+function activityGroupLabel(id: ActivityGroupId): string {
+  switch (id) {
+    case "priority": return tr("优先级", "Priority");
+    case "today": return tr("今天", "Today");
+    case "yesterday": return tr("昨天", "Yesterday");
+    case "earlier": return tr("更早", "Earlier");
+  }
+}
+
+function activityReasonLabel(reason: ActivityReason, conversation: ConversationSummary): string {
+  switch (reason) {
+    case "waiting": return tr("等待回答", "Waiting for your reply");
+    case "error": return tr("发生错误", "Needs attention");
+    case "priority": return tr("优先关注", "Marked as priority");
+    case "streaming": return tr("正在回复", "Replying");
+    case "starting": return tr("正在准备", "Starting");
+    case "recent": return conversation.turnCompletedAt ? tr("已完成", "Completed") : tr("最近更新", "Recently updated");
+  }
+}
+
+function ConversationRow({ conversation, active, activity, reason, priority, locale, today, onSelect, onTogglePriority, onRename, onArchive }: {
+  conversation: ConversationSummary; active: boolean; activity: boolean; reason: ActivityReason;
+  priority: boolean; locale: string; today: number; onSelect: (id: string) => void;
+  onTogglePriority: (id: string) => void; onRename?: (id: string) => void; onArchive: (id: string) => void;
+}) {
+  const title = conversation.title || tr("新对话", "New chat");
+  const statusLabel = activityReasonLabel(reason, conversation);
+  const priorityLabel = priority ? tr("取消优先关注", "Remove priority") : tr("设为优先关注", "Mark as priority");
+  const updatedAt = new Date(conversation.updatedAt);
+  const timeLabel = updatedAt.toLocaleString(locale, {
+    ...(conversation.updatedAt < today ? { month: "2-digit", day: "2-digit" } as const : {}),
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+  return <div className={`subchat-row${activity ? " activity-row" : ""}${onRename ? " has-rename" : ""}`}>
+    <button className={`subchat-item${active ? " active" : ""}`} type="button"
+      title={activity ? `${title}\n${conversation.cwd}\n${statusLabel} · ${updatedAt.toLocaleString(locale)}` : title}
+      aria-label={activity ? `${title}, ${workspaceName(conversation.cwd)}, ${statusLabel}` : title}
+      aria-current={active ? "page" : undefined} onClick={() => onSelect(conversation.id)}>
+      {activity ? <span className="activity-row-content">
+        <span className="activity-row-heading">
+          <span className="subchat-title">{title}</span>
+          <span className="activity-workspace">{workspaceName(conversation.cwd)}</span>
+        </span>
+        <span className="activity-row-detail">
+          <span className={`activity-status activity-status-${reason}`}>
+            {reason === "streaming" || reason === "starting" ? <span className="subchat-streaming-dot" aria-hidden="true" /> : null}
+            {statusLabel}
+          </span>
+          <time className="activity-time" dateTime={updatedAt.toISOString()}>{timeLabel}</time>
+        </span>
+      </span> : <>
+        <span className="subchat-title">{title}</span>
+        {conversation.status === "streaming" ? <span className="subchat-streaming-dot" role="img" aria-label={tr("正在回复", "Replying")} title={tr("正在回复", "Replying")} /> : null}
+      </>}
+    </button>
+    <button className="subchat-action subchat-priority" type="button" title={priorityLabel} data-conversation-id={conversation.id}
+      aria-label={`${priorityLabel} “${title}”`} aria-pressed={priority} onClick={() => onTogglePriority(conversation.id)}>
+      <PriorityIcon />
+    </button>
+    {onRename ? <button className="subchat-action subchat-rename" type="button"
+      title={tr("重命名对话", "Rename chat")} aria-label={`${tr("重命名", "Rename")} “${title}”`}
+      onClick={() => onRename(conversation.id)}><RenameIcon /></button> : null}
+    <button className="subchat-action subchat-archive" type="button"
+      title={tr("归档对话", "Archive chat")} aria-label={`${tr("归档", "Archive")} “${title}”`}
+      onClick={() => onArchive(conversation.id)}><ArchiveIcon /></button>
+  </div>;
+}
+
+function ActivityIcon() {
+  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9Z" /><path d="M10 21h4" /></svg>;
+}
+
+function PriorityIcon() {
+  return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3l-5.6 2.9 1.1-6.2L3 9.6l6.2-.9L12 3Z" /></svg>;
 }
 
 function SearchIcon() {

@@ -4,6 +4,7 @@ import { tr, useAppLocale } from "../../locale";
 import type { ProjectApi } from "../../hooks/useProject";
 import { useVersionControl } from "../../hooks/useVersionControl";
 import { useDismissable } from "../../hooks/useDismissable";
+import { useSlidingTabIndicator } from "../useSlidingTabIndicator";
 import { AlertIcon, ArrowDownIcon, ArrowUpIcon, BranchIcon, ChevronDownIcon, CloudIcon, FolderIcon, MonitorIcon, PrIcon, RefreshIcon, StackIcon, TagIcon } from "../icons";
 import { BranchMenu } from "./BranchMenu";
 import { BranchPanel } from "./BranchPanel";
@@ -71,6 +72,7 @@ export function VersionControlView({
   const prSummary = api.pr?.pr ?? null;
 
   const changeCount = status?.files.length ?? 0;
+  const pageTabs = useSlidingTabIndicator({ activeKey: page });
 
   // 工作区切换后重新加载历史/PR,避免展示上一工作区的旧结果。
   useEffect(() => {
@@ -362,16 +364,18 @@ export function VersionControlView({
       ) : null}
 
       <div className="vc-page-tabs">
-        <nav className="vc-subtabs" role="tablist" aria-label={tr("版本控制页面", "Version control pages")}>
-          <button role="tab" aria-selected={page === "changes"} className={page === "changes" ? "active" : ""} onClick={() => setPage("changes")}>
+        <nav className="vc-subtabs" role="tablist" aria-label={tr("版本控制页面", "Version control pages")}
+          ref={pageTabs.navRef} onPointerMove={pageTabs.onPointerMove} onPointerLeave={pageTabs.onPointerLeave}>
+          <button role="tab" data-tab-key="changes" ref={pageTabs.registerTab("changes")} aria-selected={page === "changes"} className={page === "changes" ? "active" : ""} onClick={() => setPage("changes")}>
             {tr("改动", "Changes")} {changeCount > 0 ? <span className="vc-pill">{changeCount}</span> : null}
           </button>
-          <button role="tab" aria-selected={page === "history"} className={page === "history" ? "active" : ""} onClick={() => setPage("history")}>
+          <button role="tab" data-tab-key="history" ref={pageTabs.registerTab("history")} aria-selected={page === "history"} className={page === "history" ? "active" : ""} onClick={() => setPage("history")}>
             {tr("历史", "History")}
           </button>
-          <button role="tab" aria-selected={page === "pr"} className={page === "pr" ? "active" : ""} onClick={() => setPage("pr")}>
+          <button role="tab" data-tab-key="pr" ref={pageTabs.registerTab("pr")} aria-selected={page === "pr"} className={page === "pr" ? "active" : ""} onClick={() => setPage("pr")}>
             {tr("Pull Request", "Pull request")}
           </button>
+          {pageTabs.indicator}
         </nav>
         <div className="vc-scope-note">
           {status.detached

@@ -541,3 +541,28 @@ it("rewinds trace turns on disk and emits a replacement event", () => {
   assert.equal(reopened.snapshot().version, recorder.snapshot().version);
   assert.deepEqual(reopened.snapshot().nodes.filter(node => node.kind === "user").map(node => node.summary), ["first"]);
 });
+
+it("keeps standalone summary usage across reopen and rewind", () => {
+  const { r: recorder, file, events } = fixture();
+  recorder.restoreHistory([
+    { type: "message", id: "u1", parentId: null, timestamp: new Date(1000).toISOString(), message: { role: "user", content: "first", timestamp: 1000 } },
+    { type: "message", id: "u2", parentId: "u1", timestamp: new Date(2000).toISOString(), message: { role: "user", content: "second", timestamp: 2000 } },
+  ] as SessionEntry[]);
+  recorder.recordSummary({
+    model: "opencode-go/deepseek-v4.1-flash", status: "Completed",
+    startedAt: 1700000001000, completedAt: 1700000002500, durationMs: 1500,
+    usage: { input: 900, output: 120, cacheRead: 6400, cacheWrite: 300, totalTokens: 7420 },
+  });
+  const snapshot = recorder.snapshot();
+  assert.equal(snapshot.summaries.length, 1);
+  assert.equal(snapshot.summaries[0]?.id, "summary-1");
+  assert.equal(snapshot.summaries[0]?.model, "opencode-go/deepseek-v4.1-flash");
+  assert.equal(snapshot.summaries[0]?.usage?.totalTokens, 7420);
+  assert.equal(events.at(-1)?.summaries.length, 1);
+  recorder.rewindTo(1);
+  assert.equal(recorder.snapshot().summaries.length, 1);
+  const reopened = new TraceRecorder("conv", file, () => {});
+  recorders.push(reopened);
+  assert.equal(reopened.snapshot().summaries.length, 1);
+  assert.equal(reopened.snapshot().summaries[0]?.usage?.cacheRead, 6400);
+});

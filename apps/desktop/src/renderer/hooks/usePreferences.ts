@@ -9,7 +9,7 @@ import {
   type DarkTheme,
   type LightTheme,
 } from "../themes";
-import type { AppLocale } from "@vela/shared";
+import type { AppLocale, ThinkingSummaryModel } from "@vela/shared";
 
 export type InfoLayout = "sidebar" | "floating";
 export type Appearance = "system" | "light" | "dark";
@@ -33,7 +33,9 @@ const toolFoldKey = "vela.toolFold";
 const toolProcessDetailsKey = "vela.toolProcessDetails";
 const thinkingSummaryKey = "vela.thinkingSummary";
 const thinkingSummaryStyleKey = "vela.thinkingSummaryStyle";
+const thinkingSummaryModelKey = "vela.thinkingSummaryModel";
 const fileIconThemeKey = "vela.fileIconTheme";
+const composerCapsulesKey = "vela.composerCapsules";
 const hiddenModelsKey = "vela.hiddenModels";
 const darkQuery = "(prefers-color-scheme: dark)";
 
@@ -96,6 +98,14 @@ function isThinkingSummaryStyle(value: unknown): value is ThinkingSummaryStyle {
   return value === "inline" || value === "headline" || value === "prose";
 }
 
+function isThinkingSummaryModel(value: unknown): value is ThinkingSummaryModel | null {
+  if (value === null) return true;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const model = value as Record<string, unknown>;
+  return typeof model.provider === "string" && Boolean(model.provider.trim()) && model.provider.length <= 200 &&
+    typeof model.id === "string" && Boolean(model.id.trim()) && model.id.length <= 500;
+}
+
 function isFileIconTheme(value: unknown): value is FileIconTheme {
   return value === "devicon" || value === "material";
 }
@@ -135,11 +145,17 @@ export function usePreferences() {
   const [thinkingSummaryStyle, setThinkingSummaryStyle] = useState<ThinkingSummaryStyle>(() =>
     readStored(thinkingSummaryStyleKey, isThinkingSummaryStyle, "inline"),
   );
+  const [thinkingSummaryModel, setThinkingSummaryModel] = useState<ThinkingSummaryModel | null>(() =>
+    readStoredJson(thinkingSummaryModelKey, isThinkingSummaryModel, null),
+  );
   const [fileIconTheme, setFileIconTheme] = useState<FileIconTheme>(() =>
     readStored(fileIconThemeKey, isFileIconTheme, "material"),
   );
   const [hiddenModels, setHiddenModels] = useState<string[]>(() =>
     readStoredJson(hiddenModelsKey, isHiddenModelList, []),
+  );
+  const [composerCapsules, setComposerCapsules] = useState(() =>
+    readStored(composerCapsulesKey, (value): value is string => value === "true", "false") === "true",
   );
 
   const isModelHidden = useCallback(
@@ -189,8 +205,13 @@ export function usePreferences() {
   useEffect(() => writeStored(toolProcessDetailsKey, String(toolProcessDetails)), [toolProcessDetails]);
   useEffect(() => writeStored(thinkingSummaryKey, String(thinkingSummary)), [thinkingSummary]);
   useEffect(() => writeStored(thinkingSummaryStyleKey, thinkingSummaryStyle), [thinkingSummaryStyle]);
+  useEffect(() => writeStored(thinkingSummaryModelKey, JSON.stringify(thinkingSummaryModel)), [thinkingSummaryModel]);
   useEffect(() => writeStored(fileIconThemeKey, fileIconTheme), [fileIconTheme]);
   useEffect(() => writeStored(hiddenModelsKey, JSON.stringify(hiddenModels)), [hiddenModels]);
+  useEffect(() => {
+    document.documentElement.dataset.composerCapsules = String(composerCapsules);
+    writeStored(composerCapsulesKey, String(composerCapsules));
+  }, [composerCapsules]);
 
   return {
     infoLayout,
@@ -206,8 +227,11 @@ export function usePreferences() {
     toolProcessDetails,
     thinkingSummary,
     thinkingSummaryStyle,
+    thinkingSummaryModel,
     fileIconTheme,
     hiddenModels,
+    composerCapsules,
+    setComposerCapsules,
     isModelHidden,
     setModelHidden,
     showAllModels,
@@ -220,6 +244,7 @@ export function usePreferences() {
     setToolProcessDetails,
     setThinkingSummary,
     setThinkingSummaryStyle,
+    setThinkingSummaryModel,
     setFileIconTheme,
   };
 }

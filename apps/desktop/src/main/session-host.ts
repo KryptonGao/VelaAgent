@@ -109,8 +109,16 @@ export class SessionHost {
       }
       return this.currentState();
     });
-    ipcMain.handle(IpcChannel.sessionCreate, async () => {
-      await this.runtime.createConversation(this.hooks.currentCwd());
+    ipcMain.handle(IpcChannel.sessionCreate, async (_event, rawCwd: unknown) => {
+      let cwd = this.hooks.currentCwd();
+      if (rawCwd !== undefined) {
+        if (typeof rawCwd !== "string" ||
+          !this.runtime.listConversations().some(conversation => conversation.cwd === rawCwd)) {
+          throw new Error("工作区不存在");
+        }
+        cwd = rawCwd;
+      }
+      await this.runtime.createConversation(cwd);
       return this.currentState();
     });
     ipcMain.handle(IpcChannel.sessionSwitch, async (_event, rawId: unknown) => {
