@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 import { UiStorage } from "../src/main/ui-storage.ts";
 import { createUiStorage } from "../src/renderer/ui-storage.ts";
 import { parseStoredSummaries, serializeStoredSummaries, thinkingDigest, thinkingSummaryKey } from "../src/renderer/thinking-summary.ts";
+import { readThinkingSummaries, thinkingSummariesStorageKey } from "../src/renderer/thinking-summary-storage.ts";
 
 function withStore(run: (file: string) => void) {
   const directory = mkdtempSync(join(tmpdir(), "vela-ui-storage-"));
@@ -34,6 +35,64 @@ function browserStorage(values: Record<string, string> = {}): Storage {
 }
 
 describe("durable UI storage", () => {
+  it("recovers v1 summaries after upgrading to v2 and keeps newer summaries across restarts", () => withStore((file) => {
+    const store = new UiStorage(file);
+    const oldKey = thinkingSummaryKey("history", "zh-CN", thinkingDigest("old thinking"));
+    const sharedKey = thinkingSummaryKey("history", "zh-CN", thinkingDigest("shared thinking"));
+    const newKey = thinkingSummaryKey("new-chat", "en", thinkingDigest("new thinking"));
+    const v1 = JSON.stringify({ [oldKey]: "历史总结", [sharedKey]: "旧版总结" });
+    const v2 = JSON.stringify({ [sharedKey]: "新版总结", [newKey]: "New summary" });
+    store.setItem("vela.thinkingSummaries.v1", v1);
+    store.setItem("vela.thinkingSummaries.v2", v2);
+    const storage = createUiStorage(bridge(store), () => browserStorage());
+    const recovered = readThinkingSummaries(storage);
+    assert.deepEqual(recovered, parseStoredSummaries(JSON.stringify({
+      [oldKey]: "历史总结", [sharedKey]: "新版总结", [newKey]: "New summary",
+    })));
+    assert.equal(store.getItem(thinkingSummariesStorageKey), serializeStoredSummaries(recovered));
+    assert.equal(store.getItem("vela.thinkingSummaries.v1"), v1);
+    assert.equal(store.getItem("vela.thinkingSummaries.v2"), v2);
+    const restarted = createUiStorage(bridge(new UiStorage(file)), () => browserStorage());
+    assert.deepEqual(readThinkingSummaries(restarted), recovered);
+  }));
+
+  it("imports summaries from the legacy browser store and tolerates malformed version data", () => withStore((file) => {
+    const key = thinkingSummaryKey("history", "en", thinkingDigest("thinking"));
+    const legacy = browserStorage({
+      "vela.thinkingSummaries.v1": "malformed",
+      "vela.thinkingSummaries.v2": JSON.stringify({ [key]: "Saved summary", invalid: 42 }),
+    });
+    const storage = createUiStorage(bridge(new UiStorage(file)), () => legacy);
+    assert.deepEqual(readThinkingSummaries(storage), { [key]: { status: "done", text: "Saved summary" } });
+    assert.deepEqual(readThinkingSummaries(createUiStorage(bridge(new UiStorage(file)), () => browserStorage())), {
+      [key]: { status: "done", text: "Saved summary" },
+    });
+  }));
+
+  it("uses the stable store after migration without reimporting removed or pruned summaries", () => withStore((file) => {
+    const store = new UiStorage(file);
+    store.setItem("vela.thinkingSummaries.v1", JSON.stringify({ old: "Old summary" }));
+    store.setItem(thinkingSummariesStorageKey, "{}");
+    assert.deepEqual(readThinkingSummaries(createUiStorage(bridge(store), () => browserStorage())), {});
+  }));
+
+  it("shows legacy summaries even if migration cannot be saved, then retries on the next read", () => {
+    const storage = browserStorage({ "vela.thinkingSummaries.v1": JSON.stringify({ old: "Saved summary" }) });
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (message: string) => { errors.push(message); };
+    try {
+      assert.deepEqual(readThinkingSummaries({
+        getItem: storage.getItem,
+        setItem: () => { throw new Error("Disk full"); },
+      }), { old: { status: "done", text: "Saved summary" } });
+    } finally { console.error = originalError; }
+    assert.equal(errors.length, 1);
+    assert.equal(storage.getItem(thinkingSummariesStorageKey), null);
+    assert.deepEqual(readThinkingSummaries(storage), { old: { status: "done", text: "Saved summary" } });
+    assert.notEqual(storage.getItem(thinkingSummariesStorageKey), null);
+  });
+
   it("restores summaries, automatic generation, and display style after restart on a different origin", () => withStore((file) => {
     const first = createUiStorage(bridge(new UiStorage(file)), () => browserStorage());
     const key = thinkingSummaryKey("chat-a", "zh-CN", thinkingDigest("检查持久化"));

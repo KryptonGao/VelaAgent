@@ -3,12 +3,12 @@ import type { AppLocale } from "@vela/shared";
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import {
   ThinkingCompletionTracker,
-  parseStoredSummaries,
   serializeStoredSummaries,
   thinkingDigest,
   thinkingSummaryKey,
   type ThinkingSummaryState,
 } from "../thinking-summary";
+import { readThinkingSummaries, thinkingSummariesStorageKey } from "../thinking-summary-storage";
 import type { ThinkingSummaryStyle } from "./usePreferences";
 import type { UiMessage } from "./useSession";
 
@@ -19,13 +19,9 @@ export interface ThinkingSummariesApi {
   request(messageId: string, text: string): void;
 }
 
-/** 已完成的总结落盘保存,窗口重开后按思考内容哈希恢复,不再退回“总结”按钮。
- * 键名带版本号:总结提示词改变口径后递增,避免旧的错误总结继续命中缓存。 */
-const storageKey = "vela.thinkingSummaries.v2";
-
 function readStoredSummaries(): Record<string, ThinkingSummaryState> {
   try {
-    return parseStoredSummaries(uiStorage.getItem(storageKey));
+    return readThinkingSummaries(uiStorage);
   } catch {
     return {};
   }
@@ -33,7 +29,7 @@ function readStoredSummaries(): Record<string, ThinkingSummaryState> {
 
 function writeStoredSummaries(records: Record<string, ThinkingSummaryState>) {
   try {
-    uiStorage.setItem(storageKey, serializeStoredSummaries(records));
+    uiStorage.setItem(thinkingSummariesStorageKey, serializeStoredSummaries(records));
   } catch {
     console.error("[vela] Failed to save thinking summaries");
   }
