@@ -8,3 +8,4 @@ out/
 *.tsbuildinfo
 .zcode/
 .scratch-logo/chrome-profile/
+apps/desktop/test-center/.runs/

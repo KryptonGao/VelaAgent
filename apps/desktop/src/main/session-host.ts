@@ -14,6 +14,7 @@ import {
   type InteractionMode,
   isAgentToolName,
   isInteractionMode,
+  isRuntimeInstructionMode,
   type ModelAuthEvent,
   type NewConversationSelection,
   type PlanExecutionContextStrategy,
@@ -67,8 +68,7 @@ export class SessionHost {
         const input = parsePromptInput(raw);
         if (input.conversationId) conversationId = input.conversationId;
         if (!conversationId) throw new Error("还没有可用的对话");
-        this.runtime.addUsage(conversationId, 1, 0);
-        await this.runtime.prompt(conversationId, input.text, input.images);
+        await this.runtime.prompt(conversationId, input.text, input.images, input.deliverAs);
       } catch (error) {
         const message = error instanceof Error ? error.message : "发送失败";
         this.broadcast({ type: "error", conversationId: conversationId ?? "", message });
@@ -105,6 +105,16 @@ export class SessionHost {
         await this.runtime.resumeGoal(conversationId);
       } catch (error) {
         const message = error instanceof Error ? error.message : "无法继续目标";
+        this.broadcast({ type: "error", conversationId, message });
+      }
+      return this.currentState();
+    });
+    ipcMain.handle(IpcChannel.sessionRemoveInstruction, async (_event, rawInstruction: unknown, rawId: unknown) => {
+      const conversationId = resolveConversationId(this.runtime.activeConversationId, rawId);
+      try {
+        await this.runtime.removeInstruction(conversationId, parseId(rawInstruction, "指令"));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "无法撤销指令";
         this.broadcast({ type: "error", conversationId, message });
       }
       return this.currentState();
@@ -488,12 +498,16 @@ function parsePromptInput(raw: unknown): PromptInput {
   const text = typeof record.text === "string" ? record.text.trim() : "";
   if (!text) throw new Error("消息不能为空");
   if (text.length > maxPromptLength) throw new Error("消息过长");
+  if (record.deliverAs !== undefined && !isRuntimeInstructionMode(record.deliverAs)) {
+    throw new Error("投递方式不正确");
+  }
   return {
     text,
     images: parseImages(record.images),
     conversationId: record.conversationId === undefined
       ? undefined
       : parseConversationId(record.conversationId, "对话"),
+    deliverAs: isRuntimeInstructionMode(record.deliverAs) ? record.deliverAs : undefined,
   };
 }
 

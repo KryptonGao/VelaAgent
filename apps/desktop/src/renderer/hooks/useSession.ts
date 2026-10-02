@@ -8,6 +8,7 @@ import type {
   ImageAttachment,
   InteractionMode,
   PlanExecutionContextStrategy,
+  RuntimeInstructionMode,
   ToolActivity,
   ToolStep,
   ToolTrace,
@@ -18,6 +19,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createMessageStore, emptyMessages, messageScope } from "./message-store";
 import { applyPlanDraft, type PlanDraft } from "../plan-draft";
 import { localizeError, tr } from "../locale";
+import { didCompleteTask, noSound, streamNotificationSound, type NotifySound } from "../notification-sounds";
 
 export interface UiMessage {
   id: string;
@@ -45,7 +47,9 @@ export type AgentMessageBuckets = Record<string, Record<string, UiMessage[]>>;
 
 type StreamUpdate = Exclude<AgentStreamEvent, { type: "state" } | { type: "trace" }>;
 
-export function useSession() {
+export function useSession(notify: NotifySound = noSound) {
+  const notifyRef = useRef(notify);
+  notifyRef.current = notify;
   const [state, setState] = useState<AppState | null>(null);
   const [messageStore] = useState(createMessageStore);
   // Only restored history is needed by App to reconstruct legacy agent tabs.
@@ -152,6 +156,9 @@ export function useSession() {
         const conversationId = conversation.id;
         const status = timing.status;
         const previous = statusesRef.current[conversationId];
+        if (didCompleteTask(previous, status, Boolean(completionBlockedRef.current[conversationId]))) {
+          notifyRef.current("complete");
+        }
         if (status === "streaming" && previous !== "streaming") {
           const startedAt = timing.turnStartedAt ?? Date.now();
           turnStartedAtRef.current[conversationId] = startedAt;
@@ -185,6 +192,8 @@ export function useSession() {
     });
 
     const unsubscribe = api.onEvent((event) => {
+      const sound = streamNotificationSound(event);
+      if (sound) notifyRef.current(sound);
       if (event.type === "trace") return;
       if (event.type === "state") {
         receivedStateEvent = true;
@@ -233,6 +242,7 @@ export function useSession() {
     const unsubscribeQuestions = api.onQuestionEvent((event) => {
       if (event.type === "request") {
         const request = event.request;
+        notifyRef.current("question");
         setQuestions((current) => ({ ...current, [request.conversationId]: request }));
         return;
       }
@@ -253,13 +263,24 @@ export function useSession() {
     };
   }, [loadTranscript, messageStore, setAgentBuckets, setBuckets]);
 
-  const send = useCallback(async (text: string, images?: ImageAttachment[]) => {
+  const send = useCallback(async (text: string, images?: ImageAttachment[], deliverAs?: RuntimeInstructionMode) => {
     const api = window.vela;
     const id = activeIdRef.current;
     if (!api || !id) return;
-    completionBlockedRef.current[id] = false;
     const attachments = images && images.length > 0 ? images : undefined;
     setErrors((current) => ({ ...current, [id]: "" }));
+    if (deliverAs) {
+      // 运行中追加指令:不在对话里预建消息,待处理条由快照驱动;
+      // 真正被模型消费时主进程再广播 user_message。
+      try {
+        setState(await api.prompt(text, images, id, deliverAs));
+      } catch (error) {
+        const message = error instanceof Error ? localizeError(error.message) : tr("发送失败", "Failed to send message");
+        setErrors((current) => ({ ...current, [id]: message }));
+      }
+      return;
+    }
+    completionBlockedRef.current[id] = false;
     setBuckets((current) => ({
       ...current,
       [id]: [
@@ -276,6 +297,19 @@ export function useSession() {
       completionBlockedRef.current[id] = true;
       setErrors((current) => ({ ...current, [id]: message }));
       setBuckets((current) => appendAssistantError(current, id, message));
+    }
+  }, []);
+
+  /** 撤销一条尚未被模型消费的排队/调整指令。 */
+  const removeInstruction = useCallback(async (instructionId: string) => {
+    const api = window.vela;
+    const id = activeIdRef.current;
+    if (!api || !id) return;
+    try {
+      setState(await api.removeInstruction(instructionId, id));
+    } catch (error) {
+      const message = error instanceof Error ? localizeError(error.message) : tr("无法撤销指令", "Could not remove the instruction");
+      setErrors((current) => ({ ...current, [id]: message }));
     }
   }, []);
 
@@ -490,6 +524,7 @@ export function useSession() {
     replyQuestion,
     ensureAgentMessages,
     send,
+    removeInstruction,
     edit,
     abort,
     setMode,

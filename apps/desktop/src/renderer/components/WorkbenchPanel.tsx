@@ -21,7 +21,9 @@ import { PlanDocumentPane } from "./PlanPanel";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
 import { StartView, type StartTabAction } from "./StartView";
 import { TerminalView } from "./TerminalView";
-import { CloseIcon, FileIcon, FolderIcon, PlanIcon, PlusIcon, TerminalIcon } from "./icons";
+import { BrowserPanel, BrowserTabLabel } from "./browser/BrowserPanel";
+import type { BrowserController } from "../browser/browser-controller";
+import { ArrowRightIcon, CloseIcon, FileIcon, FolderIcon, GlobeIcon, PlanIcon, PlusIcon, TerminalIcon } from "./icons";
 
 export type WorkbenchTab =
   | { id: string; kind: "plan"; label: string; title?: string }
@@ -31,10 +33,13 @@ export type WorkbenchTab =
   | { id: string; kind: "agent"; label: string; title: string; agent: AgentInfo }
   | { id: string; kind: "start"; label: string; title?: string }
   | { id: string; kind: "files"; label: string; title?: string }
+  | { id: string; kind: "browser"; label: string; title?: string; controller: BrowserController }
   | { id: string; kind: "terminal"; label: string; title?: string; sessionId: string };
 
 interface WorkbenchPanelProps {
   tabs: WorkbenchTab[];
+  collapsed?: boolean;
+  onCollapse?: () => void;
   activeTabId: string | null;
   contextOpen: boolean;
   leftOpen: boolean;
@@ -81,6 +86,7 @@ function TabIcon({ tab }: { tab: WorkbenchTab }) {
   if (tab.kind === "start") return <PlusIcon size={12} />;
   if (tab.kind === "files") return <FolderIcon size={12} />;
   if (tab.kind === "terminal") return <TerminalIcon size={12} />;
+  if (tab.kind === "browser") return <GlobeIcon size={12} />;
   return <AgentStatusMark status={tab.agent.status} />;
 }
 
@@ -109,6 +115,8 @@ function WorkbenchPanelContent({
   finishExit,
   onLastTabClose,
   tabs,
+  collapsed = false,
+  onCollapse,
   activeTabId,
   contextOpen,
   leftOpen,
@@ -156,6 +164,7 @@ function WorkbenchPanelContent({
   const agentTabs = tabs.filter((tab): tab is Extract<WorkbenchTab, { kind: "agent" }> => tab.kind === "agent");
   const startTabs = tabs.filter((tab): tab is Extract<WorkbenchTab, { kind: "start" }> => tab.kind === "start");
   const terminalTabs = tabs.filter((tab): tab is Extract<WorkbenchTab, { kind: "terminal" }> => tab.kind === "terminal");
+  const browserTabs = tabs.filter((tab): tab is Extract<WorkbenchTab, { kind: "browser" }> => tab.kind === "browser");
   const filesTab = tabs.find((tab): tab is Extract<WorkbenchTab, { kind: "files" }> => tab.kind === "files") ?? null;
   const tabButtons = useRef(new Map<string, HTMLButtonElement>());
   const tabListRef = useRef<HTMLElement | null>(null);
@@ -343,8 +352,8 @@ function WorkbenchPanelContent({
   return (
     <aside
       ref={panelRef}
-      className={`workbench-panel${contextOpen ? " is-context-open" : ""}${closing ? " is-closing" : ""}`}
-      inert={closing} aria-hidden={closing || undefined}
+      className={`workbench-panel${contextOpen ? " is-context-open" : ""}${closing ? " is-closing" : ""}${collapsed ? " is-collapsed" : ""}`}
+      inert={closing || collapsed} aria-hidden={closing || collapsed || undefined}
       onTransitionEnd={(event) => {
         if (event.target === event.currentTarget && event.propertyName === "margin-right") finishExit();
       }}
@@ -394,7 +403,8 @@ function WorkbenchPanelContent({
                 key={tab.id}
               >
                 <TabIcon tab={tab} />
-                <span className="workbench-tab-label">{tab.label}</span>
+                {tab.kind === "browser" ? <BrowserTabLabel controller={tab.controller} />
+                  : <span className="workbench-tab-label">{tab.label}</span>}
               </button>
             );
         })}
@@ -427,9 +437,20 @@ function WorkbenchPanelContent({
         >
           <PlusIcon size={14} />
         </button>
+        {onCollapse && <button className="workbench-collapse" type="button" aria-expanded={!collapsed}
+          aria-label={tr("折叠工作面板", "Collapse workbench")}
+          title={tr("折叠工作面板", "Collapse workbench")} onClick={onCollapse}>
+          <ArrowRightIcon size={14} />
+        </button>}
       </div>
 
-      <div className="workbench-content">
+      <div className="workbench-content" inert={collapsed} aria-hidden={collapsed || undefined}>
+        {browserTabs.map((tab) => (
+          <WorkbenchTabPanel key={tab.id} id={tabPanelId(tab)} role="tabpanel"
+            aria-labelledby={tabButtonId(tab)} hidden={activeTabId !== tab.id}>
+            <BrowserPanel controller={tab.controller} />
+          </WorkbenchTabPanel>
+        ))}
         {fileTabs.length > 0 && preview ? (
           <WorkbenchTabPanel
             id={`${baseId}-panel-files`}

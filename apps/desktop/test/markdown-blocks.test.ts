@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
-import { partitionMarkdown, type MarkdownPartition } from "../src/renderer/components/markdown-blocks.ts";
+import { trailingParagraphEnd, partitionMarkdown, type MarkdownPartition } from "../src/renderer/components/markdown-blocks.ts";
 
 const parser = unified().use(remarkParse).use(remarkGfm);
 const normalize = (value: unknown) => JSON.parse(JSON.stringify(value, (key, item) => key === "position" ? undefined : item));
@@ -56,5 +56,31 @@ describe("incremental Markdown blocks", () => {
   it("reuses an unchanged partition", () => {
     const previous = partitionMarkdown("# Title\n\nBody");
     assert.equal(partitionMarkdown(previous.text, previous), previous);
+  });
+});
+
+describe("trailing placement in the last paragraph", () => {
+  it("locates the end of the paragraph a document closes with", () => {
+    const text = "summary with `runtime.prompt` inside";
+    assert.equal(trailingParagraphEnd(text), text.length);
+    const paragraphs = "first paragraph\n\nsecond paragraph";
+    assert.equal(trailingParagraphEnd(paragraphs), paragraphs.length);
+    // 段落后还有空行时,位置停在段落内容末尾而不是文档末尾。
+    assert.equal(trailingParagraphEnd("summary\n\n"), "summary".length);
+  });
+  it("has no paragraph target for other closing nodes", () => {
+    assert.equal(trailingParagraphEnd("- one\n- two"), undefined);
+    assert.equal(trailingParagraphEnd("```ts\nconst x = 1;\n```"), undefined);
+    assert.equal(trailingParagraphEnd("# Heading"), undefined);
+    assert.equal(trailingParagraphEnd("> quoted text"), undefined);
+    assert.equal(trailingParagraphEnd("| a | b |\n| --- | --- |\n| x | y |"), undefined);
+    assert.equal(trailingParagraphEnd(""), undefined);
+  });
+  it("keeps the same answer for the final partition block", () => {
+    const endingInList = partitionMarkdown("Intro\n\n- one\n- two");
+    assert.equal(trailingParagraphEnd(endingInList.blocks.at(-1)!.text), undefined);
+    const endingInParagraph = partitionMarkdown("Intro\n\nTail paragraph.");
+    const tail = endingInParagraph.blocks.at(-1)!.text;
+    assert.equal(trailingParagraphEnd(tail), tail.length);
   });
 });

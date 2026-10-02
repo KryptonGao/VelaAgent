@@ -22,6 +22,12 @@ export function wholeMarkdown(text: string): MarkdownPartition {
   return { text, stable: [], tailOffset: 0, blocks: text ? [{ offset: 0, text }] : [], wholeDocument: true };
 }
 
+/** 文档以段落结尾时返回该段落的结束偏移(相对入参文本);以其它节点结尾时返回 undefined。 */
+export function trailingParagraphEnd(text: string): number | undefined {
+  const last = parser.parse(text).children.at(-1);
+  return last?.type === "paragraph" ? last.position?.end.offset : undefined;
+}
+
 /** Parse only the mutable suffix. Keep two trailing nodes: a partial line may
  * still become a setext heading, table delimiter, list marker or HTML block.
  * Definitions and footnotes have document-wide scope, so use the original

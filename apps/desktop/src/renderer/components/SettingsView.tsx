@@ -29,11 +29,14 @@ import { TrashIcon } from "./icons";
 import { settingsCopy, type SettingsCopy } from "./settings-copy";
 import { localizeError, tr } from "../locale";
 import { SettingsUsageView } from "./usage/SettingsUsageView";
+import type { ConversationLinkTarget } from "../browser/conversation-link-policy";
+import { notificationSoundKinds, type NotifySound } from "../notification-sounds";
 
 type SettingsSection = "agent" | "archived" | "models" | "usage" | "permissions" | "workspace" | "appearance";
 type ModelsApi = ReturnType<typeof useModels>;
 
 interface SettingsViewProps {
+  onPreviewSound: NotifySound;
   preferences: PreferencesApi;
   platform: string;
   models: ModelsApi;
@@ -46,6 +49,7 @@ interface SettingsViewProps {
 const sections: SettingsSection[] = ["agent", "archived", "models", "usage", "permissions", "workspace", "appearance"];
 
 export function SettingsView({
+  onPreviewSound,
   preferences,
   platform,
   models,
@@ -104,7 +108,7 @@ export function SettingsView({
             <WorkspaceSection copy={copy} project={project} />
           </div>
           <div hidden={section !== "appearance"}>
-            <AppearanceSection copy={copy} preferences={preferences} catalog={models.catalog} mod={mod} />
+            <AppearanceSection copy={copy} preferences={preferences} catalog={models.catalog} mod={mod} onPreviewSound={onPreviewSound} />
           </div>
         </div>
       </div>
@@ -979,11 +983,13 @@ function WorkspaceSection({ copy, project }: { copy: SettingsCopy; project: Proj
 }
 
 function AppearanceSection({
+  onPreviewSound,
   copy,
   preferences,
   catalog,
   mod,
 }: {
+  onPreviewSound: NotifySound;
   copy: SettingsCopy;
   preferences: PreferencesApi;
   catalog: ModelCatalog | null;
@@ -992,6 +998,8 @@ function AppearanceSection({
   const {
     infoLayout,
     setInfoLayout,
+    conversationLinkTarget,
+    setConversationLinkTarget,
     appearance,
     locale,
     theme,
@@ -1017,6 +1025,10 @@ function AppearanceSection({
     setFileIconTheme,
   } = preferences;
   const text = copy.appearance;
+  const soundLabels = {
+    error: text.soundError, complete: text.soundComplete,
+    question: text.soundQuestion, permission: text.soundPermission,
+  };
   const summaryModelGroups = useMemo(() => groupAvailable(catalog), [catalog]);
   const summaryModelMissing = Boolean(thinkingSummaryModel && !catalog?.models.some(model =>
     model.provider === thinkingSummaryModel.provider && model.id === thinkingSummaryModel.id && model.available,
@@ -1047,6 +1059,10 @@ function AppearanceSection({
   const infoLayoutOptions: { id: InfoLayout; label: string }[] = [
     { id: "sidebar", label: text.infoLayoutSidebar },
     { id: "floating", label: text.infoLayoutFloating },
+  ];
+  const conversationLinkOptions: { id: ConversationLinkTarget; label: string }[] = [
+    { id: "embedded", label: text.linkEmbedded },
+    { id: "external", label: text.linkExternal },
   ];
   const thinkingSummaryStyleOptions: { id: ThinkingSummaryStyle; label: string }[] = [
     { id: "inline", label: text.thinkingSummaryStyleInline },
@@ -1104,8 +1120,27 @@ function AppearanceSection({
           onChange={setLocale}
         />
       </SettingsBlock>
+      <SettingsBlock title={text.soundEffects} hint={text.soundEffectsHint}>
+        <Segmented
+          label={text.soundEffects}
+          value={preferences.soundEffects ? "on" : "off"}
+          options={[{ id: "off", label: text.soundEffectsOff }, { id: "on", label: text.soundEffectsOn }]}
+          onChange={value => preferences.setSoundEffects(value === "on")}
+        />
+        <div className="settings-actions" role="group" aria-label={text.soundPreview}>
+          {notificationSoundKinds.map(sound => (
+            <button key={sound} type="button" className="settings-secondary" onClick={() => onPreviewSound(sound)}>
+              {text.soundPreview}: {soundLabels[sound]}
+            </button>
+          ))}
+        </div>
+      </SettingsBlock>
       <SettingsBlock title={text.infoLayout} hint={text.infoLayoutHint}>
         <Segmented label={text.infoLayout} value={infoLayout} options={infoLayoutOptions} onChange={setInfoLayout} />
+      </SettingsBlock>
+      <SettingsBlock title={text.conversationLinkTarget} hint={text.conversationLinkHint}>
+        <Segmented label={text.conversationLinkTarget} value={conversationLinkTarget}
+          options={conversationLinkOptions} onChange={setConversationLinkTarget} />
       </SettingsBlock>
       <SettingsBlock title={text.composerCapsules} hint={text.composerCapsulesHint}>
         <Segmented

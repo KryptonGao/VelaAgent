@@ -15,6 +15,9 @@ const noop = () => {};
 const ready = async () => {};
 const pause = (ms = 80) => new Promise(resolve => setTimeout(resolve, ms));
 const state = { activeConversationId: "c", conversations: [{ id: "c", title: "Fixture", status: "ready" }],
+  // 首帧消息还没加载时 ChatView 会读 context,这里给全字段避免竞态崩溃。
+  context: { messageCount: 0, toolCallCount: 0, turnCount: 0, stepCount: 0, tokens: 0, contextWindow: null, percent: null,
+    segments: { system: 0, tools: 0, rules: 0, skills: 0, conversation: 0 }, sessionTokens: null, cacheHitRate: null, outputSpeed: null },
   session: { id: "c", title: "Fixture", status: "ready", mode: "agent", modelReady: false, tools: [], thinkingLevels: [] },
 } as unknown as AppState;
 let emit: (event: AgentStreamEvent) => void = noop;
@@ -163,6 +166,7 @@ void checks().catch(error => results.push(`FAIL ${error.message}`)).finally(() =
   const output = document.createElement("pre");
   output.id = "stream-check-results";
   output.textContent = results.join("\n");
+  output.dataset.status = results.some((line) => line.startsWith("FAIL")) ? "failed" : "passed";
   output.style.cssText = "position:fixed;inset:0;background:white;color:black;z-index:99999;overflow:auto;padding:24px";
   document.body.append(output);
 });

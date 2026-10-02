@@ -2,11 +2,12 @@ import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
-import { memo, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
-import { partitionMarkdown, wholeMarkdown, type MarkdownPartition } from "./markdown-blocks";
+import { memo, useContext, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
+import { trailingParagraphEnd, partitionMarkdown, wholeMarkdown, type MarkdownPartition } from "./markdown-blocks";
 import { useReducedMotion } from "../hooks/useMotionPresence";
 import { useFilePreview, type FilePreviewContextValue } from "./preview/FilePreviewContext";
 import { tr, useAppLocale } from "../locale";
+import { ConversationLinkContext } from "./ConversationLinkContext";
 
 const remarkPlugins = [remarkGfm, remarkBreaks];
 
@@ -77,9 +78,13 @@ function isLikelyPath(text: string): boolean {
 }
 
 function MarkdownLink({ href, children }: { href?: string; children?: ReactNode }) {
+  const openLink = useContext(ConversationLinkContext);
   if (!href) return <span>{children}</span>;
   return (
-    <a href={href} target="_blank" rel="noreferrer noopener">
+    <a href={href} target="_blank" rel="noreferrer noopener" onClick={(event) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      if (openLink?.(href)) event.preventDefault();
+    }}>
       {children}
     </a>
   );
@@ -107,20 +112,34 @@ function safeUrl(url: string): string {
   return "";
 }
 
-const MarkdownBlockView = memo(function MarkdownBlockView({ text, components, entering, motionAllowed }: {
-  text: string; components: Components; entering: boolean; motionAllowed: boolean;
+const MarkdownBlockView = memo(function MarkdownBlockView({ text, components, entering, motionAllowed, trailing }: {
+  text: string; components: Components; entering: boolean; motionAllowed: boolean; trailing?: ReactNode;
 }) {
   useAppLocale();
   const arrival = useRef(entering);
   useLayoutEffect(() => { if (!motionAllowed) arrival.current = false; }, [motionAllowed]);
+  // 附加内容优先排进最后一行;文档不以段落结尾时退到块末尾,保证它始终可见。
+  const trailingEnd = trailing === undefined ? undefined : trailingParagraphEnd(text);
+  const blockComponents: Components = useMemo(
+    () => trailingEnd === undefined
+      ? components
+      : { ...components, p: ({ children, node }) => <p>{children}{node?.position?.end.offset === trailingEnd ? trailing : null}</p> },
+    [components, trailingEnd, trailing],
+  );
   return <div className={`md-block${arrival.current && motionAllowed ? " is-entering" : ""}`}>
-    <ReactMarkdown remarkPlugins={remarkPlugins} urlTransform={safeUrl} components={components}>
+    <ReactMarkdown remarkPlugins={remarkPlugins} urlTransform={safeUrl} components={blockComponents}>
       {text}
     </ReactMarkdown>
+    {trailing !== undefined && trailingEnd === undefined ? trailing : null}
   </div>;
 });
 
-export const Markdown = memo(function Markdown({ text, streaming = false }: { text: string; streaming?: boolean }) {
+export const Markdown = memo(function Markdown({ text, streaming = false, trailing }: {
+  text: string;
+  streaming?: boolean;
+  /** 追加到文档末尾段落行尾的内容,例如思考总结末尾的开合图标。 */
+  trailing?: ReactNode;
+}) {
   useAppLocale();
   const preview = useFilePreview();
   const components = useMemo(
@@ -135,11 +154,13 @@ export const Markdown = memo(function Markdown({ text, streaming = false }: { te
   const partition = useMemo(() => incremental ? partitionMarkdown(text, committed.current) : wholeMarkdown(text), [text, incremental]);
   const initialOffsets = useRef(new Set((streaming ? partition.blocks.slice(0, -1) : partition.blocks).map((block) => block.offset)));
   useLayoutEffect(() => { committed.current = partition; }, [partition]);
+  const lastOffset = partition.blocks.at(-1)?.offset;
   return (
     <div className="md-content">
       {partition.blocks.map((block) => <MarkdownBlockView key={block.offset} text={block.text}
+        trailing={block.offset === lastOffset ? trailing : undefined}
         components={components} motionAllowed={!reduced && !partition.wholeDocument} entering={streaming && !reduced && !partition.wholeDocument &&
-          block.offset === partition.blocks.at(-1)?.offset && !initialOffsets.current.has(block.offset)} />)}
+          block.offset === lastOffset && !initialOffsets.current.has(block.offset)} />)}
     </div>
   );
 });

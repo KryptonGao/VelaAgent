@@ -9,7 +9,7 @@ import {
   WorkspaceManager,
   createSandboxedToolDefinitions,
 } from "@vela/workspace";
-import { app, BrowserWindow, ipcMain, nativeImage, nativeTheme, shell } from "electron";
+import { app, BrowserWindow, ipcMain, nativeImage, nativeTheme, session, shell } from "electron";
 import type { BrowserWindowConstructorOptions } from "electron";
 import { IpcChannel } from "@vela/shared";
 import { writeFileSync } from "node:fs";
@@ -23,6 +23,8 @@ import { ensureLoginShellPath } from "./shell-path";
 import { TerminalHost } from "./terminal-host";
 import { prepareVelaHome, resolveVelaHome } from "./vela-home";
 import { UiStorage } from "./ui-storage";
+import { registerUiBrowserSecurity } from "./browser-security";
+import { UI_BROWSER_PARTITION } from "../browser-policy";
 import appIconPath from "../../resources/icon.png?asset";
 
 app.setName("Vela");
@@ -69,8 +71,11 @@ function createWindow(): BrowserWindow {
       nodeIntegrationInWorker: false,
       nodeIntegrationInSubFrames: false,
       webSecurity: true,
+      webviewTag: true,
     },
   });
+
+  registerUiBrowserSecurity(win.webContents);
 
   win.once("ready-to-show", () => {
     win.show();
@@ -135,6 +140,9 @@ function createWindow(): BrowserWindow {
 
 async function start(): Promise<void> {
   await loginShellPathReady;
+  const browserSession = session.fromPartition(UI_BROWSER_PARTITION);
+  browserSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  browserSession.setPermissionCheckHandler(() => false);
   const fallbackCwd = resolve(app.getAppPath(), "../..");
   const home = resolveVelaHome();
   await prepareVelaHome(home, app.getPath("userData"));

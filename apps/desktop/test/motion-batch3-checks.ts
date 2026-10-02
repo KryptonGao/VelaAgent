@@ -133,5 +133,9 @@ export async function runBatch3MotionChecks(setReducedMotion: (value: boolean) =
       assert(node('[data-arrival-key="reduced"]').getAnimations().length === 0, "preference change replayed old entries");
     });
     output.textContent += `\n${passed} Batch 3 checks passed.\n`;
-  } catch (error) { output.textContent += `FAIL ${error instanceof Error ? error.stack : String(error)}\n`; }
+    output.dataset.status = "passed";
+  } catch (error) {
+    output.textContent += `FAIL ${error instanceof Error ? error.stack : String(error)}\n`;
+    output.dataset.status = "failed";
+  }
 }

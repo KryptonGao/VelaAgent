@@ -8,7 +8,7 @@ import type { AppState, AskUserQuestionRequest, InteractionMode } from "@vela/sh
 import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useAgentWorkspace } from "./AgentPanel";
 import { modKeyLabel } from "../platform";
-import { BranchIcon, CheckIcon, CopyIcon, FolderIcon, PlusIcon, StackIcon } from "./icons";
+import { ArrowLeftIcon, BranchIcon, CheckIcon, CopyIcon, FolderIcon, PlusIcon, StackIcon } from "./icons";
 import { trackEnteredMessages, type EnterTrack } from "./message-motion";
 import type { useModels } from "../hooks/useModels";
 import type { ProjectApi } from "../hooks/useProject";
@@ -18,6 +18,7 @@ import { RepoCard } from "./RepoCard";
 import { Composer } from "./Composer";
 import { useContentArrival } from "./BatchMotion";
 import { Markdown } from "./Markdown";
+import { ConversationLinkContext } from "./ConversationLinkContext";
 import { OpenInAppButton } from "./OpenInAppButton";
 import { Thinking } from "./Thinking";
 import { ThinkingSummaryContext } from "./ThinkingSummaryContext";
@@ -151,7 +152,9 @@ export interface ChatViewProps {
   thinkingSummaries?: ThinkingSummariesApi;
   /** 在输入框模型列表中隐藏的模型，key 为 `provider/id`。 */
   hiddenModels?: string[];
-  onSend: (text: string, images?: import("@vela/shared").ImageAttachment[]) => Promise<void>;
+  onSend: (text: string, images?: import("@vela/shared").ImageAttachment[], deliverAs?: import("@vela/shared").RuntimeInstructionMode) => Promise<void>;
+  /** 撤销一条还没被模型消费的排队/调整指令。 */
+  onRemoveInstruction: (instructionId: string) => Promise<void>;
   onEdit?: (turnIndex: number, text: string, images?: import("@vela/shared").ImageAttachment[]) => Promise<void>;
   onAbort: () => Promise<void>;
   onMode: (mode: import("@vela/shared").InteractionMode) => void;
@@ -163,6 +166,8 @@ export interface ChatViewProps {
   onBranch: (turnIndex: number) => void;
   /** 顶栏的「新建标签页」入口:工作面板没开、或右侧栏收起时才显示,避免和标签栏的 + 重复。 */
   showNewTab: boolean;
+  onExpandWorkbench?: () => void;
+  onOpenWebLink?: (url: string) => boolean;
   onNewTab: () => void;
   onOpenChanges: () => void;
   onReviewTurn?: (request: TurnReviewRequest) => void;
@@ -189,6 +194,7 @@ export function ChatView({
   thinkingSummaries,
   hiddenModels = [],
   onSend,
+  onRemoveInstruction,
   onEdit,
   onAbort,
   onMode,
@@ -198,6 +204,8 @@ export function ChatView({
   onReplyQuestion,
   onBranch,
   showNewTab,
+  onExpandWorkbench,
+  onOpenWebLink,
   onNewTab,
   onOpenChanges,
   onReviewTurn,
@@ -517,6 +525,12 @@ export function ChatView({
               </span>
             </button>
           ) : null}
+          {onExpandWorkbench && <button className="view-icon-btn workbench-expand" type="button"
+            title={tr("展开工作面板", "Expand workbench")}
+            aria-label={tr("展开工作面板", "Expand workbench")} aria-expanded={false}
+            onClick={onExpandWorkbench}>
+            <ArrowLeftIcon size={15} />
+          </button>}
           {showNewTab ? (
             <button
               className="view-icon-btn"
@@ -562,6 +576,7 @@ export function ChatView({
             onToggle={onToggleRight} />
         </div>
       ) : null}
+      <ConversationLinkContext.Provider value={onOpenWebLink ?? null}>
       <div className="chat-scroll-area" ref={scrollerRef}>
         <div className="chat-message-surface" key={messageSurfaceKey} ref={messageSurfaceRef}>
         {session?.status === "error" && session.error ? (
@@ -693,10 +708,13 @@ export function ChatView({
         </div>
       </div>
 
+      </ConversationLinkContext.Provider>
       <Composer
         ref={dockRef}
         disabled={session?.status !== "ready" && session?.status !== "streaming"}
         streaming={Boolean(streaming)}
+        platform={platform}
+        instructions={state?.session.pendingInstructions ?? []}
         showSetupControls={messages.length === 0 && !streaming && (state?.context.turnCount ?? 0) === 0}
         model={session?.model}
         modelProvider={session?.modelProvider ?? null}
@@ -712,6 +730,7 @@ export function ChatView({
         contextPopover={floatingInfo}
         project={project}
         onSend={onSend}
+        onRemoveInstruction={onRemoveInstruction}
         onAbort={onAbort}
         onMode={onMode}
       />

@@ -606,7 +606,7 @@ code,
 
 /* 纸面只在整体外缘倒圆角,并排的对话区与工作面板在接缝处保持相连。 */
 .main-chat-view { --paper-left-radius: var(--glass-fillet); --paper-right-radius: var(--glass-fillet); }
-.main-stage-pane:has(> .workbench-panel) > .main-chat-view { --paper-right-radius: 0px; }
+.main-stage-pane:has(> .workbench-panel:not(.is-collapsed)) > .main-chat-view { --paper-right-radius: 0px; }
 .workbench-panel { --paper-left-radius: 0px; --paper-right-radius: var(--glass-fillet); }
 .settings-view { --paper-left-radius: var(--glass-fillet); --paper-right-radius: var(--glass-fillet); }
 .main-chat-view::after,
@@ -1646,12 +1646,16 @@ code,
   line-height: 1.35;
   margin: 0.9em 0 0.35em;
 }
-.md-content h1 { font-size: 15px; }
-.md-content h2 { font-size: 15px; }
-.md-content h3 { font-size: 15px; }
-.md-content h4,
-.md-content h5,
-.md-content h6 { font-size: 15px; }
+/*
+ * 标题用 em 跟随所在容器的正文字号:聊天 15px、追踪预览 12px、思考区 13px 都能保持
+ * 同一套层级比例,不会在小字号区域里冒出过大的标题。
+ */
+.md-content h1 { font-size: 1.33em; }
+.md-content h2 { font-size: 1.18em; }
+.md-content h3 { font-size: 1.07em; }
+.md-content h4 { font-size: 1em; }
+.md-content h5 { font-size: 0.93em; }
+.md-content h6 { font-size: 0.87em; }
 .md-content ul,
 .md-content ol {
   padding-left: 1.25em;
@@ -1917,10 +1921,6 @@ code,
   /* 整段总结都可点击开合思考内容。 */
   cursor: pointer;
 }
-.thinking-prose-text {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
 .thinking-prose-toggle {
   display: inline-flex;
   align-items: center;
@@ -2002,19 +2002,14 @@ code,
   z-index: 1;
   left: 0;
   right: 5px;
-  height: 66px;
+  height: var(--thinking-edge-height, 66px);
   opacity: 0;
   pointer-events: none;
-  transition: opacity var(--transition-enter);
-  -webkit-backdrop-filter: blur(3px);
-  backdrop-filter: blur(3px);
+  /* 背景和滤镜使用同一滚动距离权重。 */
 }
-.thinking-scroll-fade.is-visible { opacity: 1; }
 .thinking-edge-filter { position: absolute; pointer-events: none; }
-.thinking-scroll-shell.has-content-edge-blur > .thinking-scroll-fade {
-  /* 模糊已由视口滤镜完成,这里只保留边缘背景的渐变淡出。 */
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
+.thinking-scroll-shell.has-content-edge-blur > .thinking-scroll-viewport {
+  filter: var(--scroll-edge-filter);
 }
 .thinking-scroll-fade-top {
   top: 0;
@@ -2053,10 +2048,16 @@ code,
 .process-thinking-text .md-content h5,
 .process-thinking-text .md-content h6 {
   margin: 0 0 2px;
-  font-size: 13px;
   font-weight: 500;
   letter-spacing: 0;
 }
+/* 紧凑过程卡片里收窄层级差,再大的标题也压在这个字号区间。 */
+.process-thinking-text .md-content h1 { font-size: 15px; }
+.process-thinking-text .md-content h2 { font-size: 14px; }
+.process-thinking-text .md-content h3 { font-size: 13.5px; }
+.process-thinking-text .md-content h4 { font-size: 13px; }
+.process-thinking-text .md-content h5 { font-size: 12.5px; }
+.process-thinking-text .md-content h6 { font-size: 12px; }
 .thinking-text .md-content blockquote,
 .thinking-text .md-content del {
   color: inherit;
@@ -4736,9 +4737,10 @@ button.environment-row:not(:disabled):hover { background: var(--bg-surface-subtl
   margin: 1.5em 0 0.45em;
 }
 .plan-doc-body .md-content h3 { font-size: 15.5px; margin: 1.2em 0 0.35em; }
+/* h4 及以下沿用 .md-content 的比例字号。 */
 .plan-doc-body .md-content h4,
 .plan-doc-body .md-content h5,
-.plan-doc-body .md-content h6 { font-size: 15px; margin: 1em 0 0.3em; }
+.plan-doc-body .md-content h6 { margin: 1em 0 0.3em; }
 .plan-doc-body .md-content p,
 .plan-doc-body .md-content ul,
 .plan-doc-body .md-content ol,
@@ -4936,6 +4938,44 @@ button.environment-row:not(:disabled):hover { background: var(--bg-surface-subtl
 }
 .attach-menu-row:hover { background: var(--bg-card-blue); color: var(--text-primary); }
 .attachment-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.instruction-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.instruction-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(100%, 540px);
+  padding: 4px 6px 4px 4px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface-subtle);
+  font-size: 15px;
+  color: var(--text-secondary);
+}
+.instruction-badge {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  line-height: 18px;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+}
+.instruction-chip.instruction-steer .instruction-badge {
+  background: color-mix(in srgb, var(--accent-blue) 14%, transparent);
+  color: var(--accent-blue);
+}
+.instruction-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.instruction-remove {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--text-dim);
+  background: transparent;
+  transition: background-color 100ms ease, color 100ms ease;
+}
+.instruction-remove:hover { background: var(--bg-hover); color: var(--text-primary); }
 .attachment-chip {
   position: relative;
   display: flex;
@@ -6253,6 +6293,90 @@ button.settings-radio:hover:not(:disabled) { background: var(--bg-hover); }
 .workbench-new-tab:hover { background: var(--bg-hover); color: var(--text-primary); }
 .workbench-new-tab:active { transform: scale(0.94); }
 
+.workbench-collapse {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  -webkit-app-region: no-drag;
+}
+.workbench-collapse:hover { background: var(--bg-hover); color: var(--text-primary); }
+/* Folding hides boxes only: mounted guests keep history, forms and scroll positions. */
+.vela-window .workbench-panel.is-collapsed { display: none; }
+
+/* ---------- 手动浏览器 ---------- */
+.browser-panel { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.browser-toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.browser-nav {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+}
+.browser-nav:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
+.browser-nav:disabled { opacity: 0.4; cursor: default; }
+.browser-address-form { flex: 1; min-width: 0; margin-left: 4px; }
+.browser-address {
+  width: 100%;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface-subtle);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.browser-address::placeholder { color: var(--text-muted); }
+.browser-address:focus-visible, .browser-nav:focus-visible, .workbench-collapse:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+.browser-address[aria-invalid="true"] { border-color: var(--danger); }
+.browser-page-info {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 30px;
+  padding: 4px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 12px;
+}
+.browser-page-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+.browser-load-status { flex: none; color: var(--text-muted); }
+.browser-error { flex: none; padding: 8px 14px; font-size: 12px; color: var(--danger); background: var(--danger-tint); overflow-wrap: anywhere; }
+.browser-error > span { display: block; margin-top: 4px; }
+.browser-viewport { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.browser-webview { display: flex; width: 100%; height: 100%; }
+.browser-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  background: var(--bg-chat);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.browser-empty h2 { margin: 0; font-size: 17px; font-weight: 550; color: var(--text-primary); }
+.browser-empty p { margin: 0; font-size: 13px; text-align: center; }
+
 /* ---------- 新标签页起始页 ---------- */
 
 .start-view {
@@ -6728,13 +6852,13 @@ button.settings-radio:hover:not(:disabled) { background: var(--bg-hover); }
 .preview-markdown-scroll .md-content h6 {
   scroll-margin-top: 12px;
 }
-.preview-markdown-scroll .md-content h1 { font-size: 15px; }
+.preview-markdown-scroll .md-content h1 { font-size: 24px; font-weight: 700; }
 .preview-markdown-scroll .md-content h2 {
-  font-size: 15px;
+  font-size: 18px;
   padding-bottom: 0.2em;
   border-bottom: 1px solid color-mix(in srgb, var(--text-primary) 12%, transparent);
 }
-.preview-markdown-scroll .md-content h3 { font-size: 15px; }
+.preview-markdown-scroll .md-content h3 { font-size: 15.5px; }
 .preview-markdown-scroll .md-content :not(pre) > code {
   background: var(--bg-hover);
 }
@@ -8024,6 +8148,7 @@ button.turn-changes-path:hover { color: var(--accent-blue); }
 }
 @keyframes attachment-in { from { opacity: 0; transform: scale(0.94); } to { opacity: 1; transform: none; } }
 .attachment-row:empty { display: none; }
+.instruction-row:empty { display: none; }
 .session-groups { display: flex; flex-direction: column; }
 .subchat-item { transition: background-color 100ms ease, color 100ms ease; }
 .subchat-item::before {
@@ -8052,17 +8177,34 @@ button.turn-changes-path:hover { color: var(--accent-blue); }
 .context-usage-details.open .context-usage-details-inner { opacity: 1; }
 
 .input-textarea { transition: height 120ms var(--motion-ease-enter); }
-.composer-action-slot { display: inline-grid; flex: none; width: 32px; height: 32px; }
-.composer-action-slot > .send-action-blue-btn {
-  grid-area: 1 / 1;
+.composer-action-slot { display: inline-flex; align-items: center; gap: 6px; flex: none; min-height: 32px; }
+.composer-action-stack { display: inline-grid; grid-auto-flow: column; align-items: center; gap: 6px; }
+.composer-action-stack > .send-action-blue-btn {
+  grid-row: 1;
+  grid-column: 1;
   opacity: 1;
   transform: scale(1);
   transition: opacity 120ms ease, transform 160ms var(--motion-ease-enter), background-color 100ms ease;
 }
-.composer-action-slot > .send-action-blue-btn:disabled { opacity: 0.45; }
-.composer-action-slot > .send-action-blue-btn.stop,
-.composer-action-slot.is-streaming > .send { opacity: 0; transform: scale(0.86); pointer-events: none; }
-.composer-action-slot.is-streaming > .stop { opacity: 1; transform: scale(1); pointer-events: auto; }
+.composer-action-stack > .send-action-blue-btn:disabled { opacity: 0.45; }
+.composer-action-slot > .composer-action-stack > .stop,
+.composer-action-slot.is-streaming:not(.has-instruction) > .composer-action-stack > .send { opacity: 0; transform: scale(0.86); pointer-events: none; }
+.composer-action-slot.is-streaming > .composer-action-stack > .stop { opacity: 1; transform: scale(1); pointer-events: auto; }
+.composer-action-slot.is-streaming.has-instruction > .composer-action-stack > .stop { grid-column: 2; }
+.composer-steer-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  animation: content-swap-in 120ms var(--motion-ease-enter);
+  transition: background-color 100ms ease, color 100ms ease, opacity 120ms ease;
+}
+.composer-steer-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
+.composer-steer-btn:disabled { opacity: 0.45; cursor: default; }
 .composer-stat-ring-progress { transition: stroke-dashoffset 320ms var(--motion-ease-enter), stroke 200ms ease; }
 .composer-stat-context { transition: color 200ms ease; }
 .approval-slot.open .approval-banner { animation: content-swap-in 120ms ease; }
@@ -8094,7 +8236,7 @@ button.turn-changes-path:hover { color: var(--accent-blue); }
 @media (prefers-reduced-motion: reduce) {
   .content-swap-current, .content-swap-outgoing, .motion-list-item, .motion-list-body,
   .tool-card, .tool-run, .tool-compact-item, .tool-compact-group, .diff-content-enter,
-  .composer-action-slot > .send-action-blue-btn, .subchat-item::before, .approval-btn { transform: none !important; }
+  .composer-action-stack > .send-action-blue-btn, .composer-steer-btn, .subchat-item::before, .approval-btn { transform: none !important; }
 }
 
 /*

@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
 import { tr } from "../locale";
-import { DiffIcon, FolderIcon, TerminalIcon } from "./icons";
+import { DiffIcon, FolderIcon, GlobeIcon, TerminalIcon } from "./icons";
 
-/** 起始页提供的三个入口;宿主据此打开对应标签页。 */
-export type StartTabAction = "changes" | "terminal" | "files";
+/** 起始页入口;宿主据此打开对应标签页。 */
+export type StartTabAction = "changes" | "terminal" | "files" | "browser";
 
 function StartOption({
   icon,
@@ -36,7 +36,7 @@ function StartOption({
 }
 
 /**
- * 新标签页的起始页:把工作面板最常用的三个入口集中展示。
+ * 新标签页的起始页:集中展示工作面板入口。
  * 选中后由宿主把当前起始标签替换成对应内容。
  */
 export function StartView({
@@ -54,6 +54,12 @@ export function StartView({
           <p>{tr("选择要在这个标签里打开的内容", "Pick what to open in this tab")}</p>
         </div>
         <div className="start-options">
+          <StartOption
+            icon={<GlobeIcon size={16} />}
+            title={tr("浏览器", "Browser")}
+            description={tr("在面板中手动浏览网页", "Browse web pages manually in the panel")}
+            onSelect={() => onAction("browser")}
+          />
           <StartOption
             icon={<DiffIcon size={16} />}
             title={tr("变更", "Changes")}

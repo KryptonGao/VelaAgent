@@ -3,13 +3,15 @@ import type {
   FileAttachmentPayload,
   ImageAttachment,
   InteractionMode,
+  RuntimeInstruction,
+  RuntimeInstructionMode,
   SkillSummary,
   ThinkingLevel,
 } from "@vela/shared";
 import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { useModels } from "../hooks/useModels";
 import type { ProjectApi } from "../hooks/useProject";
-import { CloseIcon, FileIcon, SendIcon } from "./icons";
+import { CloseIcon, FileIcon, SendIcon, SteerIcon } from "./icons";
 import { MotionList } from "./BatchMotion";
 import { useReducedMotion } from "../hooks/useMotionPresence";
 import { PopoverPresence } from "./MotionPresence";
@@ -24,11 +26,16 @@ import { SandboxPill } from "./composer/SandboxPill";
 import { SkillMenu, SkillToken } from "./composer/SkillMenu";
 import { WorkspaceChip } from "./composer/WorkspaceChip";
 import { applySkillPick, composeSkillPrompt, filterSkills, slashTokenAt } from "./composer/skill-picker";
+import { modKeyLabel } from "../platform";
 import { localizeError, tr } from "../locale";
 
 export interface ComposerProps {
   disabled: boolean;
   streaming: boolean;
+  /** 用于把快捷键提示里的修饰键适配成当前平台。 */
+  platform: string;
+  /** 已提交、等待执行的排队/调整指令。 */
+  instructions: RuntimeInstruction[];
   /** 工作区、执行环境和分支仅在当前聊天第一轮开始前显示。 */
   showSetupControls: boolean;
   model: string | null | undefined;
@@ -46,7 +53,9 @@ export interface ComposerProps {
   usage: ContextUsage | null;
   contextPopover?: boolean;
   project: ProjectApi;
-  onSend: (text: string, images?: ImageAttachment[]) => Promise<void>;
+  onSend: (text: string, images?: ImageAttachment[], deliverAs?: RuntimeInstructionMode) => Promise<void>;
+  /** 撤销一条还没被模型消费的排队/调整指令。 */
+  onRemoveInstruction: (instructionId: string) => Promise<void>;
   onAbort: () => Promise<void>;
   onMode: (mode: InteractionMode) => void;
 }
@@ -54,6 +63,8 @@ export interface ComposerProps {
 export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Composer({
   disabled,
   streaming,
+  platform,
+  instructions,
   showSetupControls,
   model,
   modelProvider,
@@ -69,6 +80,7 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
   contextPopover = false,
   project,
   onSend,
+  onRemoveInstruction,
   onAbort,
   onMode,
 }, ref) {
@@ -243,9 +255,9 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
     setDismissedKey(null);
   }
 
-  async function submit(): Promise<void> {
+  async function submit(steerIntent = false): Promise<void> {
     const text = composeSkillPrompt(skill?.name ?? null, value);
-    if (!text || disabled || streaming || !modelReady) return;
+    if (!text || disabled || !modelReady) return;
     const images = attachments
       .map((entry) => entry.image)
       .filter((image): image is ImageAttachment => image !== null);
@@ -253,17 +265,25 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
     setSlash(null);
     setSkill(null);
     setAttachments([]);
-    await onSend(text, images.length > 0 ? images : undefined);
+    // 运行中按追加指令投递:Enter 排队,⌘/Ctrl+Enter 调整当前任务。
+    const deliverAs: RuntimeInstructionMode | undefined = streaming
+      ? (steerIntent ? "steer" : "queue")
+      : undefined;
+    await onSend(text, images.length > 0 ? images : undefined, deliverAs);
   }
 
   const showError = sendError ? localizeError(sendError) : project.error ? localizeError(project.error) : null;
+  const modifier = modKeyLabel(platform);
   const sendHint = disabled
     ? tr("会话还没有准备好", "Chat is not ready yet")
     : !modelReady
       ? tr("先选择一个可用的模型", "Choose an available model first")
       : !prompt
         ? tr("输入内容后发送", "Enter a message to send")
-        : tr("发送 (Enter)", "Send (Enter)");
+        : streaming
+          ? tr("排队发送 (Enter)", "Queue (Enter)")
+          : tr("发送 (Enter)", "Send (Enter)");
+  const steerHint = tr(`调整当前任务 (${modifier}Enter)`, `Steer current task (${modifier}Enter)`);
 
   return (
     <div className="chat-dock-wrapper" ref={ref}>
@@ -316,6 +336,26 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
             />
           </div>
         </PopoverPresence>
+
+        <MotionList className="instruction-row" items={instructions} keyOf={(entry) => entry.id} horizontal>
+          {(entry) => (
+            <div className={`instruction-chip instruction-${entry.mode}`}>
+              <span className="instruction-badge">
+                {entry.mode === "queue" ? tr("排队", "Queued") : tr("调整", "Steering")}
+              </span>
+              <span className="instruction-text" title={entry.text}>{entry.text}</span>
+              <button
+                type="button"
+                className="instruction-remove"
+                title={tr("撤销这条指令", "Remove this instruction")}
+                aria-label={tr("撤销这条指令", "Remove this instruction")}
+                onClick={() => void onRemoveInstruction(entry.id)}
+              >
+                <CloseIcon size={10} />
+              </button>
+            </div>
+          )}
+        </MotionList>
 
         <MotionList className="attachment-row" items={attachments} keyOf={attachmentKey} horizontal>
             {(entry) => (
@@ -416,7 +456,7 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
               }
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
-                void submit();
+                void submit(event.metaKey || event.ctrlKey);
               }
             }}
           />
@@ -424,7 +464,7 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
 
         <div className="dock-controls-row">
           <div className="dock-controls-left">
-            <AttachMenu onAttachments={addAttachments} disabled={streaming} />
+            <AttachMenu onAttachments={addAttachments} disabled={disabled} />
             <ModeChip mode={mode} disabled={disabled || streaming} onChange={onMode} />
             <SandboxPill project={project} />
           </div>
@@ -451,8 +491,9 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
               onCancelLogin={models.cancelLogin}
               onDismissLogin={models.dismissLogin}
             />
-            <ComposerActions streaming={streaming} sendHint={sendHint}
-              disabled={disabled || !modelReady || !prompt} onAbort={onAbort} />
+            <ComposerActions streaming={streaming} sendHint={sendHint} steerHint={steerHint}
+              canQueue={Boolean(prompt)} disabled={disabled || !modelReady || !prompt}
+              onSteer={() => void submit(true)} onAbort={onAbort} />
           </div>
         </div>
 
@@ -470,21 +511,29 @@ function attachmentKey(entry: FileAttachmentPayload): string {
   return id;
 }
 
-function ComposerActions({ streaming, sendHint, disabled, onAbort }: {
-  streaming: boolean; sendHint: string; disabled: boolean; onAbort: () => Promise<void>;
+function ComposerActions({ streaming, sendHint, steerHint, canQueue, disabled, onSteer, onAbort }: {
+  streaming: boolean; sendHint: string; steerHint: string; canQueue: boolean; disabled: boolean;
+  onSteer: () => void; onAbort: () => Promise<void>;
 }) {
-  return <span className={`composer-action-slot${streaming ? " is-streaming" : ""}`}>
-    <button className="send-action-blue-btn send" type="submit" title={sendHint}
-      aria-label={tr("发送", "Send")} disabled={disabled || streaming}
-      inert={streaming} aria-hidden={streaming} tabIndex={streaming ? -1 : undefined}>
-      <SendIcon />
-    </button>
-    <button className="send-action-blue-btn stop" type="button"
-      title={tr("停止生成", "Stop generating")} aria-label={tr("停止生成", "Stop generating")}
-      inert={!streaming} aria-hidden={!streaming} tabIndex={streaming ? undefined : -1}
-      disabled={!streaming} onClick={() => void onAbort()}>
-      <span className="stop-square" />
-    </button>
+  const steerButton = streaming && canQueue
+    ? <button className="composer-steer-btn" type="button" title={steerHint}
+        aria-label={steerHint} disabled={disabled} onClick={onSteer}><SteerIcon /></button>
+    : null;
+  return <span className={`composer-action-slot${streaming ? " is-streaming" : ""}${steerButton ? " has-instruction" : ""}`}>
+    {steerButton}
+    <span className="composer-action-stack">
+      <button className="send-action-blue-btn send" type="submit" title={sendHint}
+        aria-label={streaming ? tr("排队发送", "Queue") : tr("发送", "Send")} disabled={disabled}
+        inert={streaming && !canQueue} aria-hidden={streaming && !canQueue} tabIndex={streaming && !canQueue ? -1 : undefined}>
+        <SendIcon />
+      </button>
+      <button className="send-action-blue-btn stop" type="button"
+        title={tr("停止生成", "Stop generating")} aria-label={tr("停止生成", "Stop generating")}
+        inert={!streaming} aria-hidden={!streaming} tabIndex={streaming ? undefined : -1}
+        disabled={!streaming} onClick={() => void onAbort()}>
+        <span className="stop-square" />
+      </button>
+    </span>
   </span>;
 }
 

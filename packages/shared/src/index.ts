@@ -20,6 +20,7 @@ export const IpcChannel = {
   sessionSetMode: "session:set-mode",
   sessionExecutePlan: "session:execute-plan",
   sessionResumeGoal: "session:resume-goal",
+  sessionRemoveInstruction: "session:instruction-remove",
   event: "session:event",
   getCatalog: "models:get-catalog",
   selectModel: "models:select",
@@ -506,6 +507,25 @@ export interface ConversationGoal {
   updatedAt: number;
 }
 
+/**
+ * 运行中追加指令的投递方式:
+ * - queue 排队发送:当前任务自然结束、且没有待处理阻塞时执行;
+ * - steer 调整当前任务:在最早可达的执行边界注入,优先于下一步工作。
+ */
+export type RuntimeInstructionMode = "queue" | "steer";
+
+export function isRuntimeInstructionMode(value: unknown): value is RuntimeInstructionMode {
+  return value === "queue" || value === "steer";
+}
+
+/** 已提交、尚未被模型消费的运行中指令(排队或调整)。 */
+export interface RuntimeInstruction {
+  id: string;
+  mode: RuntimeInstructionMode;
+  text: string;
+  createdAt: number;
+}
+
 export interface SessionSnapshot {
   id: string | null;
   title: string;
@@ -527,6 +547,8 @@ export interface SessionSnapshot {
   executionPlan: ExecutionPlan | null;
   goal: ConversationGoal | null;
   error: string | null;
+  /** 用户已提交、等待执行的运行中指令;投递或撤销后从这里移除。 */
+  pendingInstructions: RuntimeInstruction[];
   turnStartedAt?: number;
   turnCompletedAt?: number;
 }
@@ -2406,6 +2428,8 @@ export interface PromptInput {
   images: ImageAttachment[];
   /** 目标对话;缺省时主进程使用当前激活的对话。 */
   conversationId?: string;
+  /** 会话运行中追加时的投递方式;缺省表示开始新一轮用户消息。 */
+  deliverAs?: RuntimeInstructionMode;
 }
 
 // ---------- 附件 ----------
@@ -2448,7 +2472,9 @@ export interface VelaApi {
   };
   setLocale(locale: AppLocale): void;
   getState(): Promise<AppState>;
-  prompt(text: string, images?: ImageAttachment[], conversationId?: string): Promise<AppState>;
+  prompt(text: string, images?: ImageAttachment[], conversationId?: string, deliverAs?: RuntimeInstructionMode): Promise<AppState>;
+  /** 撤销一条尚未被模型消费的运行中指令。 */
+  removeInstruction(instructionId: string, conversationId?: string): Promise<AppState>;
   abort(conversationId?: string): Promise<AppState>;
   setInteractionMode(mode: InteractionMode, conversationId?: string): Promise<AppState>;
   /** 批准当前 Plan revision，并开始执行；strategy 决定复用规划上下文还是开新的执行上下文。 */

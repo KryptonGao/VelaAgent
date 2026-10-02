@@ -30,6 +30,7 @@ import {
   type ModelCatalog,
   type PlanExecutionContextStrategy,
   type ProposedPlanItem,
+  type RuntimeInstructionMode,
   type SandboxRiskInput,
   type SandboxRiskVerdict,
   type SessionSnapshot,
@@ -174,6 +175,14 @@ interface RewindMetadata {
   agentLeaves: Record<string, string | null>;
 }
 
+interface PendingInstruction {
+  id: string;
+  mode: RuntimeInstructionMode;
+  text: string;
+  images?: ImageAttachment[];
+  createdAt: number;
+}
+
 interface Conversation {
   id: string;
   session: AgentSession | null;
@@ -193,6 +202,10 @@ interface Conversation {
   skillsRevision: number;
   /** Goal 自动续跑被用户停止后置位,避免当前轮结束后继续。 */
   stopRequested: boolean;
+  /** 运行中追加、还没有被 Pi 队列消费的指令;投递或撤销时移除。 */
+  pendingInstructions: PendingInstruction[];
+  /** 撤销指令时正在重建 Pi 队列,期间忽略 queue_update 的对账。 */
+  rebuildingInstructions: boolean;
   /** drive() 进行中。两轮之间 Pi 会话会短暂空闲,不能靠 isStreaming 判断。 */
   driving: boolean;
   /** 全部 ProposedPlan revision;新 revision 不改写旧版本。 */
@@ -284,6 +297,7 @@ export class AgentRuntime {
       planRevisions: snapshot.planRevisions.map((plan) => ({ ...plan })),
       executionPlan: cloneExecutionPlan(snapshot.executionPlan),
       goal: cloneGoal(snapshot.goal),
+      pendingInstructions: snapshot.pendingInstructions.map((instruction) => ({ ...instruction })),
     };
   }
 
@@ -500,6 +514,8 @@ export class AgentRuntime {
         entry.goalValidationSequence = Math.max(0, ...(point.metadata.goal?.validation?.checks.map(check => check.sequence) ?? [0]));
         entry.planStream = null;
         entry.planStreamPlan = null;
+        entry.pendingInstructions = [];
+        this.syncPendingInstructions(entry);
         entry.generation = { stepStartedAt: null, firstTokenAt: null, outputTokens: 0, elapsedMs: 0 };
         entry.snapshot.goal = point.metadata.goal;
         this.syncPlanState(entry);
@@ -529,8 +545,25 @@ export class AgentRuntime {
     if (point) await checkpoints.finish(point, point.userEntryId);
   }
 
-  async prompt(conversationId: string, text: string, images?: ImageAttachment[]): Promise<void> {
-    const entry = this.requireIdle(conversationId);
+  /**
+   * 发送一条用户消息。运行中传入 deliverAs 时不做新一轮:
+   * queue 排队到当前任务自然结束,steer 在最早可达的执行边界调整当前任务。
+   */
+  async prompt(
+    conversationId: string,
+    text: string,
+    images?: ImageAttachment[],
+    deliverAs?: RuntimeInstructionMode,
+  ): Promise<void> {
+    const entry = this.conversations.get(conversationId);
+    if (!entry?.session) throw new Error("对话不存在或已结束");
+    const running = entry.driving || entry.session.isStreaming;
+    if (deliverAs && running) {
+      await this.appendInstruction(entry, text, images, deliverAs);
+      return;
+    }
+    this.requireIdle(conversationId);
+    this.addUsage(conversationId, 1, 0);
     if (!entry.titleManuallySet && !entry.titleGenerationStarted && entry.snapshot.title === "新对话") {
       entry.titleGenerationStarted = true;
       const fallbackTitle = clipTitle(text);
@@ -547,6 +580,109 @@ export class AgentRuntime {
       announce: false,
       rename: true,
     });
+  }
+
+  /** 撤销一条还没被 Pi 队列消费的运行中指令。 */
+  async removeInstruction(conversationId: string, instructionId: string): Promise<void> {
+    const entry = this.conversations.get(conversationId);
+    if (!entry?.session) throw new Error("对话不存在或已结束");
+    if (!entry.pendingInstructions.some((item) => item.id === instructionId)) return;
+    entry.pendingInstructions = entry.pendingInstructions.filter((item) => item.id !== instructionId);
+    entry.rebuildingInstructions = true;
+    try {
+      // Pi 队列没有单条删除接口,清空后按原顺序回放剩余指令;
+      // 文本保留原始输入,技能命令和模板会重新展开。
+      entry.session.clearQueue();
+      for (const item of entry.pendingInstructions) {
+        await this.queueInstruction(entry.session, item);
+      }
+    } finally {
+      entry.rebuildingInstructions = false;
+    }
+    // 重建期间如果有指令被消费,这里用队列现状补一次对账。
+    this.reconcileInstructions(entry.id, entry.session.getSteeringMessages(), entry.session.getFollowUpMessages());
+    this.syncPendingInstructions(entry);
+  }
+
+  private async appendInstruction(
+    entry: Conversation,
+    text: string,
+    images: ImageAttachment[] | undefined,
+    mode: RuntimeInstructionMode,
+  ): Promise<void> {
+    const session = entry.session;
+    if (!session) throw new Error("对话不存在或已结束");
+    const trimmed = text.trim();
+    if (!trimmed) throw new Error("指令不能为空");
+    const instruction: PendingInstruction = {
+      id: randomUUID(),
+      mode,
+      text: trimmed,
+      images: images && images.length > 0 ? images : undefined,
+      createdAt: Date.now(),
+    };
+    entry.pendingInstructions.push(instruction);
+    this.syncPendingInstructions(entry);
+    try {
+      await this.queueInstruction(session, instruction);
+    } catch (error) {
+      entry.pendingInstructions = entry.pendingInstructions.filter((item) => item.id !== instruction.id);
+      this.syncPendingInstructions(entry);
+      throw error;
+    }
+  }
+
+  private queueInstruction(session: AgentSession, instruction: PendingInstruction): Promise<void> {
+    const images = instruction.images?.map((image) => ({
+      type: "image" as const,
+      data: image.data,
+      mimeType: image.mimeType,
+    }));
+    return instruction.mode === "steer"
+      ? session.steer(instruction.text, images)
+      : session.followUp(instruction.text, images);
+  }
+
+  /**
+   * Pi 队列对账:steering / followUp 数组少了多少条,就说明最早提交的对应指令
+   * 已经进入会话。补发 user_message 并计数,然后从待处理列表里移除。
+   */
+  private reconcileInstructions(
+    conversationId: string,
+    steering: readonly string[],
+    followUp: readonly string[],
+  ): void {
+    const entry = this.conversations.get(conversationId);
+    if (!entry || entry.rebuildingInstructions) return;
+    const delivered: PendingInstruction[] = [];
+    for (const mode of ["steer", "queue"] as const) {
+      const pending = entry.pendingInstructions.filter((item) => item.mode === mode);
+      const queued = mode === "steer" ? steering.length : followUp.length;
+      const count = pending.length - queued;
+      if (count > 0) delivered.push(...pending.slice(0, count));
+    }
+    if (delivered.length === 0) return;
+    const deliveredIds = new Set(delivered.map((item) => item.id));
+    entry.pendingInstructions = entry.pendingInstructions.filter((item) => !deliveredIds.has(item.id));
+    for (const instruction of delivered) {
+      this.addUsage(entry.id, 1, 0);
+      this.emit({ type: "user_message", conversationId: entry.id, text: instruction.text });
+    }
+    this.syncPendingInstructions(entry);
+  }
+
+  /** 把运行中指令镜像进快照并广播,输入框上方的待处理条据此渲染。 */
+  private syncPendingInstructions(entry: Conversation): void {
+    entry.snapshot = {
+      ...entry.snapshot,
+      pendingInstructions: entry.pendingInstructions.map(({ id, mode, text, createdAt }) => ({
+        id,
+        mode,
+        text,
+        createdAt,
+      })),
+    };
+    this.emitStatus(entry);
   }
 
   async setMode(conversationId: string, mode: InteractionMode): Promise<void> {
@@ -619,6 +755,10 @@ export class AgentRuntime {
     const entry = conversationId ? this.conversations.get(conversationId) : this.activeConversation();
     if (!entry) return;
     entry.stopRequested = true;
+    // 停止一并撤销还没投递的排队/调整指令,避免下一次发言时意外继续。
+    entry.pendingInstructions = [];
+    this.syncPendingInstructions(entry);
+    entry.session?.clearQueue();
     // 中断时不沉淀未写完的 plan 草稿。
     entry.planStream = null;
     entry.planStreamPlan = null;
@@ -1068,6 +1208,8 @@ export class AgentRuntime {
         instructions: stored.instructions,
         skillsRevision: 0,
         stopRequested: false,
+        pendingInstructions: [],
+        rebuildingInstructions: false,
         driving: false,
         plans: stored.plans,
         latestProposedPlanId: stored.latestProposedPlanId,
@@ -1172,6 +1314,8 @@ export class AgentRuntime {
       instructions: options.instructions ?? this.directory?.getSettings().instructions ?? "",
       skillsRevision: this.skillsRevision,
       stopRequested: false,
+      pendingInstructions: [],
+      rebuildingInstructions: false,
       driving: false,
       plans: [],
       latestProposedPlanId: null,
@@ -1379,6 +1523,11 @@ export class AgentRuntime {
   private handlePiEvent(conversationId: string, event: AgentSessionEvent): void {
     const recorder = this.trace(conversationId);
     recorder.capture(() => recorder.handle(event));
+    // Pi 在消费 steering / follow-up 时更新队列;这里同步运行中指令的“已投递”状态。
+    if (event.type === "queue_update") {
+      this.reconcileInstructions(conversationId, event.steering, event.followUp);
+      return;
+    }
     // agent 循环里每步 assistant 消息都要在界面上独立成块;user/toolResult 的 message_start 不是边界。
     if (event.type === "message_start" && event.message.role === "assistant") {
       const entry = this.conversations.get(conversationId);
@@ -1705,6 +1854,7 @@ export class AgentRuntime {
       executionPlan: null,
       goal: null,
       error: null,
+      pendingInstructions: [],
     };
   }
 

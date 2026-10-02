@@ -137,12 +137,15 @@ const api: VelaApi = {
   },
   setLocale: (locale: AppLocale) => ipcRenderer.send(IpcChannel.appSetLocale, locale),
   getState: () => ipcRenderer.invoke(IpcChannel.getState) as Promise<AppState>,
-  prompt: (text, images, conversationId) =>
+  prompt: (text, images, conversationId, deliverAs) =>
     ipcRenderer.invoke(IpcChannel.prompt, {
       text,
       images: images ?? [],
       ...(conversationId ? { conversationId } : {}),
+      ...(deliverAs ? { deliverAs } : {}),
     } satisfies PromptInput) as Promise<AppState>,
+  removeInstruction: (instructionId: string, conversationId?: string) =>
+    ipcRenderer.invoke(IpcChannel.sessionRemoveInstruction, instructionId, conversationId ?? null) as Promise<AppState>,
   abort: (conversationId) =>
     ipcRenderer.invoke(IpcChannel.abort, conversationId ?? null) as Promise<AppState>,
   setInteractionMode: (mode: InteractionMode, conversationId) =>

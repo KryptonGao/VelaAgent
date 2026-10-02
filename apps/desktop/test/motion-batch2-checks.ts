@@ -94,17 +94,36 @@ export async function runBatch2MotionChecks(setReducedMotion: (value: boolean) =
       inputValue("short"); await wait(160);
       assert(Math.abs(input.getBoundingClientRect().height - small) < 1, "textarea failed to shrink");
     });
-    await check("send/stop fixed slot changes semantics immediately and only current action is interactive", async () => {
+    await check("composer queues and steers while streaming, then stop restores send", async () => {
+      inputValue(""); await wait(20);
       assert(Number(getComputedStyle(node(".composer-action-slot .stop")).opacity) === 0, "inactive disabled stop is visible");
       fixture.streaming(true);
       const send = node<HTMLButtonElement>(".composer-action-slot .send"), stop = node<HTMLButtonElement>(".composer-action-slot .stop");
       assert(send.inert && send.disabled && !stop.inert && !stop.disabled, "streaming controls are incorrect");
       assert(getComputedStyle(send).pointerEvents === "none", "outgoing send intercepts input");
-      await wait(35); fixture.streaming(false); await wait(35); fixture.streaming(true); await wait(190);
-      assert(Number(getComputedStyle(send).opacity) === 0 && Number(getComputedStyle(stop).opacity) === 1, "crossfade did not settle");
+
+      inputValue("完成后补充使用说明"); await wait(30);
+      assert(!send.inert && !send.disabled, "queue send stayed inert while streaming with text");
+      assert(send.getAttribute("aria-label") === "排队发送", "queue send is not labelled");
+      const textarea = node<HTMLTextAreaElement>(".input-textarea");
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); await wait(30);
+      assert(node(".instruction-chip.instruction-queue .instruction-badge").textContent === "排队", "queue chip missing");
+      assert(node(".instruction-chip.instruction-queue .instruction-text").textContent === "完成后补充使用说明", "queue chip text changed");
+      assert(textarea.value === "", "queue submit kept the draft");
+
+      inputValue("只修登录问题"); await wait(20);
+      assert(!node<HTMLButtonElement>(".composer-steer-btn").disabled, "steer button disabled while streaming with text");
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true, cancelable: true })); await wait(30);
+      assert(node(".instruction-chip.instruction-steer .instruction-badge").textContent === "调整", "steer chip missing");
+      node<HTMLButtonElement>(".instruction-chip.instruction-steer .instruction-remove").click(); await wait(220);
+      assert(!document.querySelector(".instruction-chip.instruction-steer"), "steer chip did not unmount after removal");
+
+      inputValue(""); await wait(30);
+      assert(send.inert && send.disabled, "queue send stayed interactive with empty input");
       stop.click(); await wait(190);
       assert(!send.inert && stop.inert && stop.disabled, "stop action did not restore send");
       assert(Number(getComputedStyle(stop).opacity) === 0, "inactive stop remains visible over send");
+      fixture.instructions([]); await wait(210);
     });
     await check("usage ring interpolates and high-usage color settles", async () => {
       fixture.percent(85); await wait(20);

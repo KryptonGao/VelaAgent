@@ -248,9 +248,13 @@ async function runChecks() {
 
     // Leave a useful final view for visual inspection.
     await openTurn(); await openGroup();
-    document.querySelector("#check-result")!.textContent = `PASS ${passed.length}: ${passed.join(", ")}`;
+    const result = document.querySelector<HTMLOutputElement>("#check-result")!;
+    result.textContent = `PASS ${passed.length}: ${passed.join(", ")}`;
+    result.dataset.status = "passed";
   } catch (error) {
-    document.querySelector("#check-result")!.textContent = `FAIL after ${passed.join(", ")}: ${String(error)}`;
+    const result = document.querySelector<HTMLOutputElement>("#check-result")!;
+    result.textContent = `FAIL after ${passed.join(", ")}: ${String(error)}`;
+    result.dataset.status = "failed";
     console.error(error);
   }
 }

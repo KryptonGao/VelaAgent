@@ -13,6 +13,7 @@ import type {
 } from "@vela/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { tr } from "../locale";
+import { noSound, type NotifySound } from "../notification-sounds";
 
 export type ProjectApi = ReturnType<typeof useProject>;
 
@@ -37,7 +38,9 @@ export function cleanErrorMessage(error: unknown): string {
  * 状态更新全部由主进程推送事件驱动(workspace:event、git:event),
  * 组件只负责展示与发起动作。
  */
-export function useProject() {
+export function useProject(notify: NotifySound = noSound) {
+  const notifyRef = useRef(notify);
+  notifyRef.current = notify;
   const [workspace, setWorkspace] = useState<WorkspaceState | null>(null);
   const [environment, setEnvironmentState] = useState<ExecutionEnvironment | null>(null);
   const [environments, setEnvironments] = useState<ExecutionEnvironment[]>([]);
@@ -118,6 +121,7 @@ export function useProject() {
     });
     const offApproval = api.onApprovalEvent((event) => {
       if (event.type === "request") {
+        notifyRef.current("permission");
         setApproval(event.request);
       } else if (approvalRef.current?.id === event.id) {
         setApproval(null);

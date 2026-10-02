@@ -9,10 +9,13 @@ export function Presence({
   present,
   className,
   children,
+  keepMounted = false,
 }: {
   present: boolean;
   className?: string;
   children: ReactNode;
+  /** Retain expensive guest resources while the containing view is hidden. */
+  keepMounted?: boolean;
 }) {
   const [mounted, setMounted] = useState(present);
   const [shown, setShown] = useState(present);
@@ -32,17 +35,17 @@ export function Presence({
   }, [present]);
 
   useEffect(() => {
-    if (present || !mounted) return;
+    if (present || !mounted || keepMounted) return;
     const timer = window.setTimeout(() => setMounted(false), 450);
     return () => window.clearTimeout(timer);
-  }, [present, mounted]);
+  }, [present, mounted, keepMounted]);
 
   if (!mounted) return null;
 
   function onTransitionEnd(event: TransitionEvent<HTMLDivElement>) {
     if (event.target !== event.currentTarget) return;
     if (event.propertyName !== "opacity") return;
-    if (!present) setMounted(false);
+    if (!present && !keepMounted) setMounted(false);
   }
 
   const hidden = !shown || !present;
@@ -50,6 +53,8 @@ export function Presence({
     <div
       className={[className, hidden ? "is-hidden" : "", !present ? "is-overlay" : ""].filter(Boolean).join(" ")}
       onTransitionEnd={onTransitionEnd}
+      inert={keepMounted && !present}
+      aria-hidden={(keepMounted && !present) || undefined}
     >
       {children}
     </div>

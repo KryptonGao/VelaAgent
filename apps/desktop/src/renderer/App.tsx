@@ -15,8 +15,11 @@ import { RenameConversationDialog } from "./components/RenameConversationDialog"
 import { FilePreviewProvider, type PreviewFileDescriptor } from "./components/preview/FilePreviewContext";
 import type { StartTabAction } from "./components/StartView";
 import { WorkbenchPanel, type WorkbenchTab } from "./components/WorkbenchPanel";
+import { useBrowserTabs } from "./browser/useBrowserTabs";
+import { routeConversationLink } from "./browser/conversation-link-policy";
 import { useModels } from "./hooks/useModels";
 import { usePreferences } from "./hooks/usePreferences";
+import { useNotificationSounds } from "./hooks/useNotificationSounds";
 import { isBoolean, useStoredState } from "./hooks/useStoredState";
 import { useProject } from "./hooks/useProject";
 import { useSession, type UiMessage } from "./hooks/useSession";
@@ -95,15 +98,16 @@ function findAgentInMessages(messages: UiMessage[], agentId: string): AgentInfo 
 }
 
 export function App() {
-  const session = useSession();
+  const preferences = usePreferences();
+  const sounds = useNotificationSounds(preferences.soundEffects);
+  const session = useSession(sounds.notify);
   const [renamingConversation, setRenamingConversation] = useState<{ id: string; title: string } | null>(null);
   const openRenameConversation = useCallback((id: string) => {
     const conversation = session.conversations.find(item => item.id === id);
     if (conversation) setRenamingConversation({ id, title: conversation.title });
   }, [session.conversations]);
   const models = useModels(session.setAppState);
-  const project = useProject();
-  const preferences = usePreferences();
+  const project = useProject(sounds.notify);
   setActiveLocale(preferences.locale);
   const [leftCollapsed, setLeftCollapsed] = useStoredState("vela.leftCollapsed", false, isBoolean);
   // Keep the conversation as the default focus; open the inspector when a tool
@@ -134,7 +138,10 @@ export function App() {
   const planDocument = planDocuments[conversationKey] ?? emptyPlanDocumentState;
   const [tabOrder, setTabOrder] = useState<string[]>([]);
   const [activeWorkbenchTabId, setActiveWorkbenchTabId] = useState<string | null>(null);
+  const [workbenchCollapsed, setWorkbenchCollapsed] = useState(false);
+  useEffect(() => { setWorkbenchCollapsed(false); }, [activeWorkbenchTabId]);
   const [startTabState, setStartTabState] = useState<{ id: string }[]>([]);
+  const browser = useBrowserTabs();
   // 终端与文件浏览标签不按工作区拆开存:工作区状态加载前(地址为空)创建的标签
   // 不能因为工作区地址随后确定而消失;真正切换工作区时再统一关闭。
   const [terminalTabState, setTerminalTabState] = useState<{ id: string; sessionId: string; label: string }[]>([]);
@@ -267,13 +274,25 @@ export function App() {
     setActiveWorkbenchTabId(filesTabId);
   }, []);
 
+  const openBrowserTab = useCallback((url?: string) => {
+    const id = `browser:${++tabSeq.current}`;
+    browser.open(id, url);
+    setWorkbenchCollapsed(false);
+    setActiveWorkbenchTabId(id);
+  }, [browser.open]);
+
+  const openConversationLink = useCallback((url: string) =>
+    routeConversationLink(url, preferences.conversationLinkTarget, openBrowserTab),
+  [preferences.conversationLinkTarget, openBrowserTab]);
+
   /** 起始页选好入口后关闭起始标签,换成对应内容。 */
   const handleStartAction = useCallback((tab: WorkbenchTab, action: StartTabAction) => {
     setStartTabState((current) => current.filter((candidate) => candidate.id !== tab.id));
     if (action === "changes") openChanges();
     else if (action === "terminal") openTerminalTab();
+    else if (action === "browser") openBrowserTab();
     else openFilesTab();
-  }, [openChanges, openTerminalTab, openFilesTab]);
+  }, [openChanges, openTerminalTab, openFilesTab, openBrowserTab]);
 
   const fileTabs = useMemo<WorkbenchTab[]>(() => (fileTabsByWorkspace[workspaceKey] ?? []).map((file) => ({
     id: fileTabId(workspaceKey, file.id),
@@ -327,8 +346,9 @@ export function App() {
     ...agentTabs,
     ...(filesTab ? [filesTab] : []),
     ...terminalTabs,
+    ...browser.tabs.map((tab): WorkbenchTab => ({ ...tab, kind: "browser", label: tr("浏览器", "Browser") })),
     ...startTabItems,
-  ], [fileTabs, planTab, changeTab, reviewTab, agentTabs, filesTab, terminalTabs, startTabItems]);
+  ], [fileTabs, planTab, changeTab, reviewTab, agentTabs, filesTab, terminalTabs, browser.tabs, startTabItems]);
   const workbenchTabs = useMemo(() => {
     const tabIdSet = new Set(unorderedTabs.map((tab) => tab.id));
     return [
@@ -416,12 +436,14 @@ export function App() {
       }));
     } else if (tab.kind === "terminal") {
       setTerminalTabState((current) => current.filter((candidate) => candidate.id !== tab.id));
+    } else if (tab.kind === "browser") {
+      browser.close(tab.id);
     } else if (tab.kind === "files") {
       setFilesTabOpen(false);
     } else if (tab.kind === "start") {
       setStartTabState((current) => current.filter((candidate) => candidate.id !== tab.id));
     }
-  }, [workbenchTabs, dispatchPlanDocument, workspaceKey, changesState, conversationKey, dismissTurnReview]);
+  }, [workbenchTabs, dispatchPlanDocument, workspaceKey, changesState, conversationKey, dismissTurnReview, browser.close]);
 
   const workbenchOpen = workbenchTabs.length > 0;
   const previousWorkbenchOpen = useRef(false);
@@ -559,7 +581,7 @@ export function App() {
                   onCloseFileTab={onCloseFileTab}
                   onCloseAllFileTabs={onCloseAllFileTabs}
                 >
-                  <Presence present={!settingsOpen} className="main-stage-pane">
+                  <Presence present={!settingsOpen} className="main-stage-pane" keepMounted={browser.tabs.length > 0}>
                     <PlanDocumentProvider
                       plans={session.state?.session.planRevisions ?? []}
                       draft={session.planDraft}
@@ -598,6 +620,7 @@ export function App() {
                           locale={preferences.locale}
                           hiddenModels={preferences.hiddenModels}
                           onSend={session.send}
+                          onRemoveInstruction={session.removeInstruction}
                           onEdit={session.edit}
                           onAbort={session.abort}
                           onMode={session.setMode}
@@ -608,8 +631,14 @@ export function App() {
                           onBranch={branchTurn}
                           // 工作面板自己没开(没有标签页)时,或右侧栏收起时,顶栏补一个新建标签页入口;
                           // 工作面板和右侧栏都在时它自己标签栏里的 + 已经够用,不再重复。
-                          showNewTab={workbenchTabs.length === 0 || !contextSidebarOpen}
+                          showNewTab={workbenchTabs.length === 0 || workbenchCollapsed || !contextSidebarOpen}
+                          onExpandWorkbench={workbenchCollapsed && workbenchTabs.length > 0
+                            ? () => {
+                              setWorkbenchCollapsed(false);
+                              requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('.workbench-tab[aria-selected="true"]')?.focus());
+                            } : undefined}
                           onNewTab={openStartTab}
+                          onOpenWebLink={openConversationLink}
                           onOpenChanges={openAllChanges}
                           onReviewTurn={onReviewTurn}
                           planDraft={session.planDraft}
@@ -618,6 +647,11 @@ export function App() {
                       </AgentWorkspaceProvider>
                       <WorkbenchPanel
                         tabs={workbenchTabs}
+                        collapsed={workbenchCollapsed}
+                        onCollapse={() => {
+                          setWorkbenchCollapsed(true);
+                          requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".workbench-expand")?.focus());
+                        }}
                         activeTabId={activeWorkbenchTabId}
                         contextOpen={contextSidebarOpen}
                         leftOpen={!leftCollapsed}
@@ -665,6 +699,7 @@ export function App() {
                 </FilePreviewProvider>
                 <Presence present={settingsOpen} className="main-stage-pane">
                   <SettingsView
+                    onPreviewSound={sounds.preview}
                     preferences={preferences}
                     platform={platform}
                     project={project}

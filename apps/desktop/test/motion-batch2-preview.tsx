@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
-import type { AppState, ConversationSummary, ToolTrace, VelaApi } from "@vela/shared";
+import type { AppState, ConversationSummary, RuntimeInstruction, ToolTrace, VelaApi } from "@vela/shared";
 import { Sidebar } from "../src/renderer/components/Sidebar";
 import { ChatView } from "../src/renderer/components/ChatView";
 import { ContextUsageCard, PanelDisclosure } from "../src/renderer/components/ContextPanel";
@@ -81,16 +81,18 @@ function Fixture() {
   const [changePath, setChangePath] = useState("first.txt");
   const [workspace, setWorkspace] = useState("/workspace/Vela");
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [instructions, setInstructions] = useState<RuntimeInstruction[]>([]);
   const [messages, setMessages] = useState(Array.from({ length: 20 }, (_, i) => ({ id: `${i}`, role: i % 2 ? "assistant" : "user", text: `Message ${i}`, thinking: "", tools: [] })));
   const state = { activeConversationId: active, conversations, session: { id: active, title: `Chat ${active}`, cwd: workspace,
     status: streaming ? "streaming" : "ready", model: "Fixture", modelReady: true, modelProvider: "fixture", modelId: "fixture",
-    tools: [], mode: "agent", thinkingLevel: "medium", thinkingLevels: ["medium"] }, context: { ...usage, percent } } as AppState;
+    tools: [], mode: "agent", thinkingLevel: "medium", thinkingLevels: ["medium"], pendingInstructions: instructions }, context: { ...usage, percent } } as AppState;
   const tool = { id: "tool", name: "read", status, input: { path: "first.txt" }, output: "File read", activity: [] } as unknown as ToolTrace;
   Object.assign(window, { batch2Fixture: {
     conversations: (ids: string[]) => flushSync(() => setConversations(ids.map((id, i) => makeConversation(id, ids.length - i)))),
     active: (id: string) => flushSync(() => setActive(id)), workspace: (value: string) => flushSync(() => setWorkspace(value)),
     disclosure: (value: boolean) => flushSync(() => setOpen(value)), percent: (value: number) => flushSync(() => setPercent(value)),
     streaming: (value: boolean) => flushSync(() => setStreaming(value)), status: (value: ToolTrace["status"]) => flushSync(() => setStatus(value)),
+    instructions: (value: RuntimeInstruction[]) => flushSync(() => setInstructions(value)),
     changePath: (value: string) => flushSync(() => setChangePath(value)),
     append: () => flushSync(() => setMessages((current) => [...current, { id: `new-${current.length}`, role: "assistant", text: "New reply", thinking: "", tools: [] }])),
   } });
@@ -102,7 +104,11 @@ function Fixture() {
     <div style={{ flex: 1, minWidth: 0, display: "flex" }}>
       <ChatView messages={messages as never} state={state} project={{ ...project, workspace: { ...project.workspace!, current: workspace } }}
         sendError={null} platform="darwin" leftCollapsed={false} rightCollapsed={false} models={models}
-        onToggleLeft={() => {}} onToggleRight={() => {}} onSend={async () => setStreaming(true)} onAbort={async () => setStreaming(false)}
+        onToggleLeft={() => {}} onToggleRight={() => {}} onSend={async (text, _images, deliverAs) => {
+          if (deliverAs) flushSync(() => setInstructions((current) => [...current, { id: `i-${current.length}`, mode: deliverAs, text, createdAt: Date.now() }]));
+          else setStreaming(true);
+        }} onAbort={async () => setStreaming(false)}
+        onRemoveInstruction={async (id) => flushSync(() => setInstructions((current) => current.filter((item) => item.id !== id)))}
         onMode={() => {}} getQuestion={() => null} onReplyQuestion={() => {}} onBranch={() => {}}
         showNewTab={false} onNewTab={() => {}} onOpenChanges={() => {}} />
     </div>

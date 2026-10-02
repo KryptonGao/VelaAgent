@@ -293,7 +293,6 @@ const AgentStreamMessage = memo(function AgentStreamMessage({
           text={message.thinking}
           active={thinkingActive}
           showActivityIndicator={thinkingActive && toolDisplay === "compact"}
-          contentEdgeBlur
         /></div>
       ) : null}
       {message.tools.length > 0 ? <div data-arrival-key={`${message.id}:tools`}><ToolList tools={message.tools} display={toolDisplay} /></div> : null}

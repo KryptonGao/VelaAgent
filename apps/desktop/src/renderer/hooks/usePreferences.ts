@@ -10,6 +10,8 @@ import {
   type LightTheme,
 } from "../themes";
 import type { AppLocale, ThinkingSummaryModel } from "@vela/shared";
+import { isConversationLinkTarget, type ConversationLinkTarget } from "../browser/conversation-link-policy";
+import { soundEffectsKey } from "../notification-sounds";
 
 export type InfoLayout = "sidebar" | "floating";
 export type Appearance = "system" | "light" | "dark";
@@ -24,6 +26,7 @@ export type ThinkingSummaryStyle = "inline" | "headline" | "prose";
 export type FileIconTheme = "devicon" | "material";
 
 const infoLayoutKey = "vela.infoLayout";
+const conversationLinkTargetKey = "vela.conversationLinkTarget";
 const appearanceKey = "vela.appearance";
 const lightThemeKey = "vela.theme.light";
 const darkThemeKey = "vela.theme.dark";
@@ -115,6 +118,12 @@ function systemScheme(): ColorScheme {
 }
 
 export function usePreferences() {
+  const [soundEffects, setSoundEffects] = useState(() =>
+    readStored(soundEffectsKey, (value): value is string => value === "true" || value === "false", "true") === "true",
+  );
+  const [conversationLinkTarget, setConversationLinkTarget] = useState<ConversationLinkTarget>(() =>
+    readStored(conversationLinkTargetKey, isConversationLinkTarget, "embedded"),
+  );
   const [infoLayout, setInfoLayout] = useState<InfoLayout>(() =>
     readStored(infoLayoutKey, (value): value is InfoLayout => value === "sidebar" || value === "floating", "sidebar"),
   );
@@ -191,6 +200,8 @@ export function usePreferences() {
   }, [scheme, theme]);
 
   useEffect(() => writeStored(infoLayoutKey, infoLayout), [infoLayout]);
+  useEffect(() => writeStored(soundEffectsKey, String(soundEffects)), [soundEffects]);
+  useEffect(() => writeStored(conversationLinkTargetKey, conversationLinkTarget), [conversationLinkTarget]);
   useEffect(() => writeStored(appearanceKey, appearance), [appearance]);
   useEffect(() => writeStored(lightThemeKey, lightTheme), [lightTheme]);
   useEffect(() => writeStored(darkThemeKey, darkTheme), [darkTheme]);
@@ -214,6 +225,10 @@ export function usePreferences() {
   }, [composerCapsules]);
 
   return {
+    soundEffects,
+    setSoundEffects,
+    conversationLinkTarget,
+    setConversationLinkTarget,
     infoLayout,
     setInfoLayout,
     appearance,

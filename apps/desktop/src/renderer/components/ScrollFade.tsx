@@ -1,12 +1,6 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-
-function edgesFrom(viewport: HTMLDivElement): { top: boolean; bottom: boolean } {
-  const maxScroll = viewport.scrollHeight - viewport.clientHeight;
-  return {
-    top: viewport.scrollTop > 2,
-    bottom: maxScroll > 2 && viewport.scrollTop < maxScroll - 2,
-  };
-}
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { ScrollFadeShell } from "./ScrollFadeShell";
+import { thinkingEdges } from "./thinking-edges";
 
 /**
  * 限高滚动容器：内容超过高度时上下显示渐进模糊，和思考内容展开使用同一套视觉。
@@ -25,18 +19,23 @@ export function ScrollFade({
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const [edges, setEdges] = useState({ top: false, bottom: false });
+  const [edges, setEdges] = useState({ top: 0, bottom: 0 });
+  const [viewportHeight, setViewportHeight] = useState(0);
 
-  useEffect(() => {
+  const sync = (): void => {
+    const viewport = scrollRef.current;
+    if (!viewport) return;
+    setViewportHeight(viewport.clientHeight);
+    const next = thinkingEdges(viewport.scrollTop, viewport.scrollHeight, viewport.clientHeight);
+    setEdges((current) =>
+      current.top === next.top && current.bottom === next.bottom ? current : next,
+    );
+  };
+
+  useLayoutEffect(() => {
     const viewport = scrollRef.current;
     const content = contentRef.current;
     if (!viewport) return;
-    const sync = () => {
-      const next = edgesFrom(viewport);
-      setEdges((current) =>
-        current.top === next.top && current.bottom === next.bottom ? current : next,
-      );
-    };
     sync();
     const observer = new ResizeObserver(sync);
     observer.observe(viewport);
@@ -44,21 +43,12 @@ export function ScrollFade({
     return () => observer.disconnect();
   }, []);
 
-  const onScroll = (): void => {
-    const viewport = scrollRef.current;
-    if (!viewport) return;
-    const next = edgesFrom(viewport);
-    setEdges((current) =>
-      current.top === next.top && current.bottom === next.bottom ? current : next,
-    );
-  };
-
   return (
-    <div className={`thinking-scroll-shell${className ? ` ${className}` : ""}`}>
+    <ScrollFadeShell className={className} edges={edges} height={viewportHeight}>
       <div
         className="thinking-scroll-viewport"
         ref={scrollRef}
-        onScroll={onScroll}
+        onScroll={sync}
         role="region"
         aria-label={ariaLabel}
         tabIndex={0}
@@ -67,14 +57,6 @@ export function ScrollFade({
           {children}
         </div>
       </div>
-      <div
-        className={`thinking-scroll-fade thinking-scroll-fade-top${edges.top ? " is-visible" : ""}`}
-        aria-hidden="true"
-      />
-      <div
-        className={`thinking-scroll-fade thinking-scroll-fade-bottom${edges.bottom ? " is-visible" : ""}`}
-        aria-hidden="true"
-      />
-    </div>
+    </ScrollFadeShell>
   );
 }

@@ -10,7 +10,8 @@
     "dev": "pnpm --filter @vela/desktop dev",
     "build": "pnpm --filter @vela/desktop build",
     "package:mac": "pnpm --filter @vela/desktop dist:mac",
-    "typecheck": "pnpm -r --if-present typecheck"
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test:center": "pnpm --filter @vela/desktop test:center"
   },
   "devDependencies": {
     "typescript": "^7.0.2"

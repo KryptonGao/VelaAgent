@@ -1,11 +1,12 @@
-import { useContext, useId, useLayoutEffect, useRef, useState, type TouchEvent, type WheelEvent } from "react";
+import { useContext, useId, useLayoutEffect, useMemo, useRef, useState, type TouchEvent, type WheelEvent } from "react";
 import { ActivityIndicator } from "./ActivityIndicator";
 import { Markdown } from "./Markdown";
 import { nextStreamFollow, releasesStreamFollow } from "./chat-scroll";
-import { localizeError, tr } from "../locale";
+import { localizeError, tr, useAppLocale } from "../locale";
 import { thinkingSummaryLayout } from "../thinking-summary";
 import { ThinkingSummaryContext } from "./ThinkingSummaryContext";
-import { ThinkingEdgeBlur } from "./ThinkingEdgeBlur";
+import { ScrollFadeShell } from "./ScrollFadeShell";
+import { thinkingEdges } from "./thinking-edges";
 
 /** 思考进行中默认展开,思考结束(出现新工具、开始回复或回合结束)时自动折叠;任意长度都能手动开合。 */
 export function Thinking({
@@ -13,15 +14,14 @@ export function Thinking({
   messageId,
   active,
   showActivityIndicator,
-  contentEdgeBlur = false,
 }: {
   text: string;
   messageId?: string;
   active: boolean;
   showActivityIndicator: boolean;
-  contentEdgeBlur?: boolean;
 }) {
   const summaries = useContext(ThinkingSummaryContext);
+  const locale = useAppLocale();
   const summaryAvailable = !active && summaries?.enabled && messageId !== undefined;
   const summary = summaryAvailable ? summaries.get(messageId, text) : undefined;
   const bodyId = useId();
@@ -30,9 +30,8 @@ export function Thinking({
   };
   const [open, setOpen] = useState(active);
   const [revealed, setRevealed] = useState(active);
-  const [fadeEdges, setFadeEdges] = useState({ top: false, bottom: false });
+  const [fadeEdges, setFadeEdges] = useState({ top: 0, bottom: 0 });
   const [viewportHeight, setViewportHeight] = useState(280);
-  const edgeFilterId = `${bodyId}-edge-blur`;
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const prevActive = useRef(active);
@@ -44,12 +43,8 @@ export function Thinking({
   const syncFadeEdges = () => {
     const element = scrollRef.current;
     if (!element) return;
-    const maxScroll = element.scrollHeight - element.clientHeight;
-    if (contentEdgeBlur) setViewportHeight(element.clientHeight);
-    const next = {
-      top: element.scrollTop > 2,
-      bottom: maxScroll > 2 && element.scrollTop < maxScroll - 2,
-    };
+    setViewportHeight(element.clientHeight);
+    const next = thinkingEdges(element.scrollTop, element.scrollHeight, element.clientHeight);
     setFadeEdges((current) =>
       current.top === next.top && current.bottom === next.bottom ? current : next,
     );
@@ -109,20 +104,21 @@ export function Thinking({
   useLayoutEffect(() => {
     if (!open || !revealed || !follow.current.pinned) return;
     scrollToEnd();
+    syncFadeEdges();
   }, [text, open, revealed]);
 
   useLayoutEffect(() => {
     const scrollElement = scrollRef.current;
     const contentElement = contentRef.current;
     if (!open || !revealed || !scrollElement || !contentElement) {
-      setFadeEdges({ top: false, bottom: false });
+      setFadeEdges({ top: 0, bottom: 0 });
       return;
     }
 
     // 流式追加、Markdown 异步渲染或展开动画都会改变高度,贴底时持续跟随到底部。
     const sync = () => {
-      syncFadeEdges();
       if (follow.current.pinned) scrollToEnd();
+      syncFadeEdges();
     };
     sync();
     const observer = new ResizeObserver(sync);
@@ -158,6 +154,21 @@ export function Thinking({
       </button>
     </div>
   ) : null;
+  // 图标由 Markdown 排进最后一个段落行尾,避免右侧预留空隙导致上一行提前换行。
+  const proseToggle = useMemo(() => (
+    <button
+      className={`thinking-prose-toggle${open ? " expanded" : ""}`}
+      type="button"
+      aria-expanded={open}
+      aria-controls={bodyId}
+      title={open ? tr("收起思考内容", "Hide the thinking") : tr("展开思考内容", "Show the thinking")}
+      aria-label={open ? tr("收起思考内容", "Hide the thinking") : tr("展开思考内容", "Show the thinking")}
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
+        <polyline points="9 18 15 12 9 6" />
+      </svg>
+    </button>
+  ), [open, bodyId, locale]);
   const prose = layout === "prose" && summary?.status === "done" ? (
     <div
       className="thinking-prose-summary agent-reply-prose summary-arrival"
@@ -165,25 +176,12 @@ export function Thinking({
         // 划选总结文字时不触发展开;单击整段文字等同点击末尾图标。
         const selection = window.getSelection();
         if (selection && !selection.isCollapsed && selection.containsNode(event.currentTarget, true)) return;
+        // 总结里的链接和文件引用有自己的点击行为,不连带开合思考内容。
+        if ((event.target as Element).closest("a, [role='button']")) return;
         toggle();
       }}
     >
-      {/* 图标跟在总结文字之后排进最后一行,避免右侧预留空隙导致上一行提前换行。 */}
-      <p className="thinking-prose-text">
-        {summary.text}
-        <button
-          className={`thinking-prose-toggle${open ? " expanded" : ""}`}
-          type="button"
-          aria-expanded={open}
-          aria-controls={bodyId}
-          title={open ? tr("收起思考内容", "Hide the thinking") : tr("展开思考内容", "Show the thinking")}
-          aria-label={open ? tr("收起思考内容", "Hide the thinking") : tr("展开思考内容", "Show the thinking")}
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
-            <polyline points="9 18 15 12 9 6" />
-          </svg>
-        </button>
-      </p>
+      <Markdown text={summary.text} trailing={proseToggle} />
     </div>
   ) : null;
   return (
@@ -227,11 +225,9 @@ export function Thinking({
               ) : <p className="thinking-summary-failed">{localizeError(summary.error)}</p>}
             </aside>
           ) : null}
-          <div className={`thinking-scroll-shell${contentEdgeBlur ? " has-content-edge-blur" : ""}`}>
-            {contentEdgeBlur ? <ThinkingEdgeBlur id={edgeFilterId} {...fadeEdges} height={viewportHeight} /> : null}
+          <ScrollFadeShell edges={fadeEdges} height={viewportHeight}>
             <div
               className="thinking-scroll-viewport"
-              style={contentEdgeBlur && (fadeEdges.top || fadeEdges.bottom) ? { filter: `url("#${edgeFilterId}")` } : undefined}
               ref={scrollRef}
               onScroll={handleScroll}
               onWheel={handleWheel}
@@ -245,15 +241,7 @@ export function Thinking({
                 {revealed ? <Markdown text={text} streaming={active} /> : null}
               </div>
             </div>
-            <div
-              className={`thinking-scroll-fade thinking-scroll-fade-top${fadeEdges.top ? " is-visible" : ""}`}
-              aria-hidden="true"
-            />
-            <div
-              className={`thinking-scroll-fade thinking-scroll-fade-bottom${fadeEdges.bottom ? " is-visible" : ""}`}
-              aria-hidden="true"
-            />
-          </div>
+          </ScrollFadeShell>
         </div>
       </div>
     </div>

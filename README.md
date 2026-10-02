@@ -125,6 +125,7 @@ description: 从 PDF 提取文字和表格。在阅读、转换或检查 PDF 时
 pnpm dev         # 启动 Electron 开发环境
 pnpm build       # 编译桌面端代码
 pnpm typecheck   # 检查 TypeScript 类型
+pnpm test:center # 测试中心：统一运行 Node 单测与浏览器 UI 检查（本地网页看板）
 pnpm --filter @vela/desktop test:trace  # 轨迹采集与显示逻辑的定向测试
 pnpm --filter @vela/desktop test:trace:preview  # 确定性 UI 测试页面（非生产数据）
 ```
