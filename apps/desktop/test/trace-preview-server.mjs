@@ -21,6 +21,7 @@ console.log(
     "UI fixtures:",
     "  trace:   http://127.0.0.1:5179/test/trace-preview.html (append ?count=10000 for the large-event case)",
       "  changes: http://127.0.0.1:5179/test/changes-preview.html (append ?mode=preview to render Markdown)",
+      "  review:  http://127.0.0.1:5179/test/turn-review-preview.html (append ?checks=1 for interaction checks)",
       "  images:  http://127.0.0.1:5179/test/image-viewer-preview.html (click a thumbnail for the full-screen viewer)",
       "  vcs:     http://127.0.0.1:5179/test/version-control-preview.html (append ?page=history|pr)",
       "  motion:  http://127.0.0.1:5179/test/motion-batch3-preview.html (append ?checks=1 for Batch 3 checks)",

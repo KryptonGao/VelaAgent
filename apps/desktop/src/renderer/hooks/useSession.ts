@@ -220,7 +220,7 @@ export function useSession() {
           [event.conversationId]: applyPlanDraft(current[event.conversationId] ?? null, event),
         }));
         const planId = event.type === "proposed_plan_end" ? event.plan.id : event.planId;
-        setBuckets((current) => attachPlanToLastAssistant(current, event.conversationId, planId));
+        setBuckets((current) => attachPlanToLastAssistant(current, event.conversationId, planId, turnStartedAtRef.current[event.conversationId]));
         // 开始生成时把 Plan Document 带到前台；完成后保留用户手动关闭的选择。
         if (event.type === "proposed_plan_start" && event.conversationId === activeIdRef.current) {
           setPlanFocus((current) => ({ planId: event.planId, nonce: (current?.nonce ?? 0) + 1 }));
@@ -527,21 +527,19 @@ export function attachPlanToLastAssistant(
   buckets: MessageBuckets,
   conversationId: string,
   planId: string,
+  startedAt?: number,
 ): MessageBuckets {
-  const messages = buckets[conversationId];
-  if (!messages || messages.length === 0) return buckets;
-  let index = -1;
-  for (let cursor = messages.length - 1; cursor >= 0; cursor -= 1) {
-    if (messages[cursor]?.role === "assistant") {
-      index = cursor;
-      break;
-    }
+  const messages = buckets[conversationId] ?? [];
+  const message = messages.at(-1);
+  // 计划可能是这一轮唯一的输出；不能丢掉它，也不能挂到上一轮的回复。
+  if (message?.role !== "assistant") {
+    const next = ensureAssistant(messages, startedAt);
+    next[next.length - 1]!.planIds = [planId];
+    return { ...buckets, [conversationId]: next };
   }
-  if (index < 0) return buckets;
-  const message = messages[index]!;
   if (message.planIds?.includes(planId)) return buckets;
   const next = [...messages];
-  next[index] = { ...message, planIds: [...(message.planIds ?? []), planId] };
+  next[next.length - 1] = { ...message, planIds: [...(message.planIds ?? []), planId] };
   return { ...buckets, [conversationId]: next };
 }
 
@@ -577,7 +575,7 @@ function stampLastAssistant(
   return messages;
 }
 
-function applyStreamEvent(buckets: MessageBuckets, event: StreamUpdate, startedAt?: number): MessageBuckets {
+export function applyStreamEvent(buckets: MessageBuckets, event: StreamUpdate, startedAt?: number): MessageBuckets {
   const id = event.conversationId;
   const next = applyToMessages(buckets[id] ?? [], event, startedAt);
   return { ...buckets, [id]: next };
@@ -596,7 +594,7 @@ function applyToMessages(messages: UiMessage[], event: StreamUpdate, startedAt?:
   if (event.type === "assistant_start") {
     const last = messages[messages.length - 1];
     // 发送时预建或上一轮遗留的空 assistant 块直接复用,避免出现两个空气泡。
-    if (last?.role === "assistant" && !last.text && !last.thinking && last.tools.length === 0) {
+    if (last?.role === "assistant" && !last.text && !last.thinking && last.tools.length === 0 && !last.planIds?.length) {
       if (startedAt === undefined || last.turnStartedAt === startedAt) return messages;
       return [...messages.slice(0, -1), { ...last, turnStartedAt: startedAt }];
     }

@@ -21,6 +21,8 @@ import { isBoolean, useStoredState } from "./hooks/useStoredState";
 import { useProject } from "./hooks/useProject";
 import { useSession, type UiMessage } from "./hooks/useSession";
 import { useSidebarResize } from "./hooks/useSidebarResize";
+import { useTurnReview } from "./hooks/useTurnReview";
+import type { TurnReviewRequest } from "./components/turn-changes";
 import {
   emptyPlanDocumentState,
   planDocumentReducer,
@@ -118,6 +120,7 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const workspaceKey = project.workspace?.current ?? "";
   const conversationKey = session.activeConversationId ?? "";
+  const { review: turnReview, tabId: turnReviewTabId, open: showTurnReview, close: dismissTurnReview } = useTurnReview(workspaceKey, conversationKey);
   const [fileTabsByWorkspace, setFileTabsByWorkspace] = useState<Record<string, PreviewFileDescriptor[]>>({});
   const fileWorkspaceRef = useRef<string | null>(null);
   const [changesByWorkspace, setChangesByWorkspace] = useState<Record<string, {
@@ -197,6 +200,11 @@ export function App() {
     });
     setActiveWorkbenchTabId(scopedTabId("changes", workspaceKey));
   }, [workspaceKey]);
+
+  const onReviewTurn = useCallback((request: TurnReviewRequest) => {
+    showTurnReview(request);
+    setActiveWorkbenchTabId(turnReviewTabId);
+  }, [showTurnReview, turnReviewTabId]);
 
   const onOpenFile = useCallback((file: PreviewFileDescriptor) => {
     fileWorkspaceRef.current = workspaceKey;
@@ -284,6 +292,9 @@ export function App() {
   const planTab = useMemo<WorkbenchTab | null>(() => planDocument.activePlanId
     ? { id: scopedTabId("plan", conversationKey), kind: "plan", label: tr("计划", "Plan") }
     : null, [planDocument.activePlanId, conversationKey]);
+  const reviewTab = useMemo<WorkbenchTab | null>(() => turnReview
+    ? { id: turnReviewTabId, kind: "turn-review", label: tr("变更审查", "Change review"), review: turnReview }
+    : null, [turnReview, turnReviewTabId, preferences.locale]);
   const agentTabs = useMemo<WorkbenchTab[]>(() => {
     const dismissedAgentIds = new Set(dismissedAgentsByConversation[conversationKey] ?? []);
     return allAgents.filter((agent) => !dismissedAgentIds.has(agent.id)).map((agent) => ({
@@ -312,11 +323,12 @@ export function App() {
     ...fileTabs,
     ...(planTab ? [planTab] : []),
     ...(changeTab ? [changeTab] : []),
+    ...(reviewTab ? [reviewTab] : []),
     ...agentTabs,
     ...(filesTab ? [filesTab] : []),
     ...terminalTabs,
     ...startTabItems,
-  ], [fileTabs, planTab, changeTab, agentTabs, filesTab, terminalTabs, startTabItems]);
+  ], [fileTabs, planTab, changeTab, reviewTab, agentTabs, filesTab, terminalTabs, startTabItems]);
   const workbenchTabs = useMemo(() => {
     const tabIdSet = new Set(unorderedTabs.map((tab) => tab.id));
     return [
@@ -395,6 +407,8 @@ export function App() {
         [workspaceKey]: { ...changesState, open: false },
       }));
       setSelectedChangePaths((current) => ({ ...current, [workspaceKey]: null }));
+    } else if (tab.kind === "turn-review") {
+      dismissTurnReview();
     } else if (tab.kind === "agent") {
       setDismissedAgentsByConversation((current) => ({
         ...current,
@@ -407,7 +421,7 @@ export function App() {
     } else if (tab.kind === "start") {
       setStartTabState((current) => current.filter((candidate) => candidate.id !== tab.id));
     }
-  }, [workbenchTabs, dispatchPlanDocument, workspaceKey, changesState, conversationKey]);
+  }, [workbenchTabs, dispatchPlanDocument, workspaceKey, changesState, conversationKey, dismissTurnReview]);
 
   const workbenchOpen = workbenchTabs.length > 0;
   const previousWorkbenchOpen = useRef(false);
@@ -576,6 +590,7 @@ export function App() {
                           project={project}
                           toolDisplay={preferences.toolDisplay}
                           toolFold={preferences.toolFold}
+                          toolProcessDetails={preferences.toolProcessDetails}
                           summaryEnabled={preferences.thinkingSummary}
                           summaryStyle={preferences.thinkingSummaryStyle}
                           locale={preferences.locale}
@@ -594,6 +609,9 @@ export function App() {
                           showNewTab={workbenchTabs.length === 0 || !contextSidebarOpen}
                           onNewTab={openStartTab}
                           onOpenChanges={openAllChanges}
+                          onReviewTurn={onReviewTurn}
+                          planDraft={session.planDraft}
+                          onOpenPlan={openPlan}
                         />
                       </AgentWorkspaceProvider>
                       <WorkbenchPanel

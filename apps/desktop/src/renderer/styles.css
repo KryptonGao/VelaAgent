@@ -678,6 +678,8 @@ code,
  */
 .sidebar-resize-handle.edge-right::after { left: 6px; }
 .sidebar-resize-handle.edge-left::after { left: 0; }
+/* 常驻分界线画在手柄层，避免被工作面板正文的实色背景盖住。 */
+.workbench-panel > .sidebar-resize-handle::after { background: var(--border-strong); }
 .sidebar-resize-handle:hover::after,
 .sidebar-resize-handle:focus-visible::after,
 :root[data-resizing="true"] .sidebar-resize-handle::after {
@@ -2204,6 +2206,25 @@ code,
   flex: none;
   font-weight: 600;
   color: var(--diff-del-fg);
+}
+.tool-duration,
+.tool-compact-steps {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tool-duration {
+  width: 7ch;
+  text-align: right;
+}
+.tool-compact-steps {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .tool-compact-stat {
   flex: none;
@@ -4355,7 +4376,6 @@ button.environment-row:not(:disabled):hover { background: var(--bg-surface-subtl
   flex-direction: column;
   gap: 6px;
   width: 100%;
-  max-width: 560px;
   padding: 12px 14px;
   text-align: left;
   border-radius: var(--radius-lg);
@@ -4405,6 +4425,7 @@ button.environment-row:not(:disabled):hover { background: var(--bg-surface-subtl
   line-height: 1.55;
   color: var(--text-secondary);
 }
+.plan-preview-overview-heading { margin-top: 4px; font-size: 13px; font-weight: 600; color: var(--text-primary); }
 .plan-preview-overview.is-streaming { color: var(--accent-blue); }
 .plan-preview-sections {
   display: flex;
@@ -5125,6 +5146,24 @@ button.environment-row:not(:disabled):hover { background: var(--bg-surface-subtl
 .repo-changes-entry:hover, .repo-changes-entry.active { background: var(--bg-surface-subtle); color: var(--text-primary); }
 .repo-changes-arrow { color: var(--text-dim); }
 .repo-card-empty { padding: 10px 0 6px; font-size: 15px; color: var(--text-muted); }
+.repo-plan { margin-top: 12px; }
+.repo-plan-heading { padding-bottom: 4px; font-size: 15px; color: var(--text-muted); }
+.repo-plan-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% + 16px);
+  margin-left: -8px;
+  padding: 8px;
+  border-radius: var(--radius-md);
+  text-align: left;
+  color: var(--text-primary);
+}
+.repo-plan-entry:hover { background: var(--bg-surface-subtle); }
+.repo-plan-entry:focus-visible, .plan-preview-card:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+.repo-plan-icon { display: flex; flex-shrink: 0; color: var(--text-secondary); }
+.repo-plan-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
+.repo-plan-status { flex-shrink: 0; font-size: 12px; color: var(--text-muted); }
 .repo-sources { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--bg-surface-subtle); }
 .repo-sources-header {
   display: flex;
@@ -6898,20 +6937,6 @@ button.turn-changes-path:hover { color: var(--accent-blue); }
 .turn-changes-more:hover { color: var(--accent-blue); }
 .turn-changes-more svg { transition: transform var(--transition-smooth); }
 .turn-changes-more svg.is-up { transform: rotate(180deg); }
-.turn-changes-diffs { width: 100%; min-width: 0; color: var(--text-muted); font-size: 15px; }
-.turn-changes-diffs pre {
-  max-height: 260px;
-  overflow: auto;
-  padding: 9px 11px;
-  border-radius: 8px;
-  background: var(--bg-code);
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: 14px;
-  line-height: 1.5;
-  user-select: text;
-}
-.turn-changes-diffs pre + pre { margin-top: 6px; }
 
 /* ---------- 界面动效 ---------- */
 
@@ -8118,3 +8143,102 @@ button.turn-changes-path:hover { color: var(--accent-blue); }
   .image-viewer { background: rgba(10, 11, 14, 0.97); backdrop-filter: none; }
   .image-viewer-controls, .image-viewer-nav, .image-viewer-close { background: rgba(26, 28, 34, 0.96); backdrop-filter: none; }
 }
+
+/* 本轮保存的编辑记录：独立于当前 Git 工作区的只读审查。 */
+.turn-review-view {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-chat);
+  color: var(--text-primary);
+}
+.turn-review-toolbar {
+  flex: none;
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13px;
+}
+.turn-review-toolbar strong { font-weight: 600; white-space: nowrap; }
+.turn-review-count { color: var(--text-muted); white-space: nowrap; }
+.turn-review-stats { display: inline-flex; gap: 5px; flex: none; white-space: nowrap; font-size: 12px; font-variant-numeric: tabular-nums; }
+.turn-review-files-toggle {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  font-size: 12px;
+}
+.turn-review-files-toggle:hover { background: var(--bg-hover); }
+.turn-review-body { position: relative; flex: 1; min-height: 0; display: flex; overflow: hidden; }
+.turn-review-scroll { flex: 1; min-width: 0; overflow: auto; overscroll-behavior: contain; }
+.turn-review-file { min-width: 0; border-bottom: 1px solid var(--border-subtle); }
+.turn-review-file-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 8px 12px;
+  background: var(--bg-chat);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13px;
+}
+.turn-review-file-header strong { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn-review-side-labels { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); font-size: 11px; color: var(--text-muted); background: var(--bg-surface-subtle); }
+.turn-review-side-labels span { padding: 4px 12px; }
+.turn-review-side-labels span + span { border-left: 1px solid var(--border-subtle); }
+.turn-review-edit-label { padding: 5px 12px; font-size: 11px; color: var(--text-muted); background: var(--bg-surface-subtle); border-top: 1px solid var(--border-subtle); }
+.turn-review-empty { padding: 20px 14px; font-size: 12px; color: var(--text-muted); }
+.turn-review-sidebar { flex: none; width: 220px; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border-subtle); background: var(--bg-chat); }
+.turn-review-sidebar[hidden] { display: none; }
+.turn-review-filter { display: flex; align-items: center; gap: 6px; flex: none; margin: 8px; padding: 5px 8px; min-height: 30px; border: 1px solid var(--border-subtle); border-radius: var(--radius-xs); color: var(--text-muted); }
+.turn-review-filter input { border: none; background: transparent; color: var(--text-primary); outline: none; width: 100%; min-width: 0; font-size: 12px; }
+.turn-review-filter:focus-within { outline: 2px solid var(--accent-blue); outline-offset: 1px; }
+.turn-review-tree { flex: 1; min-height: 0; overflow: auto; padding: 0 6px 10px; }
+.turn-review-tree-list { padding: 0; margin: 0; list-style: none; }
+.turn-review-tree-list .turn-review-tree-list { padding-left: 10px; }
+.turn-review-directory, .turn-review-file-link {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  border-radius: var(--radius-xs);
+  padding: 6px;
+  min-height: 30px;
+  text-align: left;
+  font-size: 12px;
+}
+.turn-review-directory { color: var(--text-secondary); }
+.turn-review-directory > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn-review-directory svg { flex: none; }
+.turn-review-chevron.open { transform: rotate(90deg); }
+.turn-review-file-link:hover, .turn-review-directory:hover { background: var(--bg-hover); }
+.turn-review-file-link.active { background: var(--bg-surface-subtle); }
+.turn-review-file-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn-review-view button:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: -2px; }
+.turn-review-view.is-compact .turn-review-sidebar { position: absolute; top: 0; right: 0; bottom: 0; z-index: 3; width: min(280px, 90%); box-shadow: var(--shadow-card); }
+
+/* 只作用于审查页，避免版本控制页的窄窗口规则把左右对比折为单列。 */
+.turn-review-view .changes-diff-body { flex: none; margin: 0; overflow: visible; padding: 0; font-size: 12px; line-height: 1.65; }
+.turn-review-view .diff-split-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.turn-review-view .diff-split-cell { display: flex; padding: 0; border-right: 1px solid var(--border-subtle); min-width: 0; }
+.turn-review-view .diff-split-cell:last-child { border-right: none; }
+.turn-review-view .diff-line-number { width: 5ch; flex: none; padding-right: 6px; text-align: right; color: var(--text-muted); user-select: none; font-variant-numeric: tabular-nums; }
+.turn-review-view .diff-code { flex: 1; min-width: 0; padding-right: 8px; white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; }
+.turn-review-view .diff-sign { width: 1ch; }
+.turn-review-view .diff-split-full { display: block; padding: 5px 12px; background: var(--bg-surface-subtle); font-family: var(--font-sans); font-size: 11px; font-style: normal; }
+.turn-review-view .diff-line.add { box-shadow: inset 3px 0 var(--diff-add-fg); }
+.turn-review-view .diff-line.del { box-shadow: inset 3px 0 var(--diff-del-fg); }

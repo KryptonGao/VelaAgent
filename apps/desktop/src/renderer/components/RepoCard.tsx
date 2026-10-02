@@ -12,10 +12,12 @@ import {
   GithubIcon,
   GridIcon,
   MoreIcon,
+  PlanIcon,
   PrIcon,
 } from "./icons";
 import type { PrSummary } from "@vela/shared";
 import { localizeError, tr } from "../locale";
+import type { PlanReferenceModel } from "../plan-draft";
 
 const prStateLabels: Record<PrSummary["state"], string> = {
   open: "Open",
@@ -35,12 +37,16 @@ export function RepoCard({
   project,
   onOpenChanges,
   activeChanges,
+  plan = null,
+  onOpenPlan,
   collapsed = false,
   onToggle,
 }: {
   project: ProjectApi;
   onOpenChanges: () => void;
   activeChanges: boolean;
+  plan?: PlanReferenceModel | null;
+  onOpenPlan?: (planId: string) => void;
   collapsed?: boolean;
   onToggle?: () => void;
 }) {
@@ -208,6 +214,23 @@ export function RepoCard({
             : tr("尚未选择工作区", "No workspace selected")}
         </div>
       )}
+
+      {plan && onOpenPlan ? (
+        <section className="repo-plan">
+          <div className="repo-plan-heading">{tr("计划", "Plan")}</div>
+          <button
+            type="button"
+            className="repo-plan-entry"
+            title={plan.title || tr("未命名计划", "Untitled plan")}
+            aria-label={`${tr("打开计划", "Open plan")}: ${plan.title || tr("未命名计划", "Untitled plan")}`}
+            onClick={() => onOpenPlan(plan.id)}
+          >
+            <span className="repo-plan-icon" aria-hidden="true"><PlanIcon size={16} /></span>
+            <span className="repo-plan-title">{plan.title || tr("未命名计划", "Untitled plan")}</span>
+            {plan.streaming ? <span className="repo-plan-status">{tr("生成中", "Writing")}</span> : null}
+          </button>
+        </section>
+      ) : null}
 
       <div className="repo-sources">
         <div className="repo-sources-header">

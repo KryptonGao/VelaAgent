@@ -1386,11 +1386,11 @@ export class AgentRuntime {
         const stream = entry?.planStream;
         if (entry && stream) {
           entry.planStream = null;
-          entry.planStreamPlan = null;
           // 用户停止时丢弃未完成的草稿，不生成半截 revision。
           if (!entry.stopRequested) {
             for (const streamEvent of stream.flush()) this.emitPlanStream(entry, streamEvent);
           }
+          entry.planStreamPlan = null;
         }
       }
       this.recordGeneration(conversationId, event.message);

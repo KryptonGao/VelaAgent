@@ -109,7 +109,7 @@ function PlanPreviewCard({ planId }: { planId: string }) {
       <span className="plan-preview-head">
         <span className="plan-preview-kind">
           <PlanIcon size={12} />
-          {tr("计划", "Plan")}
+          {resolved.streaming ? tr("正在撰写计划", "Writing a plan") : tr("已提交计划", "Plan submitted")}
         </span>
         <span className="plan-preview-meta">
           {meta}
@@ -120,7 +120,10 @@ function PlanPreviewCard({ planId }: { planId: string }) {
       {resolved.streaming ? (
         <span className="plan-preview-overview is-streaming">{tr("正在生成完整方案…", "Writing the full plan…")}</span>
       ) : info.overview ? (
-        <span className="plan-preview-overview">{info.overview}</span>
+        <>
+          <span className="plan-preview-overview-heading">{tr("概述", "Overview")}</span>
+          <span className="plan-preview-overview">{info.overview}</span>
+        </>
       ) : null}
       {!resolved.streaming && info.sections.length > 0 ? (
         <span className="plan-preview-sections" aria-hidden="true">

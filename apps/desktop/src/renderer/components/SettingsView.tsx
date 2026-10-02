@@ -995,6 +995,7 @@ function AppearanceSection({
     darkTheme,
     toolDisplay,
     toolFold,
+    toolProcessDetails,
     thinkingSummary,
     thinkingSummaryStyle,
     fileIconTheme,
@@ -1002,6 +1003,7 @@ function AppearanceSection({
     setLocale,
     setToolDisplay,
     setToolFold,
+    setToolProcessDetails,
     setThinkingSummary,
     setThinkingSummaryStyle,
     setFileIconTheme,
@@ -1107,6 +1109,17 @@ function AppearanceSection({
           value={toolFold}
           options={toolFoldOptions}
           onChange={setToolFold}
+        />
+      </SettingsBlock>
+      <SettingsBlock title={text.toolProcessDetails} hint={text.toolProcessDetailsHint}>
+        <Segmented
+          label={text.toolProcessDetails}
+          value={toolProcessDetails ? "on" : "off"}
+          options={[
+            { id: "off", label: text.toolProcessDetailsOff },
+            { id: "on", label: text.toolProcessDetailsOn },
+          ]}
+          onChange={(value) => setToolProcessDetails(value === "on")}
         />
       </SettingsBlock>
       <SettingsBlock title={text.thinkingSummary} hint={text.thinkingSummaryHint}>

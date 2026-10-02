@@ -24,13 +24,16 @@ import type { ThinkingSummariesApi } from "../hooks/useThinkingSummaries";
 import { ToolCard, ToolList, CompactToolGroup, CompactToolLine, ToolRunGroup, type QuestionLookup } from "./ToolCard";
 import { toolCompactKind } from "./tool-compact";
 import { buildTurnItems, groupProcessItems, type ProcessNode } from "./tool-sequence";
+import { formatDuration, readToolDuration } from "./tool-duration";
+import { foldSequenceId } from "./tool-fold-state";
+import { useToolExpanded, useToolProcessDetails, useToolsDuration } from "./ToolProcessContext";
 import { PlanPreviewList } from "./PlanPanel";
-import { collectPlanIds } from "../plan-draft";
+import { collectPlanIds, planReferenceModel } from "../plan-draft";
 import { SkillToken } from "./composer/SkillMenu";
 import { parseSkillPrompt } from "./composer/skill-picker";
 import { useFilePreview } from "./preview/FilePreviewContext";
 import { nextStreamFollow, releasesStreamFollow, shouldResumeFollowForMessages } from "./chat-scroll";
-import { summarizeTurnChanges, type TurnChanges } from "./turn-changes";
+import { summarizeTurnChanges, type TurnChanges, type TurnReviewRequest } from "./turn-changes";
 import { chatLaneDefaultMaxWidth, planChatLane } from "../chat-lane";
 import { UserMessageFrame } from "./UserMessageFrame";
 import { ImageViewer, type ImageViewerRequest } from "./ImageViewer";
@@ -160,6 +163,9 @@ export interface ChatViewProps {
   showNewTab: boolean;
   onNewTab: () => void;
   onOpenChanges: () => void;
+  onReviewTurn?: (request: TurnReviewRequest) => void;
+  planDraft?: import("../plan-draft").PlanDraft | null;
+  onOpenPlan?: (planId: string) => void;
 }
 
 export function ChatView({
@@ -192,6 +198,9 @@ export function ChatView({
   showNewTab,
   onNewTab,
   onOpenChanges,
+  onReviewTurn,
+  planDraft = null,
+  onOpenPlan,
 }: ChatViewProps) {
   const [views, setViews] = useState<Record<string, "chat" | "trace" | "versionControl">>({});
   const [vcMounted, setVcMounted] = useState(false);
@@ -549,6 +558,8 @@ export function ChatView({
       {floatingInfo && !environmentCollapsed ? (
         <div className="floating-environment">
           <RepoCard project={project} onOpenChanges={onOpenChanges} activeChanges={changesActive}
+            plan={planReferenceModel(session?.proposedPlan ?? null, planDraft, session?.executionPlan ?? null)}
+            onOpenPlan={onOpenPlan}
             onToggle={onToggleRight} />
         </div>
       ) : null}
@@ -593,6 +604,7 @@ export function ChatView({
                     entering={entering.has(turn.user.id)}
                     changes={null}
                     onOpenChanges={onOpenChanges}
+                    onReviewTurn={onReviewTurn}
                     canManageChanges={Boolean(project.git?.repo)}
                     getQuestion={getQuestion}
                     onReplyQuestion={onReplyQuestion}
@@ -611,6 +623,7 @@ export function ChatView({
                     entering={turn.assistants.some((message) => entering.has(message.id))}
                     changes={changes}
                     onOpenChanges={onOpenChanges}
+                    onReviewTurn={onReviewTurn}
                     canManageChanges={Boolean(project.git?.repo)}
                     getQuestion={getQuestion}
                     onReplyQuestion={onReplyQuestion}
@@ -635,8 +648,10 @@ export function ChatView({
                         />
                         {changes ? (
                           <TurnChangesCard
+                            turnId={lastAssistant!.id}
                             changes={changes}
                             onOpenChanges={onOpenChanges}
+                            onReviewTurn={onReviewTurn}
                             canManageChanges={Boolean(project.git?.repo)}
                           />
                         ) : null}
@@ -652,6 +667,7 @@ export function ChatView({
                           entering={entering.has(message.id)}
                           changes={turnChanges.get(message.id) ?? null}
                           onOpenChanges={onOpenChanges}
+                          onReviewTurn={onReviewTurn}
                           canManageChanges={Boolean(project.git?.repo)}
                           getQuestion={getQuestion}
                           onReplyQuestion={onReplyQuestion}
@@ -775,6 +791,7 @@ const Message = memo(function Message({
   entering,
   changes,
   onOpenChanges,
+  onReviewTurn,
   canManageChanges,
   getQuestion,
   onReplyQuestion,
@@ -789,6 +806,7 @@ const Message = memo(function Message({
   entering: boolean;
   changes: TurnChanges | null;
   onOpenChanges: () => void;
+  onReviewTurn?: (request: TurnReviewRequest) => void;
   canManageChanges: boolean;
   getQuestion: QuestionLookup;
   onReplyQuestion: (id: string, answer: string | null) => void;
@@ -854,6 +872,7 @@ const Message = memo(function Message({
         showText
         changes={changes}
         onOpenChanges={onOpenChanges}
+        onReviewTurn={onReviewTurn}
         canManageChanges={canManageChanges}
         getQuestion={getQuestion}
         onReplyQuestion={onReplyQuestion}
@@ -872,6 +891,7 @@ function AssistantMessageContent({
   showText,
   changes,
   onOpenChanges,
+  onReviewTurn,
   canManageChanges,
   getQuestion,
   onReplyQuestion,
@@ -885,6 +905,7 @@ function AssistantMessageContent({
   showText: boolean;
   changes: TurnChanges | null;
   onOpenChanges: () => void;
+  onReviewTurn?: (request: TurnReviewRequest) => void;
   canManageChanges: boolean;
   getQuestion: QuestionLookup;
   onReplyQuestion: (id: string, answer: string | null) => void;
@@ -919,7 +940,7 @@ function AssistantMessageContent({
           <Markdown text={message.text} streaming={streaming} />
         </div>
       ) : null}
-      {changes ? <TurnChangesCard changes={changes} onOpenChanges={onOpenChanges} canManageChanges={canManageChanges} /> : null}
+      {changes ? <TurnChangesCard turnId={message.id} changes={changes} onOpenChanges={onOpenChanges} onReviewTurn={onReviewTurn} canManageChanges={canManageChanges} /> : null}
     </>
   );
 }
@@ -956,7 +977,7 @@ function ToolSequence({
 
   const renderTool = (node: Extract<ProcessNode, { type: "tool" | "run" }>): ReactNode => {
     if (node.type === "run") {
-      return withEnter(node.id, node.messageId, compact ? <CompactToolGroup tools={node.tools} /> : <ToolRunGroup tools={node.tools} />);
+      return withEnter(node.id, node.messageId, compact ? <CompactToolGroup tools={node.tools} sequenceId={node.id} /> : <ToolRunGroup tools={node.tools} />);
     }
     return withEnter(
       node.id,
@@ -1012,6 +1033,7 @@ const CompletedAssistantTurn = memo(function CompletedAssistantTurn({
   entering,
   changes,
   onOpenChanges,
+  onReviewTurn,
   canManageChanges,
   getQuestion,
   onReplyQuestion,
@@ -1027,6 +1049,7 @@ const CompletedAssistantTurn = memo(function CompletedAssistantTurn({
   entering: boolean;
   changes: TurnChanges | null;
   onOpenChanges: () => void;
+  onReviewTurn?: (request: TurnReviewRequest) => void;
   canManageChanges: boolean;
   getQuestion: QuestionLookup;
   onReplyQuestion: (id: string, answer: string | null) => void;
@@ -1036,7 +1059,13 @@ const CompletedAssistantTurn = memo(function CompletedAssistantTurn({
   replyTime: number | null;
   onBranch: (turnIndex: number) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useToolExpanded(foldSequenceId(messages[0]?.id ? `turn:${messages[0].id}` : undefined), toolDisplay === "compact");
+  const details = useToolProcessDetails();
+  const toolsDuration = useToolsDuration(messages.flatMap(message => message.tools));
+  const startedAt = messages.find(message => message.turnStartedAt !== undefined)?.turnStartedAt;
+  const completedAt = messages[messages.length - 1]?.turnCompletedAt;
+  const turnDuration = details && toolDisplay === "compact" ? readToolDuration({ startedAt, completedAt }) ?? toolsDuration : null;
+  const displayedElapsed = turnDuration === null ? elapsed : formatDuration(turnDuration);
   const processId = useId();
   const hasProcess = messages.some((message) => (
     message.id !== finalReply.id && Boolean(message.text || message.thinking || message.tools.length > 0)
@@ -1044,7 +1073,7 @@ const CompletedAssistantTurn = memo(function CompletedAssistantTurn({
   const enterClass = entering ? " message-enter" : "";
   const triggerContent = (
     <>
-      <span>{elapsed ? tr(`用时 ${elapsed}`, `Took ${elapsed}`) : hasProcess ? tr("查看过程", "View process") : tr("耗时未记录", "Duration unavailable")}</span>
+      <span>{displayedElapsed ? tr(`用时 ${displayedElapsed}`, `Took ${displayedElapsed}`) : hasProcess ? tr("查看过程", "View process") : tr("耗时未记录", "Duration unavailable")}</span>
       {hasProcess ? (
         <svg className="time-spent-trigger-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
           <polyline points="9 18 15 12 9 6" />
@@ -1093,6 +1122,7 @@ const CompletedAssistantTurn = memo(function CompletedAssistantTurn({
                     showText={message.id !== finalReply.id}
                     changes={null}
                     onOpenChanges={onOpenChanges}
+                    onReviewTurn={onReviewTurn}
                     canManageChanges={canManageChanges}
                     getQuestion={getQuestion}
                     onReplyQuestion={onReplyQuestion}
@@ -1116,7 +1146,7 @@ const CompletedAssistantTurn = memo(function CompletedAssistantTurn({
         branchDisabled={branchTurn === null}
         onBranch={onBranch}
       />
-      {changes ? <TurnChangesCard changes={changes} onOpenChanges={onOpenChanges} canManageChanges={canManageChanges} /> : null}
+      {changes ? <TurnChangesCard turnId={messages[messages.length - 1].id} changes={changes} onOpenChanges={onOpenChanges} onReviewTurn={onReviewTurn} canManageChanges={canManageChanges} /> : null}
     </article>
   );
 });
@@ -1196,15 +1226,16 @@ function formatReplyTimeTitle(timestamp: number): string {
   return new Date(timestamp).toLocaleString(isEnglish() ? "en-US" : "zh-CN");
 }
 
-/** 本轮完成后展示文件统计；审核读取保存的工具差异，不受后续工作区改动影响。 */
-function TurnChangesCard({ changes, onOpenChanges, canManageChanges }: {
+/** 本轮完成后展示文件统计；审查读取保存的工具差异，不受后续工作区改动影响。 */
+function TurnChangesCard({ turnId, changes, onOpenChanges, onReviewTurn, canManageChanges }: {
+  turnId: string;
   changes: TurnChanges;
   onOpenChanges: () => void;
+  onReviewTurn?: (request: TurnReviewRequest) => void;
   canManageChanges: boolean;
 }) {
   const preview = useFilePreview();
   const [showAll, setShowAll] = useState(false);
-  const [reviewing, setReviewing] = useState(false);
   const files = showAll ? changes.files : changes.files.slice(0, 3);
   const remaining = changes.files.length - 3;
 
@@ -1232,13 +1263,10 @@ function TurnChangesCard({ changes, onOpenChanges, canManageChanges }: {
           <button
             type="button"
             className="turn-changes-review"
-            aria-expanded={reviewing}
-            onClick={() => {
-              setReviewing((value) => !value);
-              setShowAll(true);
-            }}
+            disabled={!onReviewTurn}
+            onClick={() => onReviewTurn?.({ turnId, changes })}
           >
-            {reviewing ? tr("收起审核", "Hide review") : tr("审核", "Review")}
+            {tr("审查", "Review")}
           </button>
         </div>
       </header>
@@ -1256,13 +1284,6 @@ function TurnChangesCard({ changes, onOpenChanges, canManageChanges }: {
               <span className="turn-changes-added">+{file.added}</span>
               <span className="turn-changes-removed">−{file.removed}</span>
             </span>
-            {reviewing ? (
-              <div className="turn-changes-diffs">
-                {file.diffs.length > 0
-                  ? file.diffs.map((diff, index) => <pre key={index}>{diff}</pre>)
-                  : <span>{tr("这项编辑没有保存可显示的差异", "No saved diff is available for this edit")}</span>}
-              </div>
-            ) : null}
           </div>
         ))}
         {remaining > 0 ? (

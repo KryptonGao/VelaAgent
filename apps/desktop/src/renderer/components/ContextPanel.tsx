@@ -11,6 +11,7 @@ import {
 import type { ProjectApi } from "../hooks/useProject";
 import type { SidebarResize } from "../hooks/useSidebarResize";
 import type { PlanDraft } from "../plan-draft";
+import { planReferenceModel } from "../plan-draft";
 import { ChevronDownIcon } from "./icons";
 import { PlanReferenceCard } from "./PlanPanel";
 import { RepoCard } from "./RepoCard";
@@ -100,6 +101,8 @@ export function ContextPanel({
           project={project}
           onOpenChanges={onOpenChanges}
           activeChanges={changesActive}
+          plan={planReferenceModel(session?.proposedPlan ?? null, planDraft, session?.executionPlan ?? null)}
+          onOpenPlan={onOpenPlan}
         />
 
         <PanelDisclosure

@@ -18,6 +18,7 @@ import {
 } from "../src/renderer/plan-draft.ts";
 import {
   attachPlanToLastAssistant,
+  applyStreamEvent,
   type MessageBuckets,
   type UiMessage,
 } from "../src/renderer/hooks/useSession.ts";
@@ -74,6 +75,26 @@ describe("Plan Preview（聊天卡片）", () => {
     buckets = attachPlanToLastAssistant(buckets, "c1", "p1");
     buckets = attachPlanToLastAssistant(buckets, "c1", "p1");
     assert.deepEqual(buckets.c1?.[0]?.planIds, ["p1"]);
+  });
+
+  it("计划作为唯一输出时创建本轮 assistant，不关联到上一轮", () => {
+    const old = assistant(["old-plan"]);
+    const user: UiMessage = { id: "u2", role: "user", text: "重新规划", thinking: "", tools: [] };
+    const buckets = attachPlanToLastAssistant({ c1: [old, user] }, "c1", "p2", 100);
+    assert.equal(buckets.c1?.length, 3);
+    assert.equal(buckets.c1?.[0], old);
+    assert.deepEqual(buckets.c1?.at(-1)?.planIds, ["p2"]);
+    assert.equal(buckets.c1?.at(-1)?.turnStartedAt, 100);
+    assert.deepEqual(collectPlanIds(attachPlanToLastAssistant({}, "c2", "p3").c2 ?? []), ["p3"]);
+  });
+
+  it("只有计划的消息也保留独立边界，下一条 assistant 不复用它", () => {
+    const planOnly = { ...assistant(["p1"]), text: "" };
+    const next = applyStreamEvent({ c1: [planOnly] }, { type: "assistant_start", conversationId: "c1" });
+    assert.equal(next.c1?.length, 2);
+    assert.equal(next.c1?.[0], planOnly);
+    assert.equal(next.c1?.[1]?.planIds, undefined);
+    assert.deepEqual(collectPlanIds(next.c1 ?? []), ["p1"]);
   });
 });
 

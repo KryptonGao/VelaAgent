@@ -30,6 +30,7 @@ const darkThemeKey = "vela.theme.dark";
 const localeKey = "vela.locale";
 const toolDisplayKey = "vela.toolDisplay";
 const toolFoldKey = "vela.toolFold";
+const toolProcessDetailsKey = "vela.toolProcessDetails";
 const thinkingSummaryKey = "vela.thinkingSummary";
 const thinkingSummaryStyleKey = "vela.thinkingSummaryStyle";
 const fileIconThemeKey = "vela.fileIconTheme";
@@ -124,6 +125,10 @@ export function usePreferences() {
   const [toolFold, setToolFold] = useState<ToolFold>(() =>
     readStored(toolFoldKey, isToolFold, "message"),
   );
+  /** 紧凑过程行的耗时标签与折叠记忆:默认关闭,与开启前的行为一致。 */
+  const [toolProcessDetails, setToolProcessDetails] = useState(() =>
+    readStored(toolProcessDetailsKey, (value): value is string => value === "true", "false") === "true",
+  );
   const [thinkingSummary, setThinkingSummary] = useState(() =>
     readStored(thinkingSummaryKey, (value): value is string => value === "true", "false") === "true",
   );
@@ -181,6 +186,7 @@ export function usePreferences() {
 
   useEffect(() => writeStored(toolDisplayKey, toolDisplay), [toolDisplay]);
   useEffect(() => writeStored(toolFoldKey, toolFold), [toolFold]);
+  useEffect(() => writeStored(toolProcessDetailsKey, String(toolProcessDetails)), [toolProcessDetails]);
   useEffect(() => writeStored(thinkingSummaryKey, String(thinkingSummary)), [thinkingSummary]);
   useEffect(() => writeStored(thinkingSummaryStyleKey, thinkingSummaryStyle), [thinkingSummaryStyle]);
   useEffect(() => writeStored(fileIconThemeKey, fileIconTheme), [fileIconTheme]);
@@ -197,6 +203,7 @@ export function usePreferences() {
     locale,
     toolDisplay,
     toolFold,
+    toolProcessDetails,
     thinkingSummary,
     thinkingSummaryStyle,
     fileIconTheme,
@@ -210,6 +217,7 @@ export function usePreferences() {
     setLocale,
     setToolDisplay,
     setToolFold,
+    setToolProcessDetails,
     setThinkingSummary,
     setThinkingSummaryStyle,
     setFileIconTheme,

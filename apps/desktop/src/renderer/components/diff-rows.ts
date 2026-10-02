@@ -16,6 +16,10 @@ export interface DiffRow {
   oldIndex: number;
   /** 该行在新文件中的行索引;不存在时为 -1。 */
   newIndex: number;
+  /** 保存的工具记录中的文件行号，与高亮片段索引分开。 */
+  oldLineNumber?: number;
+  newLineNumber?: number;
+  omitted?: boolean;
 }
 
 export interface ParsedDiff {

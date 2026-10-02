@@ -32,6 +32,8 @@ import {
   type DisplayDiffRow,
 } from "./tool-compact";
 import { shouldFoldRun } from "./tool-sequence";
+import { foldRowId, foldSequenceId } from "./tool-fold-state";
+import { DurationLabel, ToolDurationLabel, useToolExpanded, useToolProcessDetails, useToolsDuration } from "./ToolProcessContext";
 import type { ToolDisplay } from "../hooks/usePreferences";
 import { localizeError, tr } from "../locale";
 
@@ -184,7 +186,7 @@ function ToolCollapse({
  * 完整运行流在右侧 Agent Pane；点击卡片直接打开对应 Pane。
  */
 function AgentToolCard({ tool, compact = false }: { tool: ToolTrace; compact?: boolean }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useToolExpanded(foldRowId(tool.id), compact);
   const { onTransitionEnd } = useExpandSettle(open);
   const { openAgent } = useAgentWorkspace();
   const roster = useAgentRoster();
@@ -257,6 +259,7 @@ function AgentToolCard({ tool, compact = false }: { tool: ToolTrace; compact?: b
           >
             {title}
           </button>
+          <ToolDurationLabel tool={tool} />
           <button
             className="agent-compact-toggle is-tail"
             type="button"
@@ -357,7 +360,7 @@ function taskReport(body: string | undefined): string {
 }
 
 function GenericToolCard({ tool, compact = false }: ToolCardProps) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useToolExpanded(foldRowId(tool.id), compact);
   const [full, setFull] = useState(false);
   const [overflows, setOverflows] = useState(false);
   const sheetRef = useRef<HTMLDivElement>(null);
@@ -418,7 +421,7 @@ function GenericToolCard({ tool, compact = false }: ToolCardProps) {
           ) : lines !== null ? (
             <span className="tool-lines">{tr(`${lines} 行`, `${lines} lines`)}</span>
           ) : null}
-          {!compact ? <StatusMark status={tool.status} /> : null}
+          {compact ? <ToolDurationLabel tool={tool} /> : <StatusMark status={tool.status} />}
           <svg className="tool-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
             <polyline points="9 18 15 12 9 6" />
           </svg>
@@ -527,8 +530,10 @@ export function ToolRunGroup({ tools }: { tools: ToolTrace[] }) {
 }
 
 /** 紧凑模式:同一段超过 1 个工具时折叠成一行摘要,点击展开逐行明细。 */
-export function CompactToolGroup({ tools }: { tools: ToolTrace[] }) {
-  const [open, setOpen] = useState(false);
+export function CompactToolGroup({ tools, sequenceId = tools[0]?.id }: { tools: ToolTrace[]; sequenceId?: string }) {
+  const [open, setOpen] = useToolExpanded(foldSequenceId(sequenceId));
+  const details = useToolProcessDetails();
+  const duration = useToolsDuration(tools);
   const running = tools.some((tool) => tool.status === "running");
   const failed = tools.filter((tool) => tool.status === "error").length;
   const parts = compactSummaryParts(tools);
@@ -576,6 +581,11 @@ export function CompactToolGroup({ tools }: { tools: ToolTrace[] }) {
             {stat.removed > 0 ? <span className="tool-stat-del">−{stat.removed}</span> : null}
           </span>
         ) : null}
+        {details ? (
+          <span className="tool-compact-steps">
+            {tr(`${tools.length} 步`, `${tools.length} steps`)}<DurationLabel duration={duration} />
+          </span>
+        ) : null}
         <svg
           className="tool-compact-chevron"
           width="12"
@@ -621,7 +631,7 @@ export function CompactToolLine({
   hideIcon?: boolean;
 }) {
   const preview = useFilePreview();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useToolExpanded(foldRowId(tool.id));
   const kind = toolKind(tool.name);
   const activity = tool.activity ?? {};
   const subject = subjectOf(kind, activity, tool.name);
@@ -653,6 +663,7 @@ export function CompactToolLine({
           ) : null}
           {!hideAction ? <span className="tool-compact-action">{tr("已运行", "Ran")}</span> : null}
           <span className="tool-compact-cmd">{subject.name}</span>
+          <ToolDurationLabel tool={tool} />
           <svg
             className="tool-compact-chevron"
             width="12"
@@ -755,6 +766,7 @@ export function CompactToolLine({
             {stat.removed > 0 ? <span className="tool-stat-del">−{stat.removed}</span> : null}
           </span>
         ) : null}
+        <ToolDurationLabel tool={tool} />
         <CompactStatus running={running} failed={failed} />
       </div>
       {hasFileDetails ? (
@@ -1189,4 +1201,3 @@ function splitLines(text: string): string[] {
   if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
   return lines;
 }
-

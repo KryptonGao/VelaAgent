@@ -2,6 +2,7 @@ import type { AskUserQuestionRequest, ToolTrace } from "@vela/shared";
 import { useState } from "react";
 import { QuestionIcon } from "./icons";
 import { tr } from "../locale";
+import { ToolDurationLabel } from "./ToolProcessContext";
 
 /**
  * ask_user_question 工具的消息内卡片。
@@ -53,6 +54,7 @@ export function QuestionCard({
             <QuestionIcon size={13} />
           </span>
           <div className="question-card-q">{question}</div>
+          <ToolDurationLabel tool={tool} />
         </div>
         <div className="question-compact-answer">
           <span className="question-compact-guide" aria-hidden="true" />

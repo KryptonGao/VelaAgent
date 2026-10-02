@@ -14,6 +14,12 @@ export interface TurnChanges {
   removed: number;
 }
 
+export interface TurnReviewRequest {
+  /** 本轮最后一条 assistant 消息的 ID。 */
+  turnId: string;
+  changes: TurnChanges;
+}
+
 function displayPath(path: string, workspaceRoot: string | null): string {
   const normalized = path.trim().replaceAll("\\", "/").replace(/^\.\//, "");
   const root = workspaceRoot?.replaceAll("\\", "/").replace(/\/+$/, "");
