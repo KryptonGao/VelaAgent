@@ -1,52 +1,74 @@
 # Vela
 
-**在你选定的代码仓库中工作的桌面 AI 编程助手。**
+**在本地代码仓库中工作的桌面 AI 编程助手。**
 
-让 Agent 理解项目、制定计划、修改并运行代码；执行过程、文件变化和权限请求都能在同一窗口查看。
+**紧凑模式 · Codex 同款 SubAgents · DeepSeek Harness 同款轨迹界面**
 
-<p align="center">
-  <a href="./assets/readme/vela-desktop.png"><img src="./assets/readme/vela-desktop.png" width="100%" alt="Vela 工作界面：Agent 对话与工具调用位于中间会话区，HTML 文件在右侧编辑器中打开。" /></a>
-</p>
+让 Agent 理解项目、拆分任务、修改并运行代码；用紧凑对话查看进度，用独立面板跟踪子代理，用执行轨迹检查每一步。
 
-[产品实景](#产品实景) · [快速开始](#快速开始) · [权限与本地数据](#权限与本地数据) · [开发指南](#开发指南)
+[紧凑模式](#紧凑模式) · [SubAgents](#codex-同款-subagents) · [轨迹界面](#deepseek-harness-同款轨迹界面) · [快速开始](#快速开始) · [开发指南](#开发指南)
 
-用户消息气泡下方提供发送时间、复制和修改。修改后点「重新发送」，会在同一聊天中撤回该轮及后续对话、计划和代理记录，并从持久化检查点恢复工作区文件；发送前已有的未提交改动会保留。检查点从本版本起记录，旧消息没有检查点时会提示无法回退；文件存在后续手动改动或其他聊天同时执行时会阻止回退。回退范围不包括 Git 索引/提交、忽略的依赖与构建目录、工作区外文件或外部服务操作。
+## 紧凑模式
 
-## 工作方式
+**把工具调用收成过程行，让任务内容占据主要视野。** 紧凑模式默认开启：读文件、改代码和运行命令以单行呈现，连续调用自动合并为可展开的摘要。点击文件名打开右侧预览，展开改动查看 diff，展开命令查看输出；完成后还可以收起整轮过程，只保留结果。
 
-- **按任务选择模式：** `Agent` 负责日常读写与执行；`Plan` 只读查阅代码并输出完整实施方案，批准后再执行；`Goal` 记录多步目标与进度，持续推进直到完成。
-- **在真实工作区中操作：** 打开本机项目目录，或使用独立的 Git worktree。工作区决定 Agent 的文件范围、Shell 目录和 Git 上下文。
-- **查看完整执行轨迹：** 会话可在「对话」与「轨迹」之间切换；轨迹按顺序展示思考、工具参数和返回，Timeline 与节点详情同步选择，并显示请求首 Token 延迟、工具耗时、Token 和缓存指标。旧会话缺失的指标标为未记录。
-- **随时检查改动：** 查看工具调用和结果、Git 差异与暂存状态，并查看或创建当前分支的 Pull Request。
-- **在同一窗口处理周边工作：** 右侧工作面板用标签页承载变更、文件预览和集成终端，`⌘T` 新建标签页；终端直接在工作区目录运行命令。
-- **保留工作上下文：** 会话会在应用重启后恢复；模型、思考强度、上下文用量和 Skill 活动都能在界面中查看。
-- **放大查看图片：** 自己发送的图片以缩略图出现在消息里，点开即进入全屏查看：滚轮缩放、拖动平移视野，双击在适应窗口与放大之间切换，多张图片可用方向键切换。
-
-## 产品实景
-
-### 任务执行与审阅
-
-从任务说明到交付结果，查看 Agent 的答复、文件改动摘要、工具调用和上下文用量。
+下面的示例展开了文件查阅和修改摘要，展示“定位问题 → 实施修复 → 定向验证”的完整过程。
 
 <p align="center">
-  <a href="./assets/readme/vela-task-review.png"><img src="./assets/readme/vela-task-review.png" width="100%" alt="Vela 任务完成界面：展示用户需求、Agent 的交付说明、文件改动摘要，以及右侧工具调用和上下文用量。" /></a>
+  <a href="./assets/readme/vela-compact.png"><img src="./assets/readme/vela-compact.png" width="100%" alt="Vela 紧凑模式演示：登录重定向任务中的文件查阅、三处代码修改、测试命令和交付结论，以可展开的过程行展示。" /></a>
 </p>
 
-### 模型与账号
+在「设置 → 外观与快捷键 → 工具显示」中，可切换紧凑与卡片两种展示方式。
 
-在设置中管理模型提供方，并按提供方支持的方式登录或填写 API 密钥。
+## Codex 同款 SubAgents
+
+**主代理统筹，子代理并行查阅、实现和审阅。** 用 `spawn_agent` 拆分任务，用 `send_message` 交换发现，用 `followup_task` 继续分派工作；子代理也可以创建自己的子任务，形成按路径组织的代理树。
+
+主对话保留任务概况与结论，点击 `/root/auth` 这样的代理路径，就能在右侧独立查看它的消息、思考、工具调用和最终结果。标签页与代理列表支持切换子任务，主对话和子代理面板各自滚动。
+
+示例把登录问题拆成 `routing` 查阅、`auth` 修复和 `review` 边界审阅，右侧打开 `auth` 的运行流。
 
 <p align="center">
-  <a href="./assets/readme/vela-model-providers.png"><img src="./assets/readme/vela-model-providers.png" width="100%" alt="Vela 模型与账号设置：可搜索提供方，并查看登录状态、OAuth 登录或填写 API 密钥等选项。" /></a>
+  <a href="./assets/readme/vela-subagents.png"><img src="./assets/readme/vela-subagents.png" width="100%" alt="Vela SubAgents 演示：主代理并行分派 routing、auth 和 review，右侧通过标签页展示 auth 子代理的代码修改、测试输出与完成结论。" /></a>
 </p>
 
-### 外观与语言
+`explore` 子代理只读查阅；`general` 子代理使用当前会话的执行权限。新创建的子代理会话会持久化，重开聊天后可恢复运行记录。
 
-在浅色和深色外观中选择配色主题，并在简体中文与 English 界面之间切换。
+## DeepSeek Harness 同款轨迹界面
+
+**从对话切到轨迹，逐节点检查 Agent 如何得出结果。** 时间轴与事件列表联动展示思考、工具调用、返回和助手输出；支持按时长、轮次或模型调用查看时间轴，选中节点即可检查参数、结果、Schema 与计时。
+
+请求指标包括首 Token 延迟、生成耗时、Token 用量和缓存命中率；初始系统提示词与工具定义也可以查看。旧会话缺失的指标会标为未记录。
+
+示例选中登录测试的 `bash` 调用，在右侧查看完整返回，并在底部查看本轮统计。
 
 <p align="center">
-  <a href="./assets/readme/vela-themes.png"><img src="./assets/readme/vela-themes.png" width="100%" alt="Vela 外观设置：展示三种浅色主题、三种深色主题、系统外观选项和中英文语言切换。" /></a>
+  <a href="./assets/readme/vela-trace.png"><img src="./assets/readme/vela-trace.png" width="100%" alt="Vela 轨迹界面演示：上方为执行时间轴，中间为登录修复的思考与工具事件，右侧展示选中 bash 调用的测试返回，底部为 Token、缓存和上下文统计。" /></a>
 </p>
+
+> 三张截图均由 Vela 的真实界面组件配合生成的示例数据渲染。`atlas-web` 项目、对话、测试结果、耗时与 Token 指标用于展示，不代表真实任务记录或性能基准。“同款”描述交互体验与界面组织方式。
+
+## 更多工作能力
+
+- **Agent / Plan / Goal：** 日常读写执行、先制定方案再实施，或围绕多步目标持续推进。
+- **本地工作区与 Git worktree：** 打开本机项目，在原工作区或独立 worktree 中处理任务。
+- **审阅与工作面板：** 查看 Git 差异和暂存状态；右侧标签页承载文件预览、变更与集成终端，`⌘T` 新建标签页。
+- **模型与账号：** 管理模型提供方，登录账号、填写 API 密钥或添加自定义模型接口。
+- **外观与上下文：** 切换浅色 / 深色主题和中英文界面，查看上下文用量、思考强度与 Skill 活动；会话重启后可恢复。
+- **图片查看：** 点击消息缩略图，全屏缩放、拖动和切换多张图片。
+
+<details>
+<summary>查看模型与账号、外观设置截图</summary>
+
+<p align="center">
+  <a href="./assets/readme/vela-model-providers.png"><img src="./assets/readme/vela-model-providers.png" width="100%" alt="Vela 模型与账号设置：搜索提供方、查看登录状态、使用 OAuth 或 API 密钥。" /></a>
+</p>
+
+<p align="center">
+  <a href="./assets/readme/vela-themes.png"><img src="./assets/readme/vela-themes.png" width="100%" alt="Vela 外观设置：浅色与深色主题、系统外观和中英文语言切换。" /></a>
+</p>
+
+</details>
 
 ## 快速开始
 
@@ -70,6 +92,13 @@ pnpm dev
 每轮回复的用时由主进程记录，随会话保存在 `sessions/*.jsonl`，重开和分支聊天后仍可查看。旧历史未记录的用时会显示「耗时未记录」。归档状态保存在 `conversations.json`，归档和取消归档会立即写盘；左右面板及工作区分组的折叠状态也随界面设置保存。
 
 ## 权限与本地数据
+
+<details>
+<summary>修改消息与工作区回退的范围</summary>
+
+用户消息气泡下方提供发送时间、复制和修改。修改后点「重新发送」，会在同一聊天中撤回该轮及后续对话、计划和代理记录，并从持久化检查点恢复工作区文件；发送前已有的未提交改动会保留。检查点从本版本起记录，旧消息没有检查点时会提示无法回退；文件存在后续手动改动或其他聊天同时执行时会阻止回退。回退范围不包括 Git 索引/提交、忽略的依赖与构建目录、工作区外文件或外部服务操作。
+
+</details>
 
 - 执行权限分三档：「每次询问」在运行终端命令前请求批准，写入所选工作区之外的位置也会请求批准；「帮我批准」由当前对话选择的模型判断风险，只有风险操作或判断失败时才请求批准；「完全访问」跳过这些逐项确认。这里的权限设置是交互式审批策略，不是操作系统级沙箱。
 - 当前支持在本机工作区或 Git worktree 中运行；远程和隔离沙箱执行环境尚未实现。
@@ -99,6 +128,8 @@ pnpm typecheck   # 检查 TypeScript 类型
 pnpm --filter @vela/desktop test:trace  # 轨迹采集与显示逻辑的定向测试
 pnpm --filter @vela/desktop test:trace:preview  # 确定性 UI 测试页面（非生产数据）
 ```
+
+主打功能截图的示例数据、预览地址与重拍步骤见 [截图说明](./assets/readme/README.md)。预览页面复用实际界面组件，不调用模型。
 
 安装依赖时，`postinstall` 会把 Electron 开发二进制改名为 `Vela.app`、修改其应用名并重新签名（`scripts/brand-electron-dev.mjs`，仅 macOS），这样菜单栏和 Dock 显示的就是 Vela 的名字和图标，而不是 Electron 的默认模板。应用图标 `apps/desktop/resources/icon.png` 由 `scripts/generate-app-icon.py` 从 `assets/icon/VelaAgentIcon.png` 生成（圆角与留白按 macOS 图标网格加工），更换原图后重跑该脚本即可。
 
@@ -140,7 +171,7 @@ Vela 基于 [Pi Agent](https://github.com/earendil-works/pi) 构建，并通过 
 
 - 基础工具为 Pi 的 `read`、`bash`、`edit` 和 `write`。Vela 包装 `bash`、`edit`、`write`：默认权限模式下，Shell 命令逐条请求批准，工作区外的文件修改也需要批准；工作区内读写不逐项拦截。
 - `Plan` 模式通过 ToolPolicy 禁止文件编辑和写入，并只放行只读命令；模型以 `<proposed_plan>` 输出完整实施方案，每次修改生成新 revision，批准后可在当前或全新上下文执行，并用 `update_plan` 跟踪执行进度。`Goal` 模式通过 `update_goal` 记录进度与完成状态。详细行为与实现见 [docs/plan-mode.md](./docs/plan-mode.md) 与 [docs/plan-mode-architecture.md](./docs/plan-mode-architecture.md)。
-- Agent 可调用 `task` 启动子会话。`explore` 子任务只读；`general` 子任务使用当前会话的权限，并在内存会话中运行。
+- SubAgents 通过 `spawn_agent`、`send_message` 和 `followup_task` 创建、通信与继续执行常驻子代理，支持嵌套任务。`explore` 子任务只读；`general` 子任务使用当前会话的权限，独立消息与运行记录会持久化。
 
 ### 工作区与 Electron 进程
 

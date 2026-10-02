@@ -351,8 +351,8 @@ export function ChatView({
   const messageSurfaceRef = useContentArrival(messageSurfaceKey, 180, 6);
 
   // 悬浮信息布局下,环境卡片会盖住居中的对话列右缘:被盖住时把对话列放到
-  // 「左侧边栏分界 → 卡片左缘」之间居中(左右距离相等),放不下则收窄不到 10%
-  // 的宽度;需要收窄 10% 以上就保持原样,让卡片覆盖(几何规则与单测见 chat-lane.ts)。
+  // 「左侧边栏分界 → 卡片左缘」之间居中,两侧预留滚动区的横向 padding。
+  // 卡片避让最多收窄不到 10%,间距另计;超过预算就保持原样(见 chat-lane.ts)。
   useLayoutEffect(() => {
     const pane = scrollerRef.current?.parentElement;
     if (!floatingInfo || environmentCollapsed || !pane) return;
@@ -361,7 +361,8 @@ export function ChatView({
     const measure = () => {
       const surface = pane.querySelector<HTMLElement>(".chat-message-surface");
       const card = pane.querySelector<HTMLElement>(".floating-environment");
-      if (!surface || !card) return null;
+      const scroller = scrollerRef.current;
+      if (!surface || !card || !scroller) return null;
       const surfaceBox = surface.getBoundingClientRect();
       if (!(surfaceBox.width > 0)) return null;
       // 列宽上限由 CSS 变量维护,JS 只负责按实测几何决定移多少、收多少。
@@ -371,6 +372,7 @@ export function ChatView({
       return planChatLane({
         laneLeft: surfaceBox.left + (surfaceBox.width - laneWidth) / 2,
         laneWidth,
+        minGap: Number.parseFloat(getComputedStyle(scroller).paddingLeft),
         cardLeft: card.getBoundingClientRect().left,
         // 左侧边栏分界即对话区左缘,让位后左右两侧的距离以它为参照。
         laneLimitLeft: pane.getBoundingClientRect().left,
@@ -380,8 +382,10 @@ export function ChatView({
     const apply = () => {
       const plan = measure();
       if (!plan) return;
-      pane.style.setProperty("--chat-lane-shift", `${Math.round(plan.shift)}px`);
-      pane.style.setProperty("--chat-lane-shrink", `${Math.round(plan.shrink)}px`);
+      const scroller = scrollerRef.current;
+      if (scroller) pane.style.setProperty("--chat-scrollbar-width", `${scroller.offsetWidth - scroller.clientWidth}px`);
+      pane.style.setProperty("--chat-lane-shift", `${plan.shift}px`);
+      pane.style.setProperty("--chat-lane-shrink", `${plan.shrink}px`);
     };
 
     apply();
@@ -392,6 +396,7 @@ export function ChatView({
     if (card) observer.observe(card);
     return () => {
       observer.disconnect();
+      pane.style.removeProperty("--chat-scrollbar-width");
       pane.style.removeProperty("--chat-lane-shift");
       pane.style.removeProperty("--chat-lane-shrink");
     };

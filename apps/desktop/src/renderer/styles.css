@@ -3024,6 +3024,8 @@ button.tool-compact-line:hover .tool-compact-cmd {
   right: 0;
   bottom: 0;
   padding: 0 24px 18px;
+  /* 与滚动区扣除滚动条后的可用宽度一致,输入框才能和正文列对齐。 */
+  padding-right: calc(24px + var(--chat-scrollbar-width, 0px));
   display: flex;
   justify-content: center;
   pointer-events: none;
@@ -3063,6 +3065,7 @@ button.tool-compact-line:hover .tool-compact-cmd {
     padding-left: 16px;
     padding-right: 16px;
   }
+  .chat-dock-wrapper { padding-right: calc(16px + var(--chat-scrollbar-width, 0px)); }
 }
 
 .floating-input-card {

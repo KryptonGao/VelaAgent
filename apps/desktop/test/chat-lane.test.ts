@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { chatLaneMaxShrinkRatio, planChatLane } from "../src/renderer/chat-lane.ts";
+import { chatLaneMaxShrinkRatio, chatLaneMinGap, planChatLane } from "../src/renderer/chat-lane.ts";
 
 /** 自然几何:760px 的列在 [24, 860] 之间居中放不下时才会让位。 */
 function plan(overrides: Partial<Parameters<typeof planChatLane>[0]> = {}) {
@@ -22,26 +22,26 @@ function laneBox(plan: { shift: number; shrink: number }, laneLeft = 100, laneWi
 describe("planChatLane", () => {
   it("keeps the natural centered layout when the card does not cover the column", () => {
     assert.deepEqual(plan({ cardLeft: 1000 }), { shift: 0, shrink: 0 });
-    // 刚好贴住卡片左缘也不算遮挡。
-    assert.deepEqual(plan({ cardLeft: 860 }), { shift: 0, shrink: 0 });
+    // 刚好留足最小间距时不用让位。
+    assert.deepEqual(plan({ cardLeft: 884 }), { shift: 0, shrink: 0 });
   });
 
   it("centers the column between the sidebar boundary and the card", () => {
     const result = plan({ cardLeft: 800 });
-    assert.equal(result.shrink, 0);
+    assert.equal(result.shrink, 32);
     assert.equal(result.shift, 68);
     const box = laneBox(result);
     // 左缘到分界 24 的距离 = 右缘到卡片 800 的距离。
     assert.equal(box.left - 24, 800 - box.right);
-    assert.equal(box.left - 24, 8);
+    assert.equal(box.left - 24, chatLaneMinGap);
   });
 
-  it("shrinks by less than 10% when the column does not fit the free region", () => {
+  it("reserves both gutters in addition to the card shrink budget", () => {
     const result = plan({ cardLeft: 760 });
-    assert.equal(result.shrink, 24);
+    assert.equal(result.shrink, 72);
     const box = laneBox(result);
-    assert.equal(box.left, 24);
-    assert.equal(box.right, 760);
+    assert.equal(box.left, 48);
+    assert.equal(box.right, 736);
     assert.ok(result.shrink < 760 * chatLaneMaxShrinkRatio);
   });
 
@@ -52,9 +52,32 @@ describe("planChatLane", () => {
     assert.deepEqual(plan({ cardLeft: 708 }), { shift: 0, shrink: 0 });
     // 少 1px 就还算小于 10%。
     const almost = plan({ cardLeft: 709 });
-    assert.equal(almost.shrink, 75);
-    assert.equal(laneBox(almost).left, 24);
-    assert.equal(laneBox(almost).right, 709);
+    assert.equal(almost.shrink, 123);
+    assert.equal(laneBox(almost).left, 48);
+    assert.equal(laneBox(almost).right, 685);
+  });
+
+  it("leaves space even when the natural column only touches the card", () => {
+    const result = plan({ cardLeft: 860 });
+    const box = laneBox(result);
+    assert.equal(result.shrink, 0);
+    assert.equal(box.left - 24, 38);
+    assert.equal(860 - box.right, 38);
+  });
+
+  it("keeps 24px gutters at the reported window size", () => {
+    const input = { laneLeft: 437, laneWidth: 760, cardLeft: 1018, laneLimitLeft: 305 };
+    const result = planChatLane(input);
+    const box = laneBox(result, input.laneLeft, input.laneWidth);
+    assert.equal(box.left, 329);
+    assert.equal(box.right, 994);
+  });
+
+  it("uses the compact layout's 16px gutter", () => {
+    const result = plan({ cardLeft: 760, minGap: 16 });
+    const box = laneBox(result);
+    assert.equal(box.left, 40);
+    assert.equal(box.right, 744);
   });
 
   it("ignores degenerate measurements", () => {
@@ -70,10 +93,10 @@ describe("planChatLane", () => {
       const result = plan({ cardLeft });
       if (result.shift === 0 && result.shrink === 0) continue;
       const box = laneBox(result);
-      assert.ok(box.right <= cardLeft + 1e-9, `right ${box.right} vs ${cardLeft}`);
-      assert.ok(box.left >= 24 - 1e-9, `left ${box.left}`);
+      assert.ok(box.right <= cardLeft - chatLaneMinGap + 1e-9, `right ${box.right} vs ${cardLeft}`);
+      assert.ok(box.left >= 24 + chatLaneMinGap - 1e-9, `left ${box.left}`);
       assert.ok(Math.abs((box.left - 24) - (cardLeft - box.right)) < 1e-9, "gaps differ");
-      assert.ok(result.shrink < 760 * chatLaneMaxShrinkRatio);
+      assert.ok(result.shrink - chatLaneMinGap * 2 < 760 * chatLaneMaxShrinkRatio);
     }
   });
 });
