@@ -19,6 +19,9 @@ This release connects Vela to external tools and automation. Connect MCP servers
 
 - The embedded Pi SDK is upgraded from 0.87.1 to exact 1.0.0 across all workspaces, including an MCP extension patch bound to that exact version. Existing tools, modes, and session data are preserved, and version 3 sessions written by 0.87.1 still open. Running input now distinguishes queued input from input handled by extensions, the existing OpenAI API-key and OpenAI Codex login flows are retained, and Pi 1.0 classifier-only providers stay out of Vela's chat model catalog. Codemode, virtual models, classifiers, and image generation remain outside this migration. See [migration validation](docs/pi-1.0-migration.md).
 - Settings → MCP servers supports form-based editing and JSON import, shows configuration sources and project overrides, connection status, tool counts, per-tool details, and redacted diagnostics, and runs OAuth login in the system browser with cancel and retry.
+- Shell, file, browser, and MCP approval checks now bind to the conversation's own workspace instead of whichever workspace is selected in the UI, so background conversations, scheduled tasks, and subagents are gated against the correct boundary.
+- MCP calls get their own tool card with a server chip and a structured result view that keeps tool parameters and results readable without executing their content. Appearance settings also add a send button icon choice (paper plane or up arrow).
+- Only one Vela instance owns the scheduler: launching a second instance focuses the existing window, and quitting waits for sessions and the scheduler to shut down cleanly.
 - A child agent session now disposes through the runtime when the agent ends, releasing its MCP instance and resources with it; general subagents' MCP calls are also recognized as workspace mutations for Git refresh and Goal validation.
 
 ## Upgrade
