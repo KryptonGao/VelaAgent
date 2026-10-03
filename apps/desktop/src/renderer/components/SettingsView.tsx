@@ -26,13 +26,15 @@ import { LoginDialog } from "./ModelControls";
 import { SheetPresence } from "./Presence";
 import { SkillMigrationDialog } from "./SkillMigrationDialog";
 import { TrashIcon } from "./icons";
+import { McpSettingsSection } from "./McpSettingsSection";
+import { IntegrationsSection } from "./IntegrationsSection";
 import { settingsCopy, type SettingsCopy } from "./settings-copy";
 import { localizeError, tr } from "../locale";
 import { SettingsUsageView } from "./usage/SettingsUsageView";
 import type { ConversationLinkTarget } from "../browser/conversation-link-policy";
 import { notificationSoundKinds, type NotifySound } from "../notification-sounds";
 
-type SettingsSection = "agent" | "archived" | "models" | "usage" | "permissions" | "workspace" | "appearance";
+type SettingsSection = "agent" | "archived" | "models" | "integrations" | "mcp" | "usage" | "permissions" | "workspace" | "appearance";
 type ModelsApi = ReturnType<typeof useModels>;
 
 interface SettingsViewProps {
@@ -42,11 +44,12 @@ interface SettingsViewProps {
   models: ModelsApi;
   project: ProjectApi;
   conversations: ConversationSummary[];
+  conversationId?: string | null;
   onUnarchiveConversation: (id: string) => void;
   onClose: () => void;
 }
 
-const sections: SettingsSection[] = ["agent", "archived", "models", "usage", "permissions", "workspace", "appearance"];
+const sections: SettingsSection[] = ["agent", "archived", "models", "integrations", "mcp", "usage", "permissions", "workspace", "appearance"];
 
 export function SettingsView({
   onPreviewSound,
@@ -55,6 +58,7 @@ export function SettingsView({
   models,
   project,
   conversations,
+  conversationId,
   onUnarchiveConversation,
   onClose,
 }: SettingsViewProps) {
@@ -86,6 +90,8 @@ export function SettingsView({
           ))}
         </nav>
         <div className="settings-content">
+          {section === "integrations" ? <IntegrationsSection locale={locale} workspacePath={project.environment?.path ?? project.workspace?.current ?? null} conversationId={conversationId} /> : null}
+          {section === "mcp" ? <McpSettingsSection locale={locale} workspacePath={project.environment?.path ?? project.workspace?.current ?? null} conversationId={conversationId} /> : null}
           {section === "usage" ? <SettingsUsageView conversations={conversations} providers={models.catalog?.providers ?? []} /> : null}
           <div hidden={section !== "agent"}>
             <AgentSection copy={copy} catalog={models.catalog} workspacePath={project.workspace?.current ?? null} />
@@ -1014,6 +1020,8 @@ function AppearanceSection({
     fileIconTheme,
     composerCapsules,
     setComposerCapsules,
+    sendButtonIcon,
+    setSendButtonIcon,
     setAppearance,
     setLocale,
     setToolDisplay,
@@ -1151,6 +1159,17 @@ function AppearanceSection({
             { id: "on", label: text.composerCapsulesOn },
           ]}
           onChange={(value) => setComposerCapsules(value === "on")}
+        />
+      </SettingsBlock>
+      <SettingsBlock title={text.sendButtonIcon}>
+        <Segmented
+          label={text.sendButtonIcon}
+          value={sendButtonIcon}
+          options={[
+            { id: "paper-plane", label: text.sendButtonIconPaperPlane },
+            { id: "arrow-up", label: text.sendButtonIconArrowUp },
+          ]}
+          onChange={setSendButtonIcon}
         />
       </SettingsBlock>
       <SettingsBlock title={text.toolDisplay} hint={text.toolDisplayHint}>

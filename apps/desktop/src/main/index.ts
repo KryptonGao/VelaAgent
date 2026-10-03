@@ -19,6 +19,10 @@ import { setApplicationLocale } from "./menu";
 import { registerOpenTargetIpc } from "./open-targets";
 import { ProjectHost } from "./project-host";
 import { SessionHost } from "./session-host";
+import { ScheduledTaskScheduler } from "./scheduled-task-service";
+import { ScheduledTaskHost } from "./scheduled-task-host";
+import { McpHost } from "./mcp-host";
+import { SecureCredentialStore } from "./plugin-credentials";
 import { ensureLoginShellPath } from "./shell-path";
 import { TerminalHost } from "./terminal-host";
 import { prepareVelaHome, resolveVelaHome } from "./vela-home";
@@ -32,6 +36,13 @@ import { UI_BROWSER_PARTITION } from "../browser-policy";
 import appIconPath from "../../resources/icon.png?asset";
 
 app.setName("Vela");
+// Only one Main Process may claim the persisted task queue.
+const primaryInstance = app.requestSingleInstanceLock();
+if (!primaryInstance) app.quit();
+app.on("second-instance", () => {
+  const window = BrowserWindow.getAllWindows()[0];
+  if (window) { if (window.isMinimized()) window.restore(); window.show(); window.focus(); }
+});
 
 // 与 Electron 启动并行解析登录 shell 的 PATH,避免 GUI 进程只拿到 launchd
 // 的最小 PATH 而找不到 Homebrew 里的 gh、pnpm、node。start() 里再 await。
@@ -40,6 +51,9 @@ const loginShellPathReady = ensureLoginShellPath();
 const rootDir = dirname(fileURLToPath(import.meta.url));
 const preloadPath = join(rootDir, "../preload/index.js");
 
+let mcpHost: McpHost | null = null;
+let scheduledTaskHost: ScheduledTaskHost | null = null;
+let taskScheduler: ScheduledTaskScheduler | null = null;
 let host: SessionHost | null = null;
 let browserHost: BrowserHost | null = null;
 let browserRepl: BrowserReplManager | null = null;
@@ -200,16 +214,25 @@ async function start(): Promise<void> {
     return browserHost.command(window.id, event.sender, event.senderFrame === event.sender.mainFrame, command);
   });
 
+  const scheduler = new ScheduledTaskScheduler(join(home, "scheduled-tasks.json"),
+    (task, onCreated) => runtime.runScheduledTask(task.workspace, task.prompt, onCreated, task));
+  scheduler.init();
+  taskScheduler = scheduler;
   const runtime = new AgentRuntime({
+    scheduledTasks: scheduler,
+    pluginCredentialStore: new SecureCredentialStore(join(home, "integrations-auth.enc.json")),
     browserRepl,
-    browserReplPermission: { request: (input) => sandbox.request({ ...input, workspace: workspaceManager.getState().current ?? input.cwd }) },
+    mcpOpenUrl: (url) => { void shell.openExternal(url).catch(() => undefined); },
+    mcpPermission: { request: (input) => sandbox.request({ ...input, workspace: input.cwd }) },
+    browserReplPermission: { request: (input) => sandbox.request({ ...input, workspace: input.cwd }) },
     cwd: fallbackCwd,
     agentDir: home,
-    toolFactory: (cwd) =>
+    toolFactory: (cwd, context) =>
       createSandboxedToolDefinitions({
         cwd,
-        workspace: workspaceManager.getState().current,
+        workspace: cwd,
         permission: sandbox,
+        ...context,
       }),
     // 激活会话变化时让工作区跟随,保证输入区与仓库卡片显示的目录即会话目录。
     onActiveCwd: (cwd) => void project?.syncConversationWorkspace(cwd),
@@ -234,6 +257,10 @@ async function start(): Promise<void> {
     currentCwd: () => workspaceManager.getState().current ?? fallbackCwd,
   });
   host.register();
+  scheduledTaskHost = new ScheduledTaskHost(scheduler);
+  scheduledTaskHost.register();
+  mcpHost = new McpHost(runtime, () => workspaceManager.getState().current ?? fallbackCwd);
+  mcpHost.register();
   terminals = new TerminalHost(() => workspaceManager.getState().current ?? fallbackCwd);
   terminals.register();
   registerOpenTargetIpc();
@@ -244,11 +271,13 @@ async function start(): Promise<void> {
   await envManager.setWorkspace(workspace.current);
   await git.attach(workspace.current);
   const snapshot = await runtime.switchWorkspace(workspace.current ?? fallbackCwd);
+  scheduler.start();
   const detail = snapshot.error ?? snapshot.model ?? "未选择模型";
   console.log(`[vela] session ${snapshot.status}: ${detail} (${workspace.current ?? fallbackCwd})`);
 }
 
 app.whenReady().then(() => {
+  if (!primaryInstance) return;
   // dev 模式下 Dock 显示的是 Electron 二进制自带的图标,手动指到项目图标;打包后由 bundle 提供。
   if (process.platform === "darwin" && app.dock && !app.isPackaged) {
     app.dock.setIcon(nativeImage.createFromPath(appIconPath));
@@ -269,15 +298,26 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", () => {
+let shutdownComplete = false;
+let shutdownStarted = false;
+app.on("before-quit", (event) => {
+  if (shutdownComplete) return;
+  event.preventDefault();
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+  scheduledTaskHost?.dispose();
+  scheduledTaskHost = null;
+  mcpHost?.dispose();
+  mcpHost = null;
+  const closing = host?.dispose();
   browserRepl?.dispose();
   browserRepl = null;
   browserHost?.dispose();
   browserHost = null;
-  host?.dispose();
   host = null;
   project?.dispose();
   project = null;
   terminals?.dispose();
   terminals = null;
+  void Promise.allSettled([Promise.resolve(closing), taskScheduler?.drain()]).finally(() => { shutdownComplete = true; app.quit(); });
 });

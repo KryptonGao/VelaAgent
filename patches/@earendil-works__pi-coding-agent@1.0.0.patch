@@ -1,0 +1,861 @@
+diff --git a/dist/extensions/mcp/index.d.ts b/dist/extensions/mcp/index.d.ts
+index 5c39af847eee2489421b3ee12edeb52bee408e92..c77ece9180364be715c64bad9910816959837b6b 100644
+--- a/dist/extensions/mcp/index.d.ts
++++ b/dist/extensions/mcp/index.d.ts
+@@ -27,10 +27,67 @@
+  */
+ import type { ExtensionContext, ExtensionFactory } from "../../core/extensions/types.ts";
+ import { type LoadedMcpConfig, type McpServerConfigPatch, type McpServerEntry } from "./config.ts";
++import type { Tool as McpTool } from "@earendil-works/pi-mcp";
+ import type { McpOAuthCredentialStore } from "./oauth.ts";
+ import type { McpTransportFactory } from "./runtime.ts";
+ export type { McpTransportFactory } from "./runtime.ts";
++export interface McpToolSnapshot {
++    /** Original MCP tool name. */
++    name: string;
++    rawTool: string;
++    registeredName: string;
++    description?: string;
++    inputSchema: McpTool["inputSchema"];
++    annotations?: McpTool["annotations"];
++    exposure: import("./config.ts").McpExposure;
++}
++export interface McpServerSnapshot {
++    name: string;
++    source: string;
++    scope?: McpServerEntry["scope"];
++    state: "disabled" | "connecting" | "connected" | "disconnected" | "needs-auth" | "failed" | "closed";
++    exposure: import("./config.ts").McpExposure;
++    tools: McpToolSnapshot[];
++    resources: number;
++    resourceTemplates: number;
++    error?: string;
++    stderr?: string;
++    /** Whether the connection uses Pi's MCP OAuth provider. */
++    oauth: boolean;
++    /** Stored access-token presence; credential values are never included. */
++    authenticated: boolean;
++    loginPending: boolean;
++    suspended: boolean;
++}
++export type McpSnapshot = McpServerSnapshot[];
++export interface McpLoginOptions {
++    /** Explicit host callback; controller login never opens a browser implicitly. */
++    onUrl?: (url: string) => void;
++    openUrl?: (url: string) => void;
++    promptForRedirectUrl?: (signal: AbortSignal) => Promise<string | undefined>;
++    signal?: AbortSignal;
++}
++export interface McpController {
++    getSnapshot(): McpSnapshot;
++    subscribe(listener: (snapshot: McpSnapshot) => void): () => void;
++    reconnect(name: string): Promise<void>;
++    login(name: string, options?: McpLoginOptions): Promise<void>;
++    cancelLogin(name?: string): void;
++    logout(name: string): Promise<boolean>;
++    /** Hide, cancel, and close without saving configuration. reconnect resumes if policy permits. */
++    suspend(name: string): Promise<void>;
++    /** Reapply current host policy to every connection; preserves permitted active deferred tools. */
++    refreshTools(): void;
++    /** Idempotent; cancels logins and awaits pending connection teardown. */
++    close(): Promise<void>;
++}
+ export interface McpExtensionOptions {
++    agentDir?: string;
++    onController?: (controller: McpController) => void;
++    /** Denied tools are registered as hidden, including in discovery. Evaluated again at call time. */
++    allowTool?: (entry: McpServerEntry, rawTool: McpTool) => boolean;
++    /** Optional live policy guard for config revocation. */
++    allowServer?: (entry: McpServerEntry) => boolean;
+     /** Defaults to reading `mcp.json` from the agent directory and the trusted project. */
+     loadConfig?: (ctx: ExtensionContext) => LoadedMcpConfig;
+     /** Defaults to stdio and streamable HTTP transports built from the server config. */
+diff --git a/dist/extensions/mcp/index.js b/dist/extensions/mcp/index.js
+index fbbb30c87e610b98ffbe47fa71f93dbc3bd0bc45..fa49856cab18dee4fc3752670d5fb5208fb1c4c1 100644
+--- a/dist/extensions/mcp/index.js
++++ b/dist/extensions/mcp/index.js
+@@ -28,6 +28,7 @@
+ import { join, resolve } from "node:path";
+ import { hyperlink } from "@earendil-works/pi-tui";
+ import { getAgentDir } from "../../config.js";
++import { FileAuthStorageBackend } from "../../core/auth-storage.js";
+ import { mcpNamespace } from "../../core/mcp-servers.js";
+ import { openBrowser } from "../../utils/open-browser.js";
+ import { CODEMODE_TOOL_NAME, isCodemodeTool } from "../codemode/tool.js";
+@@ -204,6 +205,10 @@ export function createMcpExtension(options = {}) {
+         let pending;
+         /** Whether a prompt already waited for the startup connections since the session started. */
+         let waitedForStartup = false;
++        const agentDir = options.agentDir ?? getAgentDir();
++        const opening = new Set();
++        const logins = new Map();
++        let closePromise;
+         const startupWaitMs = options.startupWaitMs ?? DEFAULT_STARTUP_WAIT_MS;
+         /** Bumped on every session start and shutdown so a runtime load that resolves late is dropped. */
+         let generation = 0;
+@@ -218,7 +223,7 @@ export function createMcpExtension(options = {}) {
+         const listeners = new Set();
+         const emitChange = () => {
+             for (const listener of listeners)
+-                listener();
++                try { listener(getSnapshot()); } catch { /* A host observer cannot break MCP lifecycle. */ }
+         };
+         const subscribe = (listener) => {
+             listeners.add(listener);
+@@ -239,18 +244,18 @@ export function createMcpExtension(options = {}) {
+                     continue;
+                 }
+                 registered.push({
+-                    entry: { name, config, source: extensionPath, scope: "extension" },
++                    entry: { name, config: { ...config, exposure: config.exposure ?? "deferred" }, source: extensionPath, scope: "extension" },
+                     registeredConfig: JSON.stringify(config),
+                 });
+             }
+             return { servers: registered, overridden: overriddenNames };
+         };
+         const getCredentials = (runtime) => {
+-            credentials ??= new runtime.McpOAuthCredentialStore();
++            credentials ??= new runtime.McpOAuthCredentialStore(new FileAuthStorageBackend(join(agentDir, "mcp-auth.json")), agentDir);
+             return credentials;
+         };
+         const getServerLog = (runtime) => {
+-            serverLog ??= new runtime.McpServerLog(options.logPath ?? join(getAgentDir(), "mcp.log"));
++            serverLog ??= new runtime.McpServerLog(options.logPath ?? join(agentDir, "mcp.log"));
+             return serverLog;
+         };
+         /** pi tool name to the `<server>\0<tool>` it was assigned to, so names stay unique and stable. */
+@@ -259,7 +264,40 @@ export function createMcpExtension(options = {}) {
+         const serverTools = new Map();
+         /** Last definition registered under each tool name, to re-register withdrawn tools as hidden. */
+         const definitions = new Map();
++        const allowedServer = (server) => sessionActive && !server.suspended && isEnabled(server) && (options.allowServer?.(server.entry) ?? true);
++        const currentConnection = (connection) => {
++            const server = findServer(connection.name);
++            return server?.connection === connection && allowedServer(server);
++        };
++        const effectiveExposure = (entry, tool) => {
++            const server = findServer(entry.name);
++            return server && allowedServer(server) && (options.allowTool?.(entry, tool) ?? true)
++                ? getMcpToolExposure(entry.config, tool.name) : "hidden";
++        };
++        const registeredNames = new Map();
++        const serverSuspended = (name) => findServer(name)?.suspended ?? false;
++        const getSnapshot = () => structuredClone(servers.map(({ entry, connection, suspended }) => ({
++                name: entry.name, source: entry.source, scope: entry.scope, suspended: serverSuspended(entry.name),
++                state: !allowedServer({ entry, suspended }) ? "disabled" : connection?.state ?? "connecting",
++                exposure: exposureOf(entry),
++                tools: (connection?.tools ?? []).map((tool) => ({
++                    name: tool.name, rawTool: tool.name,
++                    registeredName: registeredNames.get(`${entry.name}\0${tool.name}`) ?? createMcpToolName(entry.name, tool.name),
++                    description: tool.description, inputSchema: tool.inputSchema, annotations: tool.annotations,
++                    exposure: effectiveExposure(entry, tool),
++                })),
++                resources: connection?.resources.length ?? 0,
++                resourceTemplates: connection?.resourceTemplates.length ?? 0,
++                error: connection?.error, stderr: connection?.stderr,
++                oauth: Boolean(connection?.oauthUrl),
++                authenticated: Boolean(connection?.oauthUrl && credentials?.tokens(entry.name, connection.oauthUrl)?.access_token),
++                loginPending: logins.has(entry.name),
++            })));
++        const pruneActive = (names) => {
++            if (names.size) pi.setActiveTools(pi.getActiveTools().filter((name) => !names.has(name)));
++        };
+         const registerTools = (connection) => {
++            if (!currentConnection(connection)) return;
+             const server = connection.entry.name;
+             const entry = findServer(server)?.entry ?? connection.entry;
+             const description = entry.config.description?.trim();
+@@ -285,41 +323,59 @@ export function createMcpExtension(options = {}) {
+                 return name;
+             };
+             for (const tool of connection.tools) {
++                const exposure = effectiveExposure(entry, tool);
++                const name = assignName(tool.name, `${server}\0${tool.name}`);
++                registeredNames.set(`${server}\0${tool.name}`, name);
++                const oldExposure = definitions.get(name)?.exposure;
+                 const definition = createMcpToolDefinition({
+                     server,
+                     tool,
+-                    name: assignName(tool.name, `${server}\0${tool.name}`),
+-                    exposure: getMcpToolExposure(entry.config, tool.name),
++                    name,
++                    exposure,
+                     namespace,
+                     timeoutMs: connection.timeoutMs,
+-                    getClient: async () => connection,
++                    getClient: async () => {
++                        if (!currentConnection(connection) || effectiveExposure(findServer(server).entry, tool) === "hidden")
++                            throw new Error(`MCP tool "${name}" is no longer permitted`);
++                        return connection;
++                    },
+                     readableResources: () => resourceServers().includes(connection),
+                 });
+                 definitions.set(definition.name, definition);
+                 pi.registerTool(definition);
++                if (exposure === "hidden" || (oldExposure === "direct" && exposure !== "direct")) pruneActive(new Set([name]));
+             }
+             serverTools.set(server, current);
+             // Tools cannot be unregistered, so tools the server dropped are re-registered as hidden. When
+             // the server offers them again they are registered with their configured exposure above.
+             for (const name of previous) {
+                 const definition = definitions.get(name);
+-                if (!current.has(name) && definition)
+-                    pi.registerTool({ ...definition, exposure: "hidden" });
++                if (!current.has(name) && definition) {
++                    const hidden = { ...definition, exposure: "hidden" };
++                    definitions.set(name, hidden);
++                    pi.registerTool(hidden);
++                    pruneActive(new Set([name]));
++                }
+             }
+             syncResourceTools();
++            emitChange();
+         };
+         /** Make a disabled server's tools unreachable. */
+         const hideTools = (server) => {
+             for (const name of serverTools.get(server) ?? []) {
+                 const definition = definitions.get(name);
+-                if (definition)
+-                    pi.registerTool({ ...definition, exposure: "hidden" });
++                if (definition) {
++                    const hidden = { ...definition, exposure: "hidden" };
++                    definitions.set(name, hidden);
++                    pi.registerTool(hidden);
++                }
+             }
++            pruneActive(serverTools.get(server) ?? new Set());
+             serverTools.set(server, new Set());
+             syncResourceTools();
+         };
+         /** Enabled servers with resources whose exposure is not `hidden`, which the resource tools reach. */
+-        const serversWithResources = () => servers.filter((server) => server.connection?.hasResources && isEnabled(server) && exposureOf(server.entry) !== "hidden");
++        const serversWithResources = () => servers.filter((server) => server.connection?.hasResources && allowedServer(server) && exposureOf(server.entry) !== "hidden");
+         const resourceServers = () => serversWithResources().flatMap((server) => (server.connection ? [server.connection] : []));
+         /** Exposure the resource tools were last registered with; undefined until a server has resources. */
+         let resourceToolsExposure;
+@@ -338,7 +394,7 @@ export function createMcpExtension(options = {}) {
+             const resourceDefinitions = createMcpResourceToolDefinitions({ exposure: next, servers: resourceServers });
+             for (const definition of resourceDefinitions)
+                 pi.registerTool(definition);
+-            if (wasDirect) {
++            if (wasDirect || next === "hidden") {
+                 const names = new Set(resourceDefinitions.map((definition) => definition.name));
+                 pi.setActiveTools(pi.getActiveTools().filter((name) => !names.has(name)));
+             }
+@@ -354,7 +410,7 @@ export function createMcpExtension(options = {}) {
+             // their server's exposure.
+             const exposures = new Set();
+             for (const server of servers) {
+-                if (isEnabled(server))
++                if (allowedServer(server))
+                     for (const exposure of configuredExposures(server.entry))
+                         exposures.add(exposure);
+             }
+@@ -397,6 +453,7 @@ export function createMcpExtension(options = {}) {
+             return url && credentials ? JSON.stringify(credentials.tokens(connection.name, url) ?? null) : "null";
+         };
+         const onConnectionChange = (connection) => {
++            if (!currentConnection(connection)) return;
+             if (connection.state !== "needs-auth")
+                 tokensAtSignIn.delete(connection);
+             else if (!tokensAtSignIn.has(connection))
+@@ -415,6 +472,7 @@ export function createMcpExtension(options = {}) {
+         };
+         /** Create the server's connection, loading the MCP runtime on first use. */
+         const createConnection = async (server) => {
++            const current = generation;
+             const runtime = await loadMcpRuntime();
+             const connection = new runtime.McpServerConnection({
+                 entry: server.entry,
+@@ -426,6 +484,10 @@ export function createMcpExtension(options = {}) {
+                 onTools: registerTools,
+                 onChange: onConnectionChange,
+             });
++            if (current !== generation || !servers.includes(server) || !allowedServer(server)) {
++                await connection.close();
++                return connection;
++            }
+             server.connection = connection;
+             emitChange();
+             return connection;
+@@ -441,10 +503,14 @@ export function createMcpExtension(options = {}) {
+                 if (!isCurrent())
+                     return;
+                 const connection = await createConnection(server);
+-                if (!isCurrent())
++                if (!isCurrent() || !servers.includes(server) || !allowedServer(server)) {
++                    await connection.close();
+                     return;
++                }
+                 await connection.getClient().catch(() => undefined);
+             })();
++            opening.add(ready);
++            ready.finally(() => opening.delete(ready)).catch(() => undefined);
+             server.ready = ready.catch(() => undefined);
+             return ready;
+         };
+@@ -495,37 +561,65 @@ export function createMcpExtension(options = {}) {
+             server.entry = { ...server.entry, config: { ...server.entry.config, ...patch } };
+             return undefined;
+         };
+-        const signIn = async (server, prompt) => {
+-            const connection = server.connection;
+-            const url = connection?.oauthUrl;
+-            if (!connection || !url)
+-                return `MCP server "${server.entry.name}" does not use OAuth.`;
+-            const runtime = await loadMcpRuntime();
+-            try {
++        const cancelLogin = (name) => {
++            for (const [serverName, login] of logins) {
++                if (name === undefined || name === serverName) login.abort.abort();
++            }
++        };
++        const login = (name, input = {}) => {
++            if (logins.has(name)) return Promise.reject(new Error(`MCP server "${name}" already has a pending sign-in`));
++            const abort = new AbortController();
++            const signal = input.signal ? AbortSignal.any([abort.signal, input.signal]) : abort.signal;
++            const operation = { abort, promise: undefined };
++            logins.set(name, operation);
++            emitChange();
++            operation.promise = (async () => {
++                const runtime = await loadMcpRuntime();
++                const check = () => { if (signal.aborted) throw new runtime.McpSignInCancelledError(); };
++                check();
++                const server = findServer(name);
++                if (!server || !allowedServer(server)) throw new Error(`MCP server "${name}" is no longer permitted`);
++                await waitForServers([server], signal);
++                check();
++                const connection = server.connection;
++                const url = connection?.oauthUrl;
++                if (!connection || !url) throw new Error(`MCP server "${name}" does not use OAuth.`);
++                if (!currentConnection(connection)) throw new Error(`MCP server "${name}" is no longer permitted`);
+                 await runtime.signInMcpServer({
+-                    serverUrl: url,
+-                    store: getCredentials(runtime).forServer(server.entry.name, url),
+-                    settings: connection.oauthSettings(),
+-                    challenge: connection.challenge,
+-                    prompt,
++                    serverUrl: url, store: getCredentials(runtime).forServer(name, url),
++                    settings: connection.oauthSettings(), challenge: connection.challenge, signal,
++                    prompt: {
++                        showAuthorizationUrl: (url) => (input.onUrl ?? input.openUrl ?? options.openUrl)?.(url.href),
++                        promptForRedirectUrl: input.promptForRedirectUrl ?? ((signal) => new Promise((resolve) => {
++                            if (signal.aborted) resolve(undefined);
++                            else signal.addEventListener("abort", () => resolve(undefined), { once: true });
++                        })),
++                    },
+                 });
+-            }
+-            catch (error) {
+-                if (error instanceof runtime.McpSignInCancelledError)
+-                    return "Sign-in cancelled.";
+-                return `Sign-in failed: ${errorMessage(error)}`;
+-            }
+-            // The challenge that asked for this sign-in (for example for more scope) is answered.
+-            connection.challenge = undefined;
+-            try {
++                check();
++                if (!currentConnection(connection)) throw new Error(`MCP server "${name}" is no longer permitted`);
++                connection.challenge = undefined;
+                 await connection.reconnect();
+-            }
+-            catch (error) {
+-                return `Signed in, but ${errorMessage(error)}`;
++            })().finally(() => {
++                if (logins.get(name) === operation) logins.delete(name);
++                emitChange();
++            });
++            return operation.promise;
++        };
++        const signIn = async (server, prompt) => {
++            try {
++                await login(server.entry.name, {
++                    openUrl: (url) => prompt.showAuthorizationUrl(new URL(url)),
++                    promptForRedirectUrl: prompt.promptForRedirectUrl,
++                });
++            } catch (error) {
++                return error?.name === "McpSignInCancelledError" ? "Sign-in cancelled." : `Sign-in failed: ${errorMessage(error)}`;
+             }
+             return undefined;
+         };
+         const signOut = async (server) => {
++            cancelLogin(server.entry.name);
++            await logins.get(server.entry.name)?.promise?.catch(() => undefined);
+             const connection = server.connection;
+             const url = connection?.oauthUrl;
+             if (!connection || !url)
+@@ -535,6 +629,7 @@ export function createMcpExtension(options = {}) {
+             return removed;
+         };
+         const reconnect = async (server) => {
++            if (!allowedServer(server)) return `MCP server "${server.entry.name}" is no longer permitted`;
+             const connection = server.connection;
+             if (!connection)
+                 return `MCP server "${server.entry.name}" is disabled.`;
+@@ -596,7 +691,7 @@ export function createMcpExtension(options = {}) {
+                 label: server.entry.name,
+                 description: `${describeState(server)} · ${exposureOf(server.entry)} · ${server.entry.scope ?? server.entry.source}`,
+             })),
+-            empty: `No MCP servers configured. Add them to ${resolve(getAgentDir(), "mcp.json")} or .pi/mcp.json.`,
++            empty: `No MCP servers configured. Add them to ${resolve(agentDir, "mcp.json")} or .pi/mcp.json.`,
+             confirmLabel: "manage",
+             cancelLabel: "close",
+         });
+@@ -759,7 +854,7 @@ export function createMcpExtension(options = {}) {
+         // ---------------------------------------------------------------------------------------
+         const formatStatus = () => {
+             if (servers.length === 0 && configErrors.length === 0 && overridden.length === 0) {
+-                return `No MCP servers configured. Add them to ${resolve(getAgentDir(), "mcp.json")} or .pi/mcp.json.`;
++                return `No MCP servers configured. Add them to ${resolve(agentDir, "mcp.json")} or .pi/mcp.json.`;
+             }
+             const lines = servers.map((server) => {
+                 const { name } = server.entry;
+@@ -838,7 +933,8 @@ export function createMcpExtension(options = {}) {
+             ctx.ui.notify(`Signed in to MCP server "${name}" (${server.connection?.tools.length ?? 0} tools).`, "info");
+         };
+         pi.on("session_start", (_event, ctx) => {
+-            const loaded = (options.loadConfig ?? defaultLoadConfig)(ctx);
++            closePromise = undefined;
++            const loaded = options.loadConfig ? options.loadConfig(ctx) : loadMcpConfig({ agentDir, cwd: ctx.cwd, projectTrusted: ctx.isProjectTrusted() });
+             configErrors = loaded.errors;
+             autoEnableCodemode = loaded.autoEnableCodemode ?? true;
+             warnedUnreachable = false;
+@@ -855,7 +951,7 @@ export function createMcpExtension(options = {}) {
+             // Codemode or tool_search is activated from the config: the first prompt does not wait for
+             // servers whose tools are not declared to the model, and scripts or searches wait for them.
+             ensureDiscoveryActive(ctx);
+-            const enabled = servers.filter(isEnabled);
++            const enabled = servers.filter(allowedServer);
+             if (enabled.length === 0) {
+                 reportProblems(ctx);
+                 return;
+@@ -904,7 +1000,7 @@ export function createMcpExtension(options = {}) {
+         pi.on("before_agent_start", async (event, ctx) => {
+             await waitForDirectServers(ctx);
+             const { sections } = event.systemPromptOptions;
+-            const section = renderServersSection(servers);
++            const section = renderServersSection(servers.filter(allowedServer));
+             if (section)
+                 sections[MCP_SERVERS_SECTION] = section;
+             else
+@@ -948,18 +1044,20 @@ export function createMcpExtension(options = {}) {
+             const removed = servers.filter((server) => server.entry.scope === "extension" &&
+                 next.get(server.entry.name)?.registeredConfig !== server.registeredConfig);
+             servers = servers.filter((server) => !removed.includes(server));
+-            for (const server of removed)
++            for (const server of removed) {
++                cancelLogin(server.entry.name);
+                 hideTools(server.entry.name);
++            }
+             const added = registered.servers.filter((server) => !findServer(server.entry.name));
+             servers.push(...added);
+             emitChange();
+             ensureDiscoveryActive(ctx);
+             await Promise.all(removed.map((server) => server.connection?.close()));
+-            const connecting = added.filter(isEnabled);
++            const connecting = added.filter(allowedServer);
+             if (current !== generation || connecting.length === 0)
+                 return;
+             try {
+-                await Promise.all(connecting.map((server) => startConnection(server, () => current === generation)));
++                await Promise.all(connecting.map((server) => startConnection(server, () => current === generation && servers.includes(server))));
+                 if (current !== generation) {
+                     await Promise.all(connecting.map((server) => server.connection?.close()));
+                     return;
+@@ -973,14 +1071,80 @@ export function createMcpExtension(options = {}) {
+                 return;
+             reportProblems(ctx, connecting);
+         });
+-        pi.on("session_shutdown", async () => {
++        const close = () => {
++            if (closePromise) return closePromise;
+             sessionActive = false;
+             generation++;
++            cancelLogin();
+             const closing = connections();
++            for (const server of servers) hideTools(server.entry.name);
+             servers = [];
++            tokensAtSignIn.clear();
+             emitChange();
+-            await Promise.all(closing.map((connection) => connection.close()));
++            closePromise = (async () => {
++                await Promise.allSettled(closing.map((connection) => connection.close()));
++                await Promise.allSettled([...opening]);
++                await Promise.allSettled([...logins.values()].flatMap((login) => login.promise ? [login.promise] : []));
++            })();
++            return closePromise;
++        };
++        const requireServer = (name) => {
++            const server = findServer(name);
++            if (!server || !allowedServer(server)) throw new Error(`MCP server "${name}" is no longer permitted`);
++            return server;
++        };
++        options.onController?.({
++            getSnapshot, subscribe, login, cancelLogin, close,
++            suspend: async (name) => {
++                const server = findServer(name);
++                if (!server) return;
++                server.suspended = true;
++                cancelLogin(name);
++                const connection = server.connection;
++                server.connection = undefined;
++                hideTools(name);
++                emitChange();
++                await connection?.close();
++                await server.ready;
++                await logins.get(name)?.promise?.catch(() => undefined);
++            },
++            reconnect: async (name) => {
++                const server = findServer(name);
++                if (!server || !sessionActive || !isEnabled(server) || !(options.allowServer?.(server.entry) ?? true))
++                    throw new Error(`MCP server "${name}" is no longer permitted`);
++                await server.ready;
++                server.suspended = false;
++                requireServer(name);
++                if (!server.connection) {
++                    const current = generation;
++                    await startConnection(server, () => current === generation && servers.includes(server));
++                    requireServer(name);
++                    if (server.connection?.state !== "connected") throw new Error(server.connection?.error ?? `MCP server "${name}" failed to connect`);
++                    return;
++                }
++                requireServer(name);
++                const failure = await reconnect(server);
++                if (failure) throw new Error(failure);
++            },
++            logout: async (name) => {
++                const server = requireServer(name);
++                await server.ready;
++                requireServer(name);
++                return signOut(server);
++            },
++            refreshTools: () => {
++                for (const server of servers) {
++                    if (server.connection && allowedServer(server)) registerTools(server.connection);
++                    else {
++                        cancelLogin(server.entry.name);
++                        hideTools(server.entry.name);
++                    }
++                }
++                syncResourceTools();
++                emitChange();
++            },
+         });
++        pi.on("session_shutdown", close);
+         pi.registerCommand("mcp", {
+             description: "Manage MCP servers: sign in, reconnect, enable or disable, and change exposure",
+             getArgumentCompletions: (prefix) => {
+@@ -1059,8 +1223,5 @@ export function createMcpExtension(options = {}) {
+         });
+     };
+ }
+-function defaultLoadConfig(ctx) {
+-    return loadMcpConfig({ agentDir: getAgentDir(), cwd: ctx.cwd, projectTrusted: ctx.isProjectTrusted() });
+-}
+ export default createMcpExtension();
+ //# sourceMappingURL=index.js.map
+\ No newline at end of file
+diff --git a/dist/extensions/mcp/oauth.d.ts b/dist/extensions/mcp/oauth.d.ts
+index 82468baf17092baddbf3c49a0fbf2cc86ab35a04..5bc7d9a48b3ba226f696d97d0afe0aecb8152dc1 100644
+--- a/dist/extensions/mcp/oauth.d.ts
++++ b/dist/extensions/mcp/oauth.d.ts
+@@ -93,5 +93,6 @@ export declare function signInMcpServer(options: {
+     settings: McpOAuthSettings;
+     challenge?: OAuthChallenge;
+     prompt: McpSignInPrompt;
++    signal?: AbortSignal;
+ }): Promise<void>;
+ //# sourceMappingURL=oauth.d.ts.map
+\ No newline at end of file
+diff --git a/dist/extensions/mcp/oauth.js b/dist/extensions/mcp/oauth.js
+index e0757bc410e488b1fceaa2d4da1d475ea854ed4d..735f469416925d3086332169bb7a74b4ca914296 100644
+--- a/dist/extensions/mcp/oauth.js
++++ b/dist/extensions/mcp/oauth.js
+@@ -264,19 +264,30 @@ function responseFromRedirectUrl(input, state) {
+     return { code, iss: url.searchParams.get("iss") ?? undefined };
+ }
+ /** Wait for the browser callback or a pasted redirect URL, whichever comes first. */
+-async function waitForAuthorizationResponse(callback, state, prompt) {
++async function waitForAuthorizationResponse(callback, state, prompt, signal) {
+     const controller = new AbortController();
++    const cancel = () => controller.abort();
++    signal?.addEventListener("abort", cancel, { once: true });
++    if (signal?.aborted) controller.abort();
++    let onAbort;
++    const cancelled = new Promise((_, reject) => {
++        onAbort = () => reject(new McpSignInCancelledError());
++        if (controller.signal.aborted) onAbort();
++        else controller.signal.addEventListener("abort", onAbort, { once: true });
++    });
+     const fromBrowser = callback.waitForCallback(state);
+-    const fromUser = prompt.promptForRedirectUrl(controller.signal).then((input) => {
++    const fromUser = Promise.resolve().then(() => prompt.promptForRedirectUrl(controller.signal)).then((input) => {
+         if (!input?.trim())
+             throw new McpSignInCancelledError();
+         return responseFromRedirectUrl(input, state);
+     });
+     try {
+-        return await Promise.race([fromBrowser, fromUser]);
++        return await Promise.race([fromBrowser, fromUser, cancelled]);
+     }
+     finally {
+         // The losing side rejects once the prompt is aborted or the callback server closes.
++        signal?.removeEventListener("abort", cancel);
++        controller.signal.removeEventListener("abort", onAbort);
+         controller.abort();
+         fromBrowser.catch(() => undefined);
+         fromUser.catch(() => undefined);
+@@ -306,8 +317,11 @@ async function listenForCallback(settings, port, required) {
+  * authorization code flow. Tokens are saved to `store`.
+  */
+ export async function signInMcpServer(options) {
+-    const { serverUrl, store, settings } = options;
++    const { serverUrl, store, settings, signal } = options;
++    const check = () => { if (signal?.aborted) throw new McpSignInCancelledError(); };
++    check();
+     const stored = await store.load();
++    check();
+     const stepUp = options.challenge?.error === "insufficient_scope";
+     const callbackOptions = callbackSettings(settings);
+     // Reuse the port of the registered redirect URI so the registered client stays valid.
+@@ -316,6 +330,7 @@ export async function signInMcpServer(options) {
+     const callback = await listenForCallback(callbackOptions, preferredPort, callbackOptions.port !== undefined);
+     const redirectUrl = callbackOptions.fixedRedirectUrl ?? callback.redirectUrl;
+     try {
++        check();
+         if (stored) {
+             const next = { ...stored };
+             // Every sign-in gets a fresh `state` parameter.
+@@ -333,6 +348,10 @@ export async function signInMcpServer(options) {
+             authorizationUrl = url;
+         });
+         const flow = {
++            fetch: (input, init) => globalThis.fetch(input, {
++                ...init,
++                signal: signal && init?.signal ? AbortSignal.any([signal, init.signal]) : signal ?? init?.signal,
++            }),
+             serverUrl,
+             resourceMetadataUrl: options.challenge?.resourceMetadataUrl,
+             authorizationServerMetadataUrl: settings.authServerMetadataUrl,
+@@ -342,14 +361,22 @@ export async function signInMcpServer(options) {
+         };
+         // A refresh keeps the granted scope; a server asking for more needs the browser flow.
+         const skipRefresh = stepUp;
+-        if ((await authorizeMcp(provider, { ...flow, skipRefresh })) === "AUTHORIZED")
+-            return;
++        check();
++        const result = await authorizeMcp(provider, { ...flow, skipRefresh });
++        check();
++        if (result === "AUTHORIZED") return;
+         if (!authorizationUrl)
+             throw new Error("OAuth flow did not produce an authorization URL");
+         const state = await provider.state();
+         options.prompt.showAuthorizationUrl(authorizationUrl);
+-        const { code, iss } = await waitForAuthorizationResponse(callback, state, options.prompt);
++        const { code, iss } = await waitForAuthorizationResponse(callback, state, options.prompt, signal);
++        check();
+         await authorizeMcp(provider, { ...flow, authorizationCode: code, iss });
++        check();
++    }
++    catch (error) {
++        if (signal?.aborted) throw new McpSignInCancelledError();
++        throw error;
+     }
+     finally {
+         await callback.close();
+diff --git a/dist/extensions/mcp/runtime.d.ts b/dist/extensions/mcp/runtime.d.ts
+index 3ac39f55c66f2134d71d187537717dda2501a06c..0d9b204329084273606e15dae7ee0c7ae7fd65b7 100644
+--- a/dist/extensions/mcp/runtime.d.ts
++++ b/dist/extensions/mcp/runtime.d.ts
+@@ -60,6 +60,7 @@ export declare class McpServerConnection implements McpToolCaller, McpResourceSe
+         /** Receives the server's log messages (`notifications/message`). */
+         log?: McpServerLog;
+     });
++    get stderr(): string | undefined;
+     get name(): string;
+     get timeoutMs(): number;
+     /** Server URL when the server authenticates with OAuth. */
+diff --git a/dist/extensions/mcp/runtime.js b/dist/extensions/mcp/runtime.js
+index 2b767459cdc79eb664e89595d0ea1a133486fab7..d8db3079207ea10384fa5db4485c7cf8bde87a8c 100644
+--- a/dist/extensions/mcp/runtime.js
++++ b/dist/extensions/mcp/runtime.js
+@@ -116,6 +116,9 @@ export class McpServerConnection {
+     challenge;
+     client;
+     opening;
++    openingClient;
++    closePromise;
++    lifetime = new AbortController();
+     closed = false;
+     /** Stderr of the last stdio server that failed to connect. */
+     stderrTail;
+@@ -148,6 +151,7 @@ export class McpServerConnection {
+                     { token: async () => options.providerToken?.(provider), settled: async () => { } }
+                 : undefined;
+     }
++    get stderr() { return this.stderrTail; }
+     get name() {
+         return this.entry.name;
+     }
+@@ -185,34 +189,49 @@ export class McpServerConnection {
+         return this.opening;
+     }
+     callTool(name, args, options) {
+-        return this.withClient((client) => client.callTool(name, args, options));
++        return this.withClient((client, request) => client.callTool(name, args, request), false, options);
+     }
+     readResource(uri, options) {
+-        return this.withClient((client) => client.readResource(uri, options), true);
++        return this.withClient((client, request) => client.readResource(uri, request), true, options);
+     }
+     resourcesPage(cursor, options) {
+-        return this.withClient((client) => client.listResourcesPage(cursor, options), true);
++        return this.withClient((client, request) => client.listResourcesPage(cursor, request), true, options);
+     }
+     resourceTemplatesPage(cursor, options) {
+-        return this.withClient((client) => withoutTemplates(() => client.listResourceTemplatesPage(cursor, options), { resourceTemplates: [] }), true);
++        return this.withClient((client, request) => withoutTemplates(() => client.listResourceTemplatesPage(cursor, request), { resourceTemplates: [] }), true, options);
+     }
+     allResources(options) {
+-        return this.withClient((client) => client.listResources(options), true);
++        return this.withClient((client, request) => client.listResources(request), true, options);
+     }
+     allResourceTemplates(options) {
+-        return this.withClient((client) => listTemplates(client, options), true);
++        return this.withClient((client, request) => listTemplates(client, request), true, options);
+     }
+     /**
+      * Run a request, reconnecting when needed. `readOnly` requests are retried once after a transient
+      * HTTP error; tool calls are not, since they may have run.
+      */
+-    async withClient(run, readOnly = false) {
++    async withClient(run, readOnly = false, options = {}) {
++        const signal = options.signal ? AbortSignal.any([options.signal, this.lifetime.signal]) : this.lifetime.signal;
++        const request = { ...options, signal };
++        const wait = async (promise) => {
++            signal.throwIfAborted();
++            let abort;
++            try {
++                return await Promise.race([promise, new Promise((_, reject) => {
++                    abort = () => reject(signal.reason);
++                    signal.addEventListener("abort", abort, { once: true });
++                    if (signal.aborted) abort();
++                })]);
++            } finally { if (abort) signal.removeEventListener("abort", abort); }
++        };
+         for (let attempt = 1;; attempt++) {
+-            const client = await this.getClient();
++            signal.throwIfAborted();
++            const client = await wait(this.getClient());
+             try {
+-                return await run(client);
++                return await run(client, request);
+             }
+             catch (error) {
++                signal.throwIfAborted();
+                 if (readOnly && attempt === 1 && error instanceof McpHttpError && isTransientError(error)) {
+                     await new Promise((resolve) => setTimeout(resolve, CONNECT_RETRY_DELAYS_MS[0]));
+                     continue;
+@@ -293,6 +312,7 @@ export class McpServerConnection {
+             requestTimeoutMs: this.timeoutMs,
+             roots: [{ uri: pathToFileURL(this.cwd).href, name: basename(this.cwd) }],
+         });
++        this.openingClient = client;
+         const log = this.log;
+         if (log)
+             client.onNotification("notifications/message", (params) => log.write(this.entry.name, params));
+@@ -319,6 +339,7 @@ export class McpServerConnection {
+             if (client.connectionState !== "connected")
+                 throw new Error("connection closed during setup");
+             this.client = client;
++            this.openingClient = undefined;
+             this.tools = tools;
+             this.hasResources = hasResources;
+             this.resources = resources.resources;
+@@ -331,6 +352,7 @@ export class McpServerConnection {
+             return client;
+         }
+         catch (error) {
++            if (this.openingClient === client) this.openingClient = undefined;
+             await client.close().catch(() => undefined);
+             if (transport instanceof StdioTransport) {
+                 this.stderrTail = transport.stderr.trim().slice(-STDERR_TAIL_CHARS) || undefined;
+@@ -355,6 +377,7 @@ export class McpServerConnection {
+         this.client = undefined;
+         this.state = "disconnected";
+         const stderr = stdio?.stderr.trim().slice(-STDERR_TAIL_CHARS);
++        this.stderrTail = stderr || undefined;
+         this.error = stderr ? `Connection closed\n${stderr}` : "Connection closed";
+         this.changed();
+     }
+@@ -380,16 +403,21 @@ export class McpServerConnection {
+         this.onTools(this);
+         this.changed();
+     }
+-    async close() {
++    close() {
++        if (this.closePromise) return this.closePromise;
+         this.closed = true;
++        this.lifetime.abort(new Error(`MCP server "${this.name}" is shut down`));
+         this.state = "closed";
+         this.changed();
+-        const client = this.client;
++        const clients = new Set([this.client, this.openingClient].filter(Boolean));
+         this.client = undefined;
+-        await client?.close().catch(() => undefined);
+-        // A refresh the server already answered may have rotated the refresh token; exiting before the
+-        // new tokens are saved would lose the grant.
+-        await this.authProvider?.settled();
++        this.closePromise = (async () => {
++            await Promise.allSettled([...clients].map((client) => client.close()));
++            await this.opening?.catch(() => undefined);
++            // Save rotated refresh tokens before completing shutdown.
++            await this.authProvider?.settled();
++        })();
++        return this.closePromise;
+     }
+ }
+ //# sourceMappingURL=runtime.js.map
+\ No newline at end of file
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index eda1c0822e3dc7830fb5e3835690afe56b59017a..5ac23c9797dfe07c93546be1bd7256f89ae3dded 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -1,7 +1,7 @@
+ export { type Args, parseArgs } from "./cli/args.ts";
+ export { CONFIG_DIR_NAME, getAgentDir, getDocsPath, getExamplesPath, getPackageDir, getReadmePath, VERSION, } from "./config.ts";
+ export { AgentSession, type AgentSessionConfig, type AgentSessionEvent, type AgentSessionEventListener, type ModelCycleResult, type ParsedSkillBlock, type PromptOptions, parseSkillBlock, type SessionStats, } from "./core/agent-session.ts";
+-export { readStoredCredential } from "./core/auth-storage.ts";
++export { FileAuthStorageBackend, readStoredCredential } from "./core/auth-storage.ts";
+ export type { CacheWarmingDecision, CacheWarmingStatus } from "./core/cache-warmer.ts";
+ export { type BranchPreparation, type BranchSummaryResult, type CollectEntriesResult, type CompactionResult, type CutPointResult, calculateContextTokens, collectEntriesForBranchSummary, compact, DEFAULT_COMPACTION_SETTINGS, estimateTokens, type FileOperations, findCutPoint, findTurnStartIndex, type GenerateBranchSummaryOptions, generateBranchSummary, generateSummary, generateSummaryWithUsage, getLastAssistantUsage, prepareBranchEntries, serializeConversation, shouldCompact, } from "./core/compaction/index.ts";
+ export { createEventBus, type EventBus, type EventBusController } from "./core/event-bus.ts";
+@@ -42,3 +42,8 @@ export { formatDimensionNote, type ResizedImage, resizeImage } from "./utils/ima
+ export { detectSupportedImageMimeTypeFromFile } from "./utils/mime.ts";
+ export { getPowerShellConfig, getShellConfig } from "./utils/shell.ts";
+ //# sourceMappingURL=index.d.ts.map
++export { loadMcpConfig } from "./extensions/mcp/config.ts";
++export { validateMcpServerConfig } from "./core/mcp-servers.ts";
++export { McpOAuthCredentialStore, McpSignInCancelledError, signInMcpServer } from "./extensions/mcp/oauth.ts";
++export type { McpController, McpSnapshot, McpServerSnapshot, McpToolSnapshot, McpLoginOptions } from "./extensions/mcp/index.ts";
++export type { McpHttpServerConfig, McpStdioServerConfig, McpOAuthConfig, McpServerConfigPatch } from "./extensions/mcp/config.ts";
+diff --git a/dist/index.js b/dist/index.js
+index c48934f78d61fd5f5f8008bc9e09d8c4558d330a..afb7f50e26998868bbeb9853d153fe29a4dbb7de 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -3,7 +3,7 @@ export { parseArgs } from "./cli/args.js";
+ // Config paths
+ export { CONFIG_DIR_NAME, getAgentDir, getDocsPath, getExamplesPath, getPackageDir, getReadmePath, VERSION, } from "./config.js";
+ export { AgentSession, parseSkillBlock, } from "./core/agent-session.js";
+-export { readStoredCredential } from "./core/auth-storage.js";
++export { FileAuthStorageBackend, readStoredCredential } from "./core/auth-storage.js";
+ // Compaction
+ export { calculateContextTokens, collectEntriesForBranchSummary, compact, DEFAULT_COMPACTION_SETTINGS, estimateTokens, findCutPoint, findTurnStartIndex, generateBranchSummary, generateSummary, generateSummaryWithUsage, getLastAssistantUsage, prepareBranchEntries, serializeConversation, shouldCompact, } from "./core/compaction/index.js";
+ export { createEventBus } from "./core/event-bus.js";
+@@ -51,3 +51,6 @@ export { detectSupportedImageMimeTypeFromFile } from "./utils/mime.js";
+ // Shell utilities
+ export { getPowerShellConfig, getShellConfig } from "./utils/shell.js";
+ //# sourceMappingURL=index.js.map
++export { loadMcpConfig } from "./extensions/mcp/config.js";
++export { validateMcpServerConfig } from "./core/mcp-servers.js";
++export { McpOAuthCredentialStore, McpSignInCancelledError, signInMcpServer } from "./extensions/mcp/oauth.js";

@@ -1,3 +1,8 @@
+export * from "./mcp";
+export * from "./scheduled-tasks";
+export * from "./plugin";
+import type { PluginApi } from "./plugin";
+import type { McpApi } from "./mcp";
 export * from "./trace";
 import type { TraceSnapshot, TraceDetails, TraceUpdate } from "./trace";
 export const conversationTitleMaxLength = 120;
@@ -670,6 +675,8 @@ export interface ToolPlanItem {
 
 /** 一条工具调用在对话里展示的内容。正文已经截断；steps 只保留最近若干条。 */
 export interface ToolActivity {
+  /** MCP identity for the tool card and restored history. */
+  mcp?: { server: string; tool: string };
   /** bash 要执行的命令 */
   command?: string;
   /** read / edit / write 的文件路径 */
@@ -2359,10 +2366,26 @@ export interface PrCreateResult {
  */
 export type SandboxMode = "ask" | "smart" | "full";
 
-export type SandboxApprovalKind = "bash" | "edit" | "write" | "mkdir" | "browser_repl";
+/** Host-only context for a conversation-specific permission decision. */
+export interface SandboxExecutionContext {
+  sandboxMode?: SandboxMode | null;
+  conversationId?: string;
+}
+
+export type SandboxApprovalKind = "bash" | "edit" | "write" | "mkdir" | "browser_repl" | "mcp";
+
+export interface SandboxMcpContext {
+  server: string;
+  tool: string;
+  description: string;
+  parameters: unknown;
+}
 
 /** 交给模型判断的一次操作。workspace 为工作区边界,insideWorkspace 表明是否越界。 */
-export interface SandboxRiskInput {
+export interface SandboxRiskInput extends SandboxExecutionContext {
+  /** Host-only cancellation; never sent through IPC. */
+  signal?: { readonly aborted: boolean; addEventListener(type: "abort", listener: () => void, options?: { once?: boolean }): void; removeEventListener(type: "abort", listener: () => void): void };
+  mcp?: SandboxMcpContext;
   kind: SandboxApprovalKind;
   command: string | null;
   path: string | null;
@@ -2377,6 +2400,7 @@ export type SandboxRiskVerdict = "safe" | "risky" | "unknown";
 export type SandboxRiskEvaluator = (input: SandboxRiskInput) => Promise<SandboxRiskVerdict>;
 
 export interface SandboxApprovalRequest {
+  mcp?: SandboxMcpContext;
   id: string;
   kind: SandboxApprovalKind;
   command: string | null;
@@ -2462,7 +2486,8 @@ export interface OpenTarget {
   icon: string | null;
 }
 
-export interface VelaApi {
+export interface VelaApi extends McpApi, PluginApi {
+  scheduledTasks?: import("./scheduled-tasks").ScheduledTasksApi;
   browser?: import("./browser").BrowserPanelApi;
   platform: string;
   /** Present in the desktop app; browser-only previews use localStorage. */

@@ -10,6 +10,7 @@ import { PlanDocumentProvider } from "./components/PlanPanel";
 import { ScreenPresence } from "./components/MotionPresence";
 import { Presence } from "./components/Presence";
 import { SettingsView } from "./components/SettingsView";
+import { ScheduledTasksPage } from "./components/ScheduledTasksPage";
 import { Sidebar } from "./components/Sidebar";
 import { RenameConversationDialog } from "./components/RenameConversationDialog";
 import { FilePreviewProvider, type PreviewFileDescriptor } from "./components/preview/FilePreviewContext";
@@ -114,8 +115,9 @@ export function App() {
   // Keep the conversation as the default focus; open the inspector when a tool
   // preview or workspace-change action needs it.
   const [rightCollapsed, setRightCollapsed] = useStoredState("vela.rightCollapsed", true, isBoolean);
+  const [scheduledTasksOpen, setScheduledTasksOpen] = useState(false);
   const floatingInfo = preferences.infoLayout === "floating";
-  const contextSidebarOpen = !floatingInfo && !rightCollapsed;
+  const contextSidebarOpen = !floatingInfo && !rightCollapsed && !scheduledTasksOpen;
   const [environmentCollapsed, setEnvironmentCollapsed] = useStoredState("vela.environmentCollapsed", false, isBoolean);
   const toggleInfo = useCallback(() => {
     if (floatingInfo) setEnvironmentCollapsed(value => !value);
@@ -510,9 +512,11 @@ export function App() {
         toggleInfo();
       } else if (key === "t") {
         event.preventDefault();
+        setScheduledTasksOpen(false);
         openStartTab();
       } else if (event.code === "Comma") {
         event.preventDefault();
+        setScheduledTasksOpen(false);
         setSettingsOpen((open) => !open);
       }
     };
@@ -534,9 +538,11 @@ export function App() {
     return vela.onMenuAction((action) => {
       if (!onboardingComplete) return;
       if (action === "new-chat") {
+        setScheduledTasksOpen(false);
         setSettingsOpen(false);
         void session.newChat();
       } else {
+        setScheduledTasksOpen(false);
         setSettingsOpen((open) => !open);
       }
     });
@@ -560,7 +566,7 @@ export function App() {
         <div className="app-screens">
           <BrowserViewHost tabs={browser.allTabs}
             activeTabId={browser.tabs.some(tab => tab.id === activeWorkbenchTabId) ? activeWorkbenchTabId : null}
-            visible={onboardingComplete && !settingsOpen && !workbenchCollapsed} hosted={browser.hosted} command={browser.command} />
+            visible={onboardingComplete && !settingsOpen && !scheduledTasksOpen && !workbenchCollapsed} hosted={browser.hosted} command={browser.command} />
           <ScreenPresence present={!onboardingComplete} className="app-screen-onboarding">
             <div className={`vela-window platform-${platform} onboarding-window`}>
               <OnboardingView
@@ -591,21 +597,28 @@ export function App() {
           <ScreenPresence present={onboardingComplete} className="app-screen-main">
             <div className={`vela-window platform-${platform}${leftCollapsed ? " left-collapsed" : ""}${!contextSidebarOpen ? " right-collapsed" : ""}${floatingInfo ? " layout-floating" : ""}`}>
               <Sidebar
+                onOpenScheduledTasks={() => {
+                  setSettingsOpen(false);
+                  setScheduledTasksOpen(true);
+                }}
                 collapsed={leftCollapsed}
                 resize={resize}
                 platform={platform}
                 conversations={session.conversations}
                 waitingConversationIds={session.waitingConversationIds}
-                activeConversationId={session.activeConversationId}
+                scheduledTasksOpen={scheduledTasksOpen}
+                activeConversationId={scheduledTasksOpen ? null : session.activeConversationId}
                 settingsOpen={settingsOpen}
                 settingsLabel={tr("设置", "Settings")}
                 onToggle={() => setLeftCollapsed((value) => !value)}
-                onOpenSettings={() => setSettingsOpen((open) => !open)}
+                onOpenSettings={() => { setScheduledTasksOpen(false); setSettingsOpen((open) => !open); }}
                 onNewChat={(cwd) => {
+                  setScheduledTasksOpen(false);
                   setSettingsOpen(false);
                   void session.newChat(cwd);
                 }}
                 onSwitchConversation={(id) => {
+                  setScheduledTasksOpen(false);
                   setSettingsOpen(false);
                   void session.switchTo(id);
                 }}
@@ -618,7 +631,7 @@ export function App() {
                   onCloseFileTab={onCloseFileTab}
                   onCloseAllFileTabs={onCloseAllFileTabs}
                 >
-                  <Presence present={!settingsOpen} className="main-stage-pane">
+                  <Presence present={!settingsOpen && !scheduledTasksOpen} keepMounted={scheduledTasksOpen} className="main-stage-pane">
                     <PlanDocumentProvider
                       plans={session.state?.session.planRevisions ?? []}
                       draft={session.planDraft}
@@ -656,6 +669,7 @@ export function App() {
                           summaryModel={preferences.thinkingSummaryModel}
                           locale={preferences.locale}
                           hiddenModels={preferences.hiddenModels}
+                          sendButtonIcon={preferences.sendButtonIcon}
                           onSend={session.send}
                           onRemoveInstruction={session.removeInstruction}
                           onEdit={session.edit}
@@ -738,7 +752,21 @@ export function App() {
                     </PlanDocumentProvider>
                   </Presence>
                 </FilePreviewProvider>
-                <Presence present={settingsOpen} className="main-stage-pane">
+                <Presence present={scheduledTasksOpen} className="main-stage-pane scheduled-tasks-stage">
+                  <ScheduledTasksPage
+                    catalog={models.catalog}
+                    catalogError={models.catalogError}
+                    workspace={project.workspace?.current ?? null}
+                    workspaces={project.workspace?.recents.map(recent => recent.path) ?? []}
+                    sidebarCollapsed={leftCollapsed}
+                    onToggleSidebar={toggleLeft}
+                    onOpenConversation={(id) => {
+                      setScheduledTasksOpen(false);
+                      void session.switchTo(id);
+                    }}
+                  />
+                </Presence>
+                <Presence present={settingsOpen && !scheduledTasksOpen} className="main-stage-pane">
                   <SettingsView
                     onPreviewSound={sounds.preview}
                     preferences={preferences}
@@ -746,6 +774,7 @@ export function App() {
                     project={project}
                     models={models}
                     conversations={session.conversations}
+                    conversationId={session.activeConversationId}
                     onUnarchiveConversation={(id) => void session.unarchive(id)}
                     onClose={() => setSettingsOpen(false)}
                   />

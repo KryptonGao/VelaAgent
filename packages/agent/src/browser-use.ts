@@ -1,3 +1,4 @@
+import type { SandboxExecutionContext } from "@vela/shared";
 import { toolResultIsError } from "./tool-activity";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -17,7 +18,7 @@ export interface BrowserReplService {
 }
 
 export interface BrowserReplPermission {
-  request(input: { kind: "browser_repl"; command: string; cwd: string; workspace: string; signal?: AbortSignal }): Promise<boolean>;
+  request(input: SandboxExecutionContext & { kind: "browser_repl"; command: string; cwd: string; workspace: string; signal?: AbortSignal }): Promise<boolean>;
 }
 
 export const browserToolNames = ["browser_repl", "browser_repl_reset"] as const;

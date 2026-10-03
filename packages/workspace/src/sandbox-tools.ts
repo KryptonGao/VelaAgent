@@ -1,3 +1,4 @@
+import type { SandboxExecutionContext } from "@vela/shared";
 import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
@@ -14,7 +15,7 @@ import {
 import { isPathInside } from "./git-service";
 import type { SandboxPermissionManager } from "./sandbox-permission-manager";
 
-export interface SandboxToolFactoryInput {
+export interface SandboxToolFactoryInput extends SandboxExecutionContext {
   /** Agent 会话 cwd(Pi 需要它来构造内置工具) */
   cwd: string;
   /** 工作区边界;null 时退化为会话 cwd */
@@ -33,7 +34,7 @@ export function createSandboxedToolDefinitions(input: SandboxToolFactoryInput): 
 
   const bashOperations: BashOperations = {
     exec: async (command, cwd, options) => {
-      const allowed = await input.permission.request({ kind: "bash", command, cwd, workspace: boundary });
+      const allowed = await input.permission.request({ sandboxMode: input.sandboxMode, conversationId: input.conversationId, kind: "bash", command, cwd, workspace: boundary });
       if (!allowed) throw new Error(`用户拒绝了命令执行:${command}`);
       return createLocalBashOperations().exec(command, cwd, options);
     },
@@ -41,6 +42,8 @@ export function createSandboxedToolDefinitions(input: SandboxToolFactoryInput): 
 
   const guardFileWrite = async (kind: "edit" | "write", path: string): Promise<void> => {
     const allowed = await input.permission.request({
+      sandboxMode: input.sandboxMode,
+      conversationId: input.conversationId,
       kind,
       path,
       workspace: boundary,

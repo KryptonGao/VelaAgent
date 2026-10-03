@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
-import type { SandboxApprovalEvent, SandboxRiskEvaluator, SandboxRiskInput } from "@vela/shared";
+import type { SandboxApprovalEvent, SandboxMcpContext, SandboxRiskEvaluator, SandboxRiskInput, SandboxRiskVerdict } from "@vela/shared";
 import { SandboxPermissionManager } from "../src/sandbox-permission-manager.ts";
 
 const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
@@ -208,4 +208,185 @@ it("stop cancels a pending smart evaluation promptly without opening approval", 
   assert.equal(await pending, false);
   assert.deepEqual(events, []);
   finish("safe");
+});
+
+describe("MCP permissions", () => {
+  const mcp: SandboxMcpContext = {
+    server: "issues",
+    tool: "update_issue",
+    description: "Update an issue in the remote tracker",
+    parameters: { id: 42, title: "Updated", token: "[REDACTED]" },
+  };
+  const input = { kind: "mcp", mcp, cwd: "/repo", workspace: "/repo", insideWorkspace: true } as const;
+
+  it("ask requires approval for every MCP call, even inside the workspace", async () => {
+    let evaluations = 0;
+    const { manager, events } = await createManager("ask", async () => { evaluations++; return "safe"; });
+    for (const allowed of [true, false]) {
+      const pending = manager.request(input);
+      const event = events.at(-1);
+      assert.equal(event?.type, "request");
+      if (event?.type !== "request") throw new Error("Missing approval request");
+      assert.equal(event.request.kind, "mcp");
+      assert.deepEqual(event.request.mcp, mcp);
+      assert.equal(event.request.command, null);
+      assert.equal(event.request.path, null);
+      manager.reply(event.request.id, allowed);
+      assert.equal(await pending, allowed);
+    }
+    assert.equal(evaluations, 0);
+    assert.equal(events.filter(event => event.type === "request").length, 2);
+  });
+
+  it("missing optional MCP context still requires approval in ask", async () => {
+    const { manager, events } = await createManager("ask");
+    const pending = manager.request({ kind: "mcp", insideWorkspace: true });
+    const id = pendingRequest(events);
+    assert.ok(id);
+    manager.reply(id, false);
+    assert.equal(await pending, false);
+  });
+
+  it("full allows MCP without evaluation or approval", async () => {
+    let evaluations = 0;
+    const { manager, events } = await createManager("full", async () => { evaluations++; return "risky"; });
+    assert.equal(await manager.request(input), true);
+    assert.equal(evaluations, 0);
+    assert.deepEqual(events, []);
+  });
+
+  it("smart passes the redacted structured context to the evaluator", async () => {
+    const calls: SandboxRiskInput[] = [];
+    const { manager, events } = await createManager("smart", async action => { calls.push(action); return "safe"; });
+    assert.equal(await manager.request(input), true);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].kind, "mcp");
+    assert.deepEqual(calls[0].mcp, mcp);
+    assert.equal(calls[0].workspace, "/repo");
+    assert.equal(calls[0].insideWorkspace, false);
+    assert.deepEqual(events, []);
+  });
+
+  for (const verdict of ["risky", "unknown", "error", "no evaluator"] as const) {
+    it(`smart requests approval when MCP evaluation returns ${verdict}`, async () => {
+      const evaluator: SandboxRiskEvaluator | undefined = verdict === "no evaluator" ? undefined : async () => {
+        if (verdict === "error") throw new Error("Risk evaluation failed");
+        return verdict;
+      };
+      const { manager, events } = await createManager("smart", evaluator);
+      const pending = manager.request(input);
+      await tick();
+      const event = events[0];
+      assert.equal(event?.type, "request");
+      if (event?.type !== "request") throw new Error("Missing approval request");
+      assert.deepEqual(event.request.mcp, mcp);
+      manager.reply(event.request.id, false);
+      assert.equal(await pending, false);
+    });
+  }
+
+  it("smart never reuses a safe MCP verdict or a prior approval", async () => {
+    let calls = 0;
+    const { manager, events } = await createManager("smart", async () => ++calls === 1 ? "safe" : "risky");
+    assert.equal(await manager.request(input), true);
+    for (const allowed of [true, false]) {
+      const pending = manager.request(input);
+      await tick();
+      const event = events.at(-1);
+      if (event?.type !== "request") throw new Error("Missing approval request");
+      manager.reply(event.request.id, allowed);
+      assert.equal(await pending, allowed);
+    }
+    assert.equal(calls, 3);
+  });
+
+  it("smart does not share concurrent MCP evaluations or cancellation", async () => {
+    const calls: SandboxRiskInput[] = [];
+    const finishes: ((verdict: SandboxRiskVerdict) => void)[] = [];
+    const { manager, events } = await createManager("smart", action => {
+      calls.push(action);
+      return new Promise(resolve => finishes.push(resolve));
+    });
+    const controller = new AbortController();
+    const first = manager.request({ ...input, signal: controller.signal });
+    const second = manager.request(input);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].signal, controller.signal);
+    assert.equal(calls[1].signal, undefined);
+    controller.abort();
+    assert.equal(await first, false);
+    assert.equal(calls[0].signal?.aborted, true);
+    finishes[0]("safe");
+    finishes[1]("safe");
+    assert.equal(await second, true);
+    assert.deepEqual(events, []);
+  });
+
+  for (const mode of ["ask", "smart", "full"] as const) {
+    it(`${mode} denies already-aborted MCP calls without evaluation or approval`, async () => {
+      let calls = 0;
+      const { manager, events } = await createManager(mode, async () => { calls++; return "safe"; });
+      const controller = new AbortController();
+      controller.abort();
+      assert.equal(await manager.request({ ...input, signal: controller.signal }), false);
+      assert.equal(calls, 0);
+      assert.deepEqual(events, []);
+    });
+  }
+
+  for (const mode of ["ask", "smart"] as const) {
+    it(`${mode} aborts pending MCP approval and ignores a late approval reply`, async () => {
+      const { manager, events } = await createManager(mode, async () => "risky");
+      const controller = new AbortController();
+      const pending = manager.request({ ...input, signal: controller.signal });
+      await tick();
+      const id = pendingRequest(events);
+      assert.ok(id);
+      controller.abort();
+      assert.equal(await pending, false);
+      assert.deepEqual(events.at(-1), { type: "resolved", id, allowed: false });
+      manager.reply(id, true);
+      assert.equal(events.length, 2);
+    });
+  }
+
+  it("abort reaches the MCP risk evaluator and cancels without opening approval", async () => {
+    let riskSignal: AbortSignal | undefined;
+    const { manager, events } = await createManager("smart", action => {
+      riskSignal = action.signal;
+      return new Promise(resolve => action.signal?.addEventListener("abort", () => resolve("unknown"), { once: true }));
+    });
+    const controller = new AbortController();
+    const pending = manager.request({ ...input, signal: controller.signal });
+    assert.equal(riskSignal, controller.signal);
+    controller.abort();
+    assert.equal(await pending, false);
+    assert.equal(riskSignal?.aborted, true);
+    assert.deepEqual(events, []);
+  });
+});
+
+it("scoped permissions coexist without mutating global settings or sharing risk verdicts", async () => {
+  const calls: SandboxRiskInput[] = [];
+  const { manager, events } = await createManager("full", async input => {
+    calls.push(input); return input.conversationId === "safe-task" ? "safe" : "risky";
+  });
+  manager.subscribe(event => { if (event.type === "request") manager.reply(event.request.id, false); });
+  const action = { kind: "bash" as const, command: "printf permissions", cwd: "/repo" };
+  const decisions = await Promise.all([
+    manager.request({ ...action, sandboxMode: "ask", conversationId: "ask-task" }),
+    manager.request({ ...action, sandboxMode: "smart", conversationId: "safe-task" }),
+    manager.request({ ...action, sandboxMode: "smart", conversationId: "risky-task" }),
+    manager.request({ ...action, sandboxMode: "full", conversationId: "full-task" }),
+    manager.request(action),
+  ]);
+  assert.deepEqual(decisions, [false, true, false, true, true]);
+  assert.equal(manager.getMode(), "full");
+  assert.deepEqual(calls.map(input => input.conversationId).sort(), ["risky-task", "safe-task"]);
+  assert.equal(events.filter(event => event.type === "request").length, 2);
+  for (const kind of ["browser_repl", "mcp"] as const) {
+    assert.equal(await manager.request({ kind, sandboxMode: "ask", conversationId: "ask-task", cwd: "/repo" }), false);
+    assert.equal(await manager.request({ kind, sandboxMode: "smart", conversationId: "safe-task", cwd: "/repo" }), true);
+    assert.equal(calls.at(-1)?.conversationId, "safe-task");
+  }
 });

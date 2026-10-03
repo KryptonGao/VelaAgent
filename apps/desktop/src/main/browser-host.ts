@@ -183,7 +183,7 @@ export class BrowserHost {
   private open(windowId: number, conversationId: string|null,url: string,id?:string): BrowserRecord {
     if(typeof url!=='string'||!isUiBrowserUrl(url)) throw new BrowserHostError('invalid-address','Only HTTP(S) URLs are accepted');
     const win=this.window(windowId); const tab=this.registry.create(windowId,conversationId,id,url,win.viewport);
-    tab.agentCursor = { x: 24, y: 24, viewportWidth: tab.width, viewportHeight: tab.height, kind: 'click', sequence: 0, active: false };
+    // Manual browsing has no Agent pointer; trusted input actions create it on demand.
     this.tabSignals.set(tab.id,new AbortController());
     win.selected[conversationId??'']=tab.id; this.publish(windowId); return tab;
   }

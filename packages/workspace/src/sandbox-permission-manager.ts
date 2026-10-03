@@ -2,8 +2,10 @@ import { randomUUID } from "node:crypto";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import type {
+  SandboxExecutionContext,
   SandboxApprovalEvent,
   SandboxApprovalKind,
+  SandboxMcpContext,
   SandboxMode,
   SandboxRiskEvaluator,
   SandboxRiskInput,
@@ -22,7 +24,7 @@ type ApprovalListener = (event: SandboxApprovalEvent) => void;
 
 /**
  * Agent 操作的权限门。三种模式:
- * - ask(默认):bash 逐条审批,工作区外文件写入也要审批;
+ * - ask(默认):bash、browser_repl 和 MCP 逐条审批,工作区外文件写入也要审批;
  * - smart:交给当前对话模型判断,只有风险操作或判断失败时请求批准;
  * - full:在授权范围内直接放行。
  */
@@ -77,22 +79,25 @@ export class SandboxPermissionManager {
   }
 
   /**
-   * 请求批准。full 直接放行;ask 下 bash 逐条审批、工作区内的文件改动放行;
+   * 请求批准。full 直接放行;ask 下 bash、browser_repl 和 MCP 逐条审批,
+   * 工作区内的文件改动放行;
    * smart 下先交给模型判断,只有风险或判断失败才推送审批请求。
    */
-  async request(input: {
+  async request(input: SandboxExecutionContext & {
     kind: SandboxApprovalKind;
     command?: string | null;
     path?: string | null;
     cwd?: string | null;
     workspace?: string | null;
     insideWorkspace?: boolean;
+    mcp?: SandboxMcpContext;
     signal?: AbortSignal;
   }): Promise<boolean> {
     if (input.signal?.aborted) return false;
-    if (this.mode === "full") return true;
-    if (this.mode === "ask" && input.kind !== "bash" && input.kind !== "browser_repl" && input.insideWorkspace === true) return true;
-    if (this.mode === "smart" && this.riskEvaluator) {
+    const mode = input.sandboxMode ?? this.mode;
+    if (mode === "full") return true;
+    if (mode === "ask" && input.kind !== "bash" && input.kind !== "browser_repl" && input.kind !== "mcp" && input.insideWorkspace === true) return true;
+    if (mode === "smart" && this.riskEvaluator) {
       const verdict = await withApprovalAbort(this.evaluateRisk(input), input.signal);
       if (input.signal?.aborted) return false;
       if (verdict === "safe") return true;
@@ -104,6 +109,7 @@ export class SandboxPermissionManager {
       command: input.command ?? null,
       path: input.path ?? null,
       cwd: input.cwd ?? null,
+      ...(input.mcp ? { mcp: input.mcp } : {}),
       createdAt: Date.now(),
     };
     return new Promise<boolean>((resolve) => {
@@ -126,31 +132,44 @@ export class SandboxPermissionManager {
     this.pending.get(id)?.(allowed);
   }
 
-  private async evaluateRisk(input: {
+  private async evaluateRisk(input: SandboxExecutionContext & {
     kind: SandboxApprovalKind;
     command?: string | null;
     path?: string | null;
     cwd?: string | null;
     workspace?: string | null;
     insideWorkspace?: boolean;
+    mcp?: SandboxMcpContext;
+    signal?: AbortSignal;
   }): Promise<SandboxRiskVerdict> {
     const evaluator = this.riskEvaluator;
     if (!evaluator) return "unknown";
-    // Persistent REPL bindings and page state can change the meaning of identical code.
-    if (input.kind === "browser_repl") {
+    // REPL state and external MCP state can change between identical calls.
+    // Do not cache verdicts or share in-flight evaluations for these operations.
+    if (input.kind === "browser_repl" || input.kind === "mcp") {
       try {
-        return await evaluator({ kind: input.kind, command: input.command ?? null, path: null,
-          cwd: input.cwd ?? null, workspace: input.workspace ?? null, insideWorkspace: false });
+        return await evaluator({
+          conversationId: input.conversationId,
+          kind: input.kind,
+          command: input.command ?? null,
+          path: null,
+          cwd: input.cwd ?? null,
+          workspace: input.workspace ?? null,
+          insideWorkspace: false,
+          ...(input.mcp ? { mcp: input.mcp } : {}),
+          signal: input.signal,
+        });
       } catch {
         return "unknown";
       }
     }
-    const key = riskCacheKey(input);
+    const key = `${input.conversationId ?? ""}\0${riskCacheKey(input)}`;
     const cached = this.verdicts.get(key);
     if (cached) return cached;
     const running = this.evaluations.get(key);
     if (running) return running;
     const risk: SandboxRiskInput = {
+      conversationId: input.conversationId,
       kind: input.kind,
       command: input.command ?? null,
       path: input.path ?? null,

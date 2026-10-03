@@ -57,9 +57,11 @@ IPC / 渲染层：
 - 排队指令不参与自动标题生成，也不在提交时计入消息数；被模型消费时才计数。
 - 待处理指令只存在于内存，应用重启后不恢复；会话回退（rewind）会清空。
 - 排队指令在运行失败后保留，用户可撤销，或在下一次发言时由 Pi 队列继续投递。
+- Pi 1.0 的 `steer()` / `followUp()` 返回 `queued` 或 `handled`。只有确认入队的输入参与队列消费对账；被扩展处理的输入直接移出待处理列表，不补发用户消息，也不增加消息数。提交结果返回前的队列事件不会把尚在处理的输入误判为已投递；撤销回放同样检查返回值。
 
 ## 5. 验收与测试
 
-- `packages/agent/test/runtime-instructions.test.ts`：调整投递、排队投递、单条撤销回放、停止清空、空指令拒绝。
+- `packages/agent/test/runtime-instructions.test.ts`：调整投递、排队投递、单条撤销回放、停止清空、空指令拒绝、扩展消费、提交期间的队列事件及失败回滚。
+- `packages/agent/test/pi-sdk-compatibility.test.ts`：实际 SDK 的运行中指令、输入转换、沙箱拒绝、工具集合、Plan 拦截、Trace 与使用量。
 - `apps/desktop/test/motion-batch2-checks.ts`：运行中输入时动作区语义、排队 / 调整快捷键提交、待处理条进出场与撤销。
 - `pnpm --filter @vela/agent typecheck`、`pnpm --filter @vela/desktop typecheck`、`pnpm --filter @vela/desktop build`。

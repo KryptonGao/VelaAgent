@@ -670,7 +670,9 @@ function applyToMessages(messages: UiMessage[], event: StreamUpdate, startedAt?:
     const exists = last.tools.some((tool) => tool.id === event.toolCallId);
     last.tools = exists
       ? last.tools.map((tool) =>
-          tool.id === event.toolCallId ? { ...tool, name: event.toolName || tool.name, status, activity } : tool,
+          tool.id === event.toolCallId
+            ? { ...tool, name: event.toolName || tool.name, status, activity: { ...activity, mcp: activity.mcp ?? tool.activity?.mcp } }
+            : tool,
         )
       : [...last.tools, { id: event.toolCallId, name: event.toolName, status, activity }];
   }
@@ -734,7 +736,9 @@ function applyAgentToMessages(messages: UiMessage[], event: AgentRuntimeStreamEv
     const exists = last.tools.some((tool) => tool.id === event.toolCallId);
     last.tools = exists
       ? last.tools.map((tool) =>
-          tool.id === event.toolCallId ? { ...tool, name: event.toolName || tool.name, status, activity } : tool,
+          tool.id === event.toolCallId
+            ? { ...tool, name: event.toolName || tool.name, status, activity: { ...activity, mcp: activity.mcp ?? tool.activity?.mcp } }
+            : tool,
         )
       : [...last.tools, { id: event.toolCallId, name: event.toolName, status, activity }];
   } else if (event.type === "error") {
@@ -766,6 +770,10 @@ function sanitizeActivity(value: ToolActivity | undefined): ToolActivity {
     agentId: typeof value?.agentId === "string" ? value.agentId : undefined,
     agentPath: typeof value?.agentPath === "string" ? value.agentPath : undefined,
     steps,
+    mcp: typeof value?.mcp?.server === "string" && value.mcp.server.trim() &&
+      typeof value.mcp.tool === "string" && value.mcp.tool.trim()
+      ? { server: value.mcp.server, tool: value.mcp.tool }
+      : undefined,
     mutated: value?.mutated === true ? true : undefined,
   };
 }
@@ -883,6 +891,7 @@ function mergeActivity(current: ToolActivity | undefined, patch: ToolActivity): 
     agentId: patch.agentId ?? base.agentId,
     agentPath: patch.agentPath ?? base.agentPath,
     steps: patch.steps ?? base.steps,
+    mcp: patch.mcp ?? base.mcp,
     mutated: patch.mutated ?? base.mutated,
   };
 }

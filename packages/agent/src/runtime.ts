@@ -1,3 +1,14 @@
+import { McpConfigService } from "./mcp-config";
+import { PluginRegistry } from "./mcp/plugin-registry";
+import { OAuthMCPManager } from "./mcp/oauth";
+import { PluginMCPManager } from "./mcp/manager";
+import type { CredentialStore } from "./mcp/credentials";
+import type { BuiltInPlugin, PluginCatalog, PluginTarget, PluginStatusEvent } from "@vela/shared";
+import { redactMcpDisplay, mcpConfiguredSecrets } from "./mcp-redaction";
+import { McpSessionBridge, isMcpTool, type McpPermission } from "./mcp-session";
+import { createScheduledTaskTools, scheduledTaskInstructions, scheduledTaskToolNames } from "./scheduled-task-tools";
+import type { ScheduledTaskInput, SandboxExecutionContext, SandboxMode, ScheduledTaskService } from "@vela/shared";
+import type { McpCatalog, McpCatalogInput, McpServerInput, McpServerTarget, McpEnabledInput, McpProjectTrustInput, McpToolReadOnlyInput, McpStatusEvent } from "@vela/shared";
 import { browserToolNames, browserUseInstructions, createBrowserTools, type BrowserReplService, type BrowserReplPermission } from "./browser-use";
 import { TurnCheckpoints, type TurnCheckpoint } from "./turn-checkpoints";
 import { TraceRecorder } from "./trace";
@@ -10,6 +21,7 @@ import {
   type AgentSession,
   type AgentSessionEvent,
   type ToolDefinition,
+  type ExtensionFactory,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
@@ -48,7 +60,7 @@ import {
   type AiTextResult,
 } from "@vela/shared";
 import { defaultToolNames } from "@vela/tools";
-import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
+import { getCurrentTools, clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
 import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
@@ -158,14 +170,19 @@ export type RuntimeEvent =
   | { type: "error"; conversationId: string; message: string };
 
 export interface AgentRuntimeOptions {
+  scheduledTasks?: ScheduledTaskService;
   cwd: string;
   /** Vela 自己的模型目录，不读取本机 Pi 配置。 */
   agentDir: string;
   /** Optional desktop host for persistent Browser Panel JavaScript contexts. */
   browserRepl?: BrowserReplService;
   browserReplPermission?: BrowserReplPermission;
+  mcpPermission?: McpPermission;
+  mcpOpenUrl?: (url: string) => void;
+  pluginCredentialStore?: CredentialStore;
+  builtInPlugins?: readonly BuiltInPlugin[];
   /** 按会话 cwd 构造沙箱化的 bash/edit/write 工具,以同名覆盖 Pi 内置实现。 */
-  toolFactory?: (cwd: string) => ToolDefinition[];
+  toolFactory?: (cwd: string, context?: SandboxExecutionContext) => ToolDefinition[];
   /** 激活对话的 cwd 变化时回调(用于让工作区等界面状态跟随会话)。 */
   onActiveCwd?: (cwd: string) => void;
 }
@@ -186,9 +203,12 @@ interface PendingInstruction {
   text: string;
   images?: ImageAttachment[];
   createdAt: number;
+  /** Only confirmed Pi queue entries participate in delivery accounting. */
+  queued: boolean;
 }
 
 interface Conversation {
+  scheduledSandboxMode?: SandboxMode | null;
   id: string;
   session: AgentSession | null;
   /** 新对话在登记时创建;恢复的对话在激活时通过 sessionFile 打开。 */
@@ -273,18 +293,44 @@ export class AgentRuntime {
   private disabledSkills: Set<string> | null = null;
   /** 每次停用、启用或删除 Skill 时递增，用于让已打开的会话在下次发言前刷新 Skill。 */
   private skillsRevision = 0;
+  private readonly mcpConfig: McpConfigService;
+  private readonly plugins: PluginRegistry;
+  private readonly oauthMcp: OAuthMCPManager;
+  private readonly pluginManager: PluginMCPManager;
+  private readonly mcpBridges = new Map<AgentSession, McpSessionBridge>();
+  private readonly mcpManagement = new Map<string, AgentSession>();
+  private readonly mcpManagementStarting = new Map<string, Promise<McpSessionBridge>>();
+  private readonly mcpRevisions = new Map<AgentSession, number>();
+  private readonly sessionStarting = new Map<string, Promise<SessionSnapshot>>();
+  private readonly mcpListeners = new Set<(event: McpStatusEvent) => void>();
+  private readonly mcpPending = new Set<AgentSession>();
+  private readonly mcpReloading = new Map<AgentSession, Promise<void>>();
+  private readonly sessionClosings = new Map<AgentSession, Promise<void>>();
+  private mcpPoll: ReturnType<typeof setInterval> | null = null;
+  private mcpPolling = false;
+  private disposed = false;
   private gate: Promise<void> = Promise.resolve();
   private readonly rewindingWorkspaces = new Set<string>();
   private readonly overlappingCheckpointRuns = new Set<string>();
 
   constructor(private readonly options: AgentRuntimeOptions) {
     this.currentCwd = options.cwd;
+    this.plugins = new PluginRegistry(join(options.agentDir, "integrations.json"), options.builtInPlugins);
+    this.oauthMcp = new OAuthMCPManager({ agentDir: options.agentDir, credentialStore: options.pluginCredentialStore,
+      isPlugin: name => this.plugins.ownsServer(name), openUrl: options.mcpOpenUrl });
+    this.pluginManager = new PluginMCPManager(this.plugins, {
+      activate: (id, cwd, signal) => this.activatePlugin(id, cwd, signal),
+      deactivate: (id, cwd) => this.deactivatePlugin(id, cwd),
+    });
+    this.mcpConfig = new McpConfigService({ agentDir: options.agentDir, plugins: this.plugins });
     this.store = new ConversationStore(join(options.agentDir, "conversations.json"));
     // QuestionManager 的事件转发给宿主监听器(SessionHost 由此广播到界面)。
     this.questions.subscribe((event) => {
       for (const listener of this.questionListeners) listener(event);
     });
     this.initializePromise = this.initialize();
+    this.mcpPoll = setInterval(() => { void this.pollMcpChanges(); }, 1000);
+    this.mcpPoll.unref();
   }
 
   get activeConversationId(): string | null {
@@ -359,6 +405,39 @@ export class AgentRuntime {
       const entry = this.addEntry(cwd);
       return this.startInternal(entry);
     });
+  }
+
+  /** Scheduler entry point: create a persisted background chat without changing the selected workspace. */
+  async runScheduledTask(cwd: string, text: string, onCreated: (id: string) => void, execution: Pick<ScheduledTaskInput, "model" | "thinkingLevel" | "sandboxMode"> = {}): Promise<void> {
+    const entry = await this.exclusive(async () => {
+      await this.ready();
+      const entry = this.addEntry(cwd, { activate: false, mode: "agent" });
+      entry.scheduledSandboxMode = execution.sandboxMode;
+      onCreated(entry.id);
+      try {
+        const directory = await this.readyDirectory();
+        const defaults = this.conversationSelection(directory);
+        const model = execution.model ? directory.requireAvailable(execution.model.provider, execution.model.id) : defaults.model;
+        const requestedLevel = execution.thinkingLevel ?? defaults.thinkingLevel;
+        const thinkingLevel = model ? clampToModel(model, requestedLevel) : requestedLevel;
+        await this.startInternal(entry, { model, thinkingLevel });
+      } catch (error) {
+        this.patchEntry(entry, { status: "error", error: error instanceof Error ? error.message : "无法启动定时任务对话" });
+        throw error;
+      }
+      if (!entry.session || entry.snapshot.status === "error") throw new Error(entry.snapshot.error ?? "无法启动定时任务对话");
+      return entry;
+    });
+    let failure: string | null = null;
+    const unsubscribe = this.subscribe(event => { if (event.type === "error" && event.conversationId === entry.id) failure = event.message; });
+    try {
+      // The renderer is not sending this prompt, so publish it for any viewer already in this chat.
+      this.emit({ type: "user_message", conversationId: entry.id, text });
+      await this.prompt(entry.id, text);
+      if (this.disposed) throw new Error("应用退出导致任务中断");
+      if (failure) throw new Error(failure);
+      if (entry.stopRequested) throw new Error("任务执行已停止");
+    } finally { unsubscribe(); }
   }
 
   /**
@@ -499,7 +578,7 @@ export class AgentRuntime {
       try {
         await checkpoints.restore(selected);
         const selection = { model: entry.session.model, thinkingLevel: entry.session.thinkingLevel as ThinkingLevel };
-        this.detachEntry(entry);
+        await this.detachEntry(entry);
         if (point.leaf) manager.branch(point.leaf); else manager.resetLeaf();
         manager.appendCustomEntry("vela_rewind", { turnIndex });
         entry.plans = point.metadata.plans;
@@ -598,8 +677,10 @@ export class AgentRuntime {
       // Pi 队列没有单条删除接口,清空后按原顺序回放剩余指令;
       // 文本保留原始输入,技能命令和模板会重新展开。
       entry.session.clearQueue();
-      for (const item of entry.pendingInstructions) {
-        await this.queueInstruction(entry.session, item);
+      const remaining = [...entry.pendingInstructions];
+      for (const item of remaining) item.queued = false;
+      for (const item of remaining) {
+        await this.queueInstruction(entry, entry.session, item);
       }
     } finally {
       entry.rebuildingInstructions = false;
@@ -625,11 +706,12 @@ export class AgentRuntime {
       text: trimmed,
       images: images && images.length > 0 ? images : undefined,
       createdAt: Date.now(),
+      queued: false,
     };
     entry.pendingInstructions.push(instruction);
     this.syncPendingInstructions(entry);
     try {
-      await this.queueInstruction(session, instruction);
+      await this.queueInstruction(entry, session, instruction);
     } catch (error) {
       entry.pendingInstructions = entry.pendingInstructions.filter((item) => item.id !== instruction.id);
       this.syncPendingInstructions(entry);
@@ -637,15 +719,25 @@ export class AgentRuntime {
     }
   }
 
-  private queueInstruction(session: AgentSession, instruction: PendingInstruction): Promise<void> {
+  private async queueInstruction(entry: Conversation, session: AgentSession, instruction: PendingInstruction): Promise<void> {
     const images = instruction.images?.map((image) => ({
       type: "image" as const,
       data: image.data,
       mimeType: image.mimeType,
     }));
-    return instruction.mode === "steer"
-      ? session.steer(instruction.text, images)
-      : session.followUp(instruction.text, images);
+    const disposition = instruction.mode === "steer"
+      ? await session.steer(instruction.text, images)
+      : await session.followUp(instruction.text, images);
+    if (disposition === "handled") {
+      // An input extension consumed it; it never became a user message in Pi.
+      entry.pendingInstructions = entry.pendingInstructions.filter((item) => item.id !== instruction.id);
+    } else {
+      instruction.queued = true;
+    }
+    // queue_update may fire before the async input handler returns, including
+    // consumption of this or an earlier input. Account only after disposition.
+    this.reconcileInstructions(entry.id, session.getSteeringMessages(), session.getFollowUpMessages());
+    this.syncPendingInstructions(entry);
   }
 
   /**
@@ -661,7 +753,7 @@ export class AgentRuntime {
     if (!entry || entry.rebuildingInstructions) return;
     const delivered: PendingInstruction[] = [];
     for (const mode of ["steer", "queue"] as const) {
-      const pending = entry.pendingInstructions.filter((item) => item.mode === mode);
+      const pending = entry.pendingInstructions.filter((item) => item.mode === mode && item.queued);
       const queued = mode === "steer" ? steering.length : followUp.length;
       const count = pending.length - queued;
       if (count > 0) delivered.push(...pending.slice(0, count));
@@ -817,11 +909,12 @@ export class AgentRuntime {
     } catch {
       return "unknown";
     }
-    const entry = this.activeConversation();
+    const entry = input.conversationId ? this.conversations.get(input.conversationId) : this.activeConversation();
     const model = entry?.session?.model;
     if (!model || !directory.isAvailable(model)) return "unknown";
     const task = entry?.snapshot.goal?.objective ?? entry?.snapshot.title ?? null;
     const controller = new AbortController();
+    const riskSignal = input.signal ? AbortSignal.any([controller.signal, input.signal as AbortSignal]) : controller.signal;
     const timer = setTimeout(() => controller.abort(), sandboxRiskTimeoutMs);
     try {
       const response = await directory.runtime.completeSimple(
@@ -835,7 +928,7 @@ export class AgentRuntime {
         {
           maxTokens: sandboxRiskMaxTokens,
           temperature: 0,
-          signal: controller.signal,
+          signal: riskSignal,
           sessionId: entry.id,
           headers: openCodeSessionHeaders(model, entry.id),
         },
@@ -952,6 +1045,7 @@ export class AgentRuntime {
     const revision = this.skillsRevision;
     try {
       await session.reload();
+      this.applyActiveTools(entry);
     } catch (error) {
       if (process.env.VELA_DEBUG) console.error("[vela] 重新加载 Skill 失败:", error);
       return;
@@ -1073,7 +1167,7 @@ export class AgentRuntime {
 
   getTrace(conversationId: string) {
     if (!this.conversations.has(conversationId)) throw new Error("对话不存在或已结束");
-    return this.trace(conversationId).snapshot();
+    return this.redactMcpForConversation(conversationId, this.trace(conversationId).snapshot());
   }
 
   /** Trace bookkeeping must never block a summary; narrow test harnesses may omit the trace map. */
@@ -1084,7 +1178,7 @@ export class AgentRuntime {
 
   getTraceDetails(conversationId: string, nodeId: string) {
     if (!this.conversations.has(conversationId)) throw new Error("对话不存在或已结束");
-    return this.trace(conversationId).details(nodeId);
+    return this.redactMcpForConversation(conversationId, this.trace(conversationId).details(nodeId));
   }
 
   /** 恢复界面消息列表(应用重启后渲染层桶是空的,从会话文件重建)。 */
@@ -1093,7 +1187,7 @@ export class AgentRuntime {
     const session = entry?.session ?? null;
     if (!session || !entry) return [];
     const manager = session.sessionManager;
-    return transcriptFromProjection(manager.buildSessionProjection(), entry.plans, readTurnTimings(manager.getBranch()));
+    return this.decorateMcpTranscript(entry.id, session, transcriptFromProjection(manager.buildSessionProjection(), entry.plans, readTurnTimings(manager.getBranch())));
   }
 
   /** 使用指定总结模型或捕获对话当前模型；独立调用，不修改会话消息和模型选择。 */
@@ -1149,13 +1243,13 @@ export class AgentRuntime {
     const entry = this.conversations.get(conversationId);
     if (!entry) return [];
     const session = agentId === entry.id ? entry.session : entry.control?.getSession(agentId) ?? null;
-    if (session) return transcriptFromMessages(session.messages);
+    if (session) return this.decorateMcpTranscript(conversationId, session, transcriptFromMessages(session.messages));
     const stored = entry.storedAgents.find((agent) => agent.id === agentId);
     if (stored?.sessionFile && existsSync(stored.sessionFile)) {
       const manager = SessionManager.open(stored.sessionFile, this.childSessionDir(entry.id), entry.snapshot.cwd);
-      return transcriptFromProjection(manager.buildSessionProjection());
+      return this.decorateMcpTranscript(conversationId, null, transcriptFromProjection(manager.buildSessionProjection()));
     }
-    return stored ? legacyAgentTranscript(stored) : [];
+    return stored ? this.decorateMcpTranscript(conversationId, null, legacyAgentTranscript(stored)) : [];
   }
 
   getAgents(conversationId: string | null): AgentInfo[] {
@@ -1163,20 +1257,377 @@ export class AgentRuntime {
     return entry?.control?.list() ?? entry?.storedAgents.map(({ sessionFile: _file, ...agent }) => agent) ?? [];
   }
 
-  dispose(): void {
+  subscribeMcp(listener: (event: McpStatusEvent) => void): () => void {
+    this.mcpListeners.add(listener);
+    return () => this.mcpListeners.delete(listener);
+  }
+
+  async getMcpCatalog(input: McpCatalogInput): Promise<McpCatalog> {
+    await this.ready();
+    if (this.disposed) throw new Error("MCP runtime has closed");
+    const bridge = await this.mcpBridgeFor(input);
+    const catalog = bridge.catalog();
+    catalog.pendingApply = bridge.session ? this.mcpPending.has(bridge.session) : false;
+    return catalog;
+  }
+
+  saveMcpServer(input: McpServerInput): Promise<McpCatalog> {
+    return this.exclusive(async () => {
+      await this.mcpConfig.save(input);
+      await this.applyMcpChanges(input.cwd, true, false, input.scope === "global");
+      return this.getMcpCatalog(input);
+    });
+  }
+
+  removeMcpServer(input: McpServerTarget): Promise<McpCatalog> {
+    return this.exclusive(async () => {
+      await this.mcpConfig.remove(input);
+      await this.applyMcpChanges(input.cwd, true, true, input.scope === "global");
+      return this.getMcpCatalog(input);
+    });
+  }
+
+  setMcpEnabled(input: McpEnabledInput): Promise<McpCatalog> {
+    return this.exclusive(async () => {
+      await this.mcpConfig.setEnabled(input);
+      await this.applyMcpChanges(input.cwd, true, !input.enabled, input.scope === "global");
+      return this.getMcpCatalog(input);
+    });
+  }
+
+  setMcpProjectTrust(input: McpProjectTrustInput): Promise<McpCatalog> {
+    return this.exclusive(async () => {
+      await this.mcpConfig.setTrust(input);
+      await this.applyMcpChanges(input.cwd, true, !input.trusted);
+      return this.getMcpCatalog(input);
+    });
+  }
+
+  setMcpToolReadOnly(input: McpToolReadOnlyInput): Promise<McpCatalog> {
+    return this.exclusive(async () => {
+      const bridge = await this.mcpBridgeFor(input);
+      const tool = bridge.rawTool(input.server, input.tool);
+      if (!tool) throw new Error("MCP tool is unavailable; reconnect and review its definition");
+      await this.mcpConfig.setReadOnly(input, tool);
+      await this.applyMcpChanges(input.cwd, false, !input.readOnly);
+      return this.getMcpCatalog(input);
+    });
+  }
+
+  async reconnectMcpServer(input: McpServerTarget): Promise<McpCatalog> {
+    const bridge = await this.mcpBridgeFor(input);
+    this.validateMcpServerTarget(bridge, input);
+    try { await bridge.controller?.reconnect(input.name); }
+    catch { throw new Error("MCP reconnect failed. Check the server configuration and diagnostics."); }
+    return this.getMcpCatalog(input);
+  }
+
+  subscribePlugins(listener: (event: PluginStatusEvent) => void): () => void {
+    return this.pluginManager.subscribe(listener);
+  }
+
+  async getPlugins(input: McpCatalogInput): Promise<PluginCatalog> {
+    const catalog = await this.getMcpCatalog({ cwd: input.cwd, conversationId: null });
+    const pendingApply = [...this.mcpPending].some(session => this.mcpBridges.get(session)?.options.cwd === catalog.cwd);
+    return { cwd: catalog.cwd, plugins: this.pluginManager.snapshots(catalog), pendingApply };
+  }
+
+  async connectPlugin(input: PluginTarget): Promise<PluginCatalog> {
+    await this.ready();
+    await this.pluginManager.connect(input.id, input.cwd);
+    return this.getPlugins(input);
+  }
+
+  async disconnectPlugin(input: PluginTarget): Promise<PluginCatalog> {
+    await this.ready();
+    await this.pluginManager.disconnect(input.id, input.cwd);
+    return this.getPlugins(input);
+  }
+
+  private async activatePlugin(id: string, cwd: string, signal: AbortSignal): Promise<void> {
+    const check = () => { signal.throwIfAborted(); if (this.disposed) throw new Error("MCP runtime is closed"); };
+    check();
+    this.plugins.setEnabled(id, true);
+    await this.applyPluginConfiguration(cwd);
+    check();
+    // A separate management session makes Connect available even while a chat is streaming.
+    const bridge = await this.mcpBridgeFor({ cwd, conversationId: null });
+    check();
+    const server = this.plugins.serverName(id);
+    if (!bridge.controller) throw new Error("MCP session is starting");
+    try { await bridge.controller.reconnect(server); }
+    catch {
+      if (bridge.controller.getSnapshot().find(item => item.name === server)?.state !== "needs-auth") throw new Error("MCP connection failed");
+    }
+    check();
+    if (this.plugins.get(id).authType === "oauth2" && bridge.controller.getSnapshot().find(item => item.name === server)?.state !== "connected") {
+      await this.oauthMcp.login(bridge.controller, server, this.plugins.get(id).mcpUrl, signal);
+    }
+    check();
+    if (bridge.controller.getSnapshot().find(item => item.name === server)?.state !== "connected") throw new Error("MCP connection failed");
+    await Promise.all([...this.mcpBridges.values()].filter(other => other !== bridge).map(async other => {
+      if (other.session?.isStreaming) return;
+      await other.controller?.reconnect(server).catch(() => undefined);
+    }));
+    this.emitMcp(bridge);
+  }
+
+  private async deactivatePlugin(id: string, cwd: string): Promise<void> {
+    const plugin = this.plugins.get(id);
+    const server = this.plugins.serverName(id);
+    this.oauthMcp.cancel(server);
+    for (const bridge of this.mcpBridges.values()) bridge.controller?.cancelLogin(server);
+    this.plugins.setEnabled(id, false);
+    // Disable live policy before closing transports, then await refreshes before deleting tokens.
+    await this.applyPluginConfiguration(cwd);
+    await Promise.all([...this.mcpBridges.values()].map(bridge => bridge.controller?.suspend(server)));
+    this.oauthMcp.credentials.remove(server, plugin.mcpUrl);
+  }
+
+  private async applyPluginConfiguration(cwd: string): Promise<void> {
+    // Record our own write before yielding: the external-change poll must not reload and
+    // cancel an OAuth browser flow merely because we enabled the plugin ourselves.
+    const cwds = new Set([cwd, ...[...this.mcpBridges.values()].map(bridge => bridge.options.cwd)]);
+    const changes = [...cwds].map(path => this.mcpConfig.checkChanges(path));
+    await this.applyMcpChanges(cwd, true, changes.some(change => change.policyChanged), true);
+  }
+
+  async loginMcpServer(input: McpServerTarget): Promise<McpCatalog> {
+    const bridge = await this.mcpBridgeFor(input);
+    this.validateMcpServerTarget(bridge, input);
+    if (!bridge.controller) throw new Error("MCP session is starting");
+    const config = this.mcpConfig.loadConfigSync(input.cwd).servers.find(item => item.name === input.name)?.config;
+    if (!config || !("url" in config)) throw new Error("MCP server does not use OAuth");
+    try { await this.oauthMcp.login(bridge.controller, input.name, config.url); }
+    catch { throw new Error("MCP sign-in was cancelled or failed. Retry from the MCP settings."); }
+    for (const [session, other] of this.mcpBridges) {
+      if (other.options.cwd === bridge.options.cwd && session !== bridge.session && !session.isStreaming) {
+        void other.controller?.reconnect(input.name).catch(() => undefined);
+      }
+    }
+    return this.getMcpCatalog(input);
+  }
+
+  async cancelMcpLogin(input: McpServerTarget): Promise<McpCatalog> {
+    this.oauthMcp.cancel(input.name);
+    const bridge = await this.mcpBridgeFor(input);
+    bridge.controller?.cancelLogin(input.name);
+    return this.getMcpCatalog(input);
+  }
+
+  async logoutMcpServer(input: McpServerTarget): Promise<McpCatalog> {
+    const bridge = await this.mcpBridgeFor(input);
+    this.validateMcpServerTarget(bridge, input);
+    await bridge.controller?.logout(input.name);
+    // All sessions sharing this server/account must stop using its old tokens immediately.
+    await Promise.all([...this.mcpBridges.values()].map(other => other.controller?.suspend(input.name)));
+    await bridge.controller?.reconnect(input.name).catch(() => undefined);
+    return this.getMcpCatalog(input);
+  }
+
+  private validateMcpServerTarget(bridge: McpSessionBridge, input: McpServerTarget): void {
+    const server = bridge.catalog().servers.find(item => item.name === input.name && item.scope === input.scope && item.effective && item.enabled && item.trusted);
+    if (!server) throw new Error("MCP server is disabled, untrusted, or overridden");
+  }
+
+  private async mcpBridgeFor(input: McpCatalogInput): Promise<McpSessionBridge> {
+    await this.ready();
+    const id = input.conversationId === undefined ? (this.activeConversation()?.snapshot.cwd === input.cwd ? this.activeId : null) : input.conversationId;
+    if (id) {
+      const entry = this.conversations.get(id);
+      if (!entry || entry.snapshot.cwd !== input.cwd) throw new Error("MCP conversation does not belong to this workspace");
+      if (!entry.session) await this.startInternal(entry);
+      const bridge = entry.session ? this.mcpBridges.get(entry.session) : undefined;
+      if (bridge) return bridge;
+      throw new Error("MCP conversation is unavailable");
+    }
+    const existing = this.mcpManagement.get(input.cwd);
+    if (existing) return this.mcpBridges.get(existing)!;
+    const starting = this.mcpManagementStarting.get(input.cwd);
+    if (starting) return starting;
+    const creating = this.createMcpManagement(input.cwd);
+    this.mcpManagementStarting.set(input.cwd, creating);
+    try { return await creating; } finally { this.mcpManagementStarting.delete(input.cwd); }
+  }
+
+  private async createMcpManagement(cwd: string): Promise<McpSessionBridge> {
+    if (this.disposed) throw new Error("MCP runtime is closed");
+    // Management sessions contain no conversation history and never send a model request.
+    const bridge = this.createMcpBridge(cwd, null, () => false);
+    const settingsManager = SettingsManager.inMemory({ defaultTools: [] });
+    const resourceLoader = new DefaultResourceLoader({ cwd, agentDir: this.options.agentDir, settingsManager,
+      noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true,
+      extensionFactories: bridge.factories() });
+    await resourceLoader.reload();
+    const { session } = await createAgentSession({ cwd, agentDir: this.options.agentDir, settingsManager,
+      resourceLoader, modelRuntime: (await this.readyDirectory()).runtime, sessionManager: SessionManager.inMemory(cwd) });
+    clearSessionModel(session);
+    if (this.disposed) { bridge.attach(session); await bridge.close(); session.dispose(); throw new Error("MCP runtime is closed"); }
+    bridge.attach(session);
+    this.mcpBridges.set(session, bridge);
+    this.mcpManagement.set(cwd, session);
+    try { await session.bindExtensions({}); } catch (error) { await this.closeSession(session); throw error; }
+    return bridge;
+  }
+
+  private createMcpBridge(cwd: string, conversationId: string | null, readOnly: () => boolean, nativeTools?: () => string[]): McpSessionBridge {
+    const changes = this.mcpConfig.checkChanges(cwd);
+    if (changes.changed && this.mcpBridges.size) void this.applyMcpChanges(cwd, changes.configChanged, changes.policyChanged).catch(() => undefined);
+    let bridge: McpSessionBridge;
+    bridge = new McpSessionBridge({ cwd, conversationId, agentDir: this.options.agentDir, config: this.mcpConfig, readOnly,
+      nativeTools: nativeTools ?? (() => {
+        const entry = conversationId ? this.conversations.get(conversationId) : undefined;
+        if (!entry) return [];
+        return [...this.nativeToolNames(entry.snapshot.mode, entry.snapshot.executionPlan !== null), ...(this.options.browserRepl && entry.snapshot.mode !== "plan" ? browserToolNames : [])];
+      }),
+      permission: this.options.mcpPermission ? { request: input => this.options.mcpPermission!.request({ ...input,
+        conversationId: conversationId ?? undefined, sandboxMode: conversationId ? this.conversations.get(conversationId)?.scheduledSandboxMode : undefined }) } : undefined, openUrl: this.options.mcpOpenUrl, oauth: this.oauthMcp,
+      onChange: () => queueMicrotask(() => {
+        if (this.disposed || !bridge.session || !this.mcpBridges.has(bridge.session)) return;
+        const entry = conversationId ? this.conversations.get(conversationId) : undefined;
+        if (entry?.session === bridge.session) {
+          const native = this.nativeToolNames(entry.snapshot.mode, entry.snapshot.executionPlan !== null);
+          if (this.options.browserRepl && entry.snapshot.mode !== "plan") native.push(...browserToolNames);
+          const tools = this.mcpActiveTools(bridge.session, native);
+          bridge.session.setActiveToolsByName(tools);
+          if (JSON.stringify(tools) !== JSON.stringify(entry.snapshot.tools)) this.patchEntry(entry, { tools });
+        } else {
+          bridge.session.setActiveToolsByName(this.mcpActiveTools(bridge.session, bridge.options.nativeTools()));
+        }
+        this.emitMcp(bridge);
+      }),
+    });
+    return bridge;
+  }
+
+  private mcpActiveTools(session: AgentSession, native: string[]): string[] {
+    const registered = session.getAllTools();
+    const active = new Set([...session.getActiveToolNames(), ...getCurrentTools(session.sessionManager.buildSessionContext().messages).map(tool => tool.name)]);
+    const extra = registered.filter(tool => isMcpTool(tool.name) && tool.name !== "tool_search" && tool.exposure !== "hidden"
+      && (tool.exposure === "direct" || active.has(tool.name))).map(tool => tool.name);
+    const servers = this.mcpBridges.get(session)?.controller?.getSnapshot() ?? [];
+    const discovery = servers.some(server => server.state !== "disabled" && !server.suspended && server.exposure !== "hidden"
+      && (server.exposure === "deferred" || server.tools.some(tool => tool.exposure === "deferred")));
+    return [...new Set([...native, ...(discovery ? ["tool_search"] : []), ...extra])];
+  }
+
+  private emitMcp(bridge: McpSessionBridge): void {
+    if (this.disposed) return;
+    try {
+      const catalog = bridge.catalog();
+      catalog.pendingApply = bridge.session ? this.mcpPending.has(bridge.session) : false;
+      for (const listener of this.mcpListeners) listener({ cwd: catalog.cwd, conversationId: catalog.conversationId, catalog });
+    } catch { /* A removed workspace must not interrupt an unrelated conversation. */ }
+  }
+
+  private async applyMcpChanges(cwd: string, configChanged: boolean, revoke: boolean, all = false): Promise<void> {
+    const affected = [...this.mcpBridges.entries()].filter(([, bridge]) => all || bridge.options.cwd === cwd);
+    for (const [session, bridge] of affected) {
+      await bridge.revokeChanged(revoke);
+      if (configChanged || revoke) {
+        this.mcpPending.add(session);
+        this.mcpRevisions.set(session, (this.mcpRevisions.get(session) ?? 0) + 1);
+      }
+      bridge.refresh();
+      this.emitMcp(bridge);
+    }
+    await this.refreshPendingMcp();
+  }
+
+  private async refreshPendingMcp(): Promise<void> {
+    await Promise.all([...this.mcpPending].map(async session => {
+      const bridge = this.mcpBridges.get(session);
+      if (!bridge || this.disposed || session.isStreaming || (bridge.options.conversationId && this.conversations.get(bridge.options.conversationId)?.driving)) return;
+      let loading = this.mcpReloading.get(session);
+      if (!loading) {
+        const revision = this.mcpRevisions.get(session);
+        loading = (async () => {
+          try {
+            await session.reload();
+            // Management binds no UI/actions; Pi therefore does not emit session_start on reload.
+            if (this.mcpManagement.get(bridge.options.cwd) === session) await session.bindExtensions({});
+            if (revision === this.mcpRevisions.get(session)) this.mcpPending.delete(session);
+            const entry = bridge.options.conversationId ? this.conversations.get(bridge.options.conversationId) : undefined;
+            if (entry?.session === session) this.applyActiveTools(entry);
+            else session.setActiveToolsByName(this.mcpActiveTools(session, bridge.options.nativeTools()));
+            this.emitMcp(bridge);
+          } catch { /* Preserve pending state so settings and the next idle poll can retry. */ }
+          finally { this.mcpReloading.delete(session); }
+        })();
+        this.mcpReloading.set(session, loading);
+      }
+      await loading;
+    }));
+  }
+
+  private async pollMcpChanges(): Promise<void> {
+    if (this.mcpPolling || this.disposed) return;
+    this.mcpPolling = true;
+    try {
+      const cwds = new Set([...this.mcpBridges.values()].map(bridge => bridge.options.cwd));
+      for (const cwd of cwds) {
+        try {
+          const change = this.mcpConfig.checkChanges(cwd);
+          if (change.changed) await this.applyMcpChanges(cwd, change.configChanged, change.policyChanged);
+        } catch { /* Workspace might have been removed. The per-call guard fails closed. */ }
+      }
+      await this.refreshPendingMcp();
+    } finally { this.mcpPolling = false; }
+  }
+
+  private closeSession(session: AgentSession): Promise<void> {
+    const existing = this.sessionClosings.get(session);
+    if (existing) return existing;
+    const bridge = this.mcpBridges.get(session);
+    session.agent.abort();
+    const closing = (async () => {
+      try {
+        await this.mcpReloading.get(session);
+        await bridge?.close();
+        await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+      } finally {
+        session.dispose();
+        this.mcpBridges.delete(session);
+        this.mcpPending.delete(session);
+        this.mcpRevisions.delete(session);
+        for (const [cwd, management] of this.mcpManagement) if (management === session) this.mcpManagement.delete(cwd);
+      }
+    })();
+    this.sessionClosings.set(session, closing);
+    void closing.finally(() => this.sessionClosings.delete(session)).catch(() => undefined);
+    return closing;
+  }
+
+  private mcpActivity(conversationId: string, name: string, activity: ToolActivity): ToolActivity {
+    const session = this.conversations.get(conversationId)?.session;
+    return session ? this.mcpBridges.get(session)?.decorateActivity(name, activity) ?? activity : activity;
+  }
+
+  dispose(): Promise<void> {
+    this.disposed = true;
+    if (this.mcpPoll) clearInterval(this.mcpPoll);
+    this.mcpPoll = null;
+    const closing: Promise<void>[] = [...this.sessionStarting.values()].map(starting => starting.then(() => undefined, () => undefined));
+    closing.push(this.pluginManager.dispose(), this.oauthMcp.dispose());
     void Promise.resolve().then(() => this.options.browserRepl?.dispose?.()).catch(() => {});
     this.thinkingSummaries.dispose();
     this.textAssist.dispose();
     for (const trace of this.traces.values()) trace.dispose();
     this.directory?.cancelLogin();
     this.questions.cancelAll();
-    for (const entry of this.conversations.values()) this.detachEntry(entry);
+    for (const entry of this.conversations.values()) closing.push(this.detachEntry(entry));
+    for (const session of this.mcpManagement.values()) closing.push(this.closeSession(session));
+    for (const pending of this.mcpManagementStarting.values()) closing.push(pending.then(bridge => bridge.session ? this.closeSession(bridge.session) : undefined, () => undefined));
+    for (const session of this.mcpBridges.keys()) closing.push(this.closeSession(session));
+    this.mcpManagement.clear();
+    this.mcpListeners.clear();
     this.conversations.clear();
     this.toolArgs.clear();
     this.toolGoalContexts.clear();
     this.agentToolArgs.clear();
     this.activeId = null;
     this.store.flushSync();
+    return Promise.allSettled(closing).then(() => undefined);
   }
 
   private async initialize(): Promise<void> {
@@ -1204,7 +1655,7 @@ export class AgentRuntime {
           planRevisions: stored.plans.map((plan) => ({ ...plan })),
           executionPlan: cloneExecutionPlan(activeExecution),
           goal: stored.goal,
-          tools: defaultToolPolicy.availableTools(stored.mode, activeExecution !== null),
+          tools: this.nativeToolNames(stored.mode, activeExecution !== null),
         },
         titleGenerationStarted: stored.title !== "新对话",
         titleManuallySet: stored.titleManuallySet === true,
@@ -1294,6 +1745,7 @@ export class AgentRuntime {
   private addEntry(
     cwd: string,
     options: {
+      activate?: boolean;
       sessionManager?: SessionManager;
       title?: string;
       mode?: InteractionMode;
@@ -1338,16 +1790,25 @@ export class AgentRuntime {
       agentMutationsSeen: new Set(),
     };
     this.conversations.set(entry.id, entry);
-    this.activeId = entry.id;
+    if (options.activate !== false) this.activeId = entry.id;
     this.persistEntry(entry);
     // 新对话是用户明确创建的状态,不等防抖窗口,立刻同步落盘。
     this.store.flushSync();
-    this.notifyActiveCwd(cwd);
+    if (options.activate !== false) this.notifyActiveCwd(cwd);
     this.emitStatus(entry);
     return entry;
   }
 
   private async startInternal(entry: Conversation, selection?: { model: Model<Api> | undefined; thinkingLevel: ThinkingLevel }): Promise<SessionSnapshot> {
+    if (this.disposed) throw new Error("Vela runtime has closed");
+    const existing = this.sessionStarting.get(entry.id);
+    if (existing) return existing;
+    const starting = this.startInternalOnce(entry, selection);
+    this.sessionStarting.set(entry.id, starting);
+    try { return await starting; } finally { this.sessionStarting.delete(entry.id); }
+  }
+
+  private async startInternalOnce(entry: Conversation, selection?: { model: Model<Api> | undefined; thinkingLevel: ThinkingLevel }): Promise<SessionSnapshot> {
     this.patchEntry(entry, { status: "starting", error: null });
     try {
       const directory = await this.readyDirectory();
@@ -1358,9 +1819,10 @@ export class AgentRuntime {
         ?? (entry.sessionFile
           ? SessionManager.open(entry.sessionFile, this.sessionDir(), cwd)
           : createPersistedSession(cwd, this.sessionDir()));
-      const settingsManager = SettingsManager.inMemory();
+      const settingsManager = SettingsManager.inMemory({ defaultTools: [...defaultToolNames, ...modeToolNames, ...agentToolNames, ...(this.options.scheduledTasks ? scheduledTaskToolNames : []), ...(this.options.browserRepl ? browserToolNames : [])] });
       const instructions = entry.instructions.trim();
       await this.loadDisabledSkills();
+      const mcp = this.createMcpBridge(cwd, entry.id, () => entry.snapshot.mode === "plan");
       const resourceLoader = new DefaultResourceLoader({
         cwd,
         agentDir: this.options.agentDir,
@@ -1372,9 +1834,16 @@ export class AgentRuntime {
           factory: createModeExtension(() => ({
             mode: entry.snapshot.mode,
             hasExecutionPlan: entry.snapshot.executionPlan !== null,
-          })),
-        }],
-        appendSystemPromptOverride: (base) => [...base, ...(instructions ? [instructions] : []), ...(this.options.browserRepl ? [browserUseInstructions] : [])],
+          }), {
+            availableTools: (mode, plan) => this.nativeToolNames(mode, plan),
+            authorizeCall: call => isMcpTool(call.toolName) || (this.options.scheduledTasks && call.toolName === "list_scheduled_tasks") ? { allowed: true } : defaultToolPolicy.authorizeCall(call),
+          }),
+        }, ...(this.options.scheduledTasks ? [{ name: "vela-scheduled-tasks-clock", hidden: true,
+          factory: ((pi) => { pi.on("before_agent_start", event => {
+            event.systemPromptOptions.appendSystemPrompt += `\n\n任务时间上下文：${new Date().toISOString()}；本机时区：${Intl.DateTimeFormat().resolvedOptions().timeZone}`;
+          }); }) as ExtensionFactory,
+        }] : []), ...mcp.factories()],
+        appendSystemPromptOverride: (base) => [...base, ...(instructions ? [instructions] : []), ...(this.options.scheduledTasks ? [scheduledTaskInstructions] : []), ...(this.options.browserRepl ? [browserUseInstructions] : [])],
       });
       await resourceLoader.reload();
       const control = new AgentControl({
@@ -1382,6 +1851,8 @@ export class AgentRuntime {
         restoredAgents: entry.storedAgents,
         host: {
           createChildSession: (input) => this.createChildSession(entry, input),
+          disposeChildSession: (session) => this.closeSession(session),
+          toolMutates: (session, name) => this.mcpBridges.get(session)?.isMutation(name) ?? false,
           deliverToRoot: (input) => {
             void this.deliverAgentMessage(entry, input.message);
           },
@@ -1400,11 +1871,11 @@ export class AgentRuntime {
           modelRuntime: directory.runtime,
           model: chosen,
           thinkingLevel,
-          // tools 是 Pi 的注册表白名单(内置与自定义都过滤),模式和 agent 树工具必须并入才能被激活。
-          tools: [...defaultToolNames, ...modeToolNames, ...agentToolNames, ...(this.options.browserRepl ? browserToolNames : [])],
+          // MCP registers tools after session_start; defaultTools selects the loadout without restricting the registry.
           customTools: [
-            ...(this.options.toolFactory?.(cwd) ?? []),
+            ...(this.options.toolFactory?.(cwd, { conversationId: entry.id, sandboxMode: entry.scheduledSandboxMode }) ?? []),
             ...this.browserTools(entry, entry.id),
+            ...(this.options.scheduledTasks ? createScheduledTaskTools(this.options.scheduledTasks, cwd, () => entry.snapshot.mode !== "plan") : []),
             ...createModeTools({
               updateExecutionPlan: (items) => this.updateExecutionPlan(entry, items),
               updateGoal: (status, note) => this.updateGoal(entry, status, note),
@@ -1416,13 +1887,24 @@ export class AgentRuntime {
         });
         session = created.session;
       } catch (error) {
-        control.dispose();
+        await control.dispose();
         throw error;
+      }
+      if (this.disposed || !this.conversations.has(entry.id)) {
+        mcp.attach(session);
+        await mcp.close();
+        session.dispose();
+        await control.dispose();
+        throw new Error("Vela runtime has closed");
       }
       // 没有显式选择时，Pi 会挑第一个带本机环境变量的模型。这里清掉，只保留用户在 Vela 里选的模型。
       if (!chosen) clearSessionModel(session);
+      mcp.attach(session);
+      this.mcpBridges.set(session, mcp);
       this.attachEntry(entry, session, sessionManager);
       entry.control = control;
+      await session.bindExtensions({ onError: event => { if (process.env.VELA_DEBUG) console.error("[vela] extension", event.event); } });
+      if (this.disposed) { await this.closeSession(session); await control.dispose(); throw new Error("Vela runtime has closed"); }
       control.registerRoot(session);
       entry.skillsRevision = this.skillsRevision;
       this.syncFromSession(entry);
@@ -1436,7 +1918,7 @@ export class AgentRuntime {
       if (process.env.VELA_DEBUG) {
         console.error("[vela] 会话启动失败:", error);
       }
-      this.detachEntry(entry);
+      await this.detachEntry(entry);
       this.patchEntry(entry, {
         status: "error",
         id: null,
@@ -1518,13 +2000,14 @@ export class AgentRuntime {
     });
   }
 
-  private detachEntry(entry: Conversation): void {
+  private async detachEntry(entry: Conversation): Promise<void> {
     entry.unsubscribe?.();
     entry.unsubscribe = null;
-    entry.control?.dispose();
+    const control = entry.control;
+    const session = entry.session;
     entry.control = null;
-    entry.session?.dispose();
     entry.session = null;
+    await Promise.all([control?.dispose(), session ? this.closeSession(session) : undefined]);
   }
 
   private handlePiEvent(conversationId: string, event: AgentSessionEvent): void {
@@ -1591,7 +2074,7 @@ export class AgentRuntime {
         goalBeforeTool && goalBeforeTool.validation?.workRevision === goalBeforeTool.workRevision,
       );
       if (
-        entry && goalBeforeTool && goalBeforeTool.status !== "complete" && isPotentialGoalMutation(event.toolName, event.args) &&
+        entry && goalBeforeTool && goalBeforeTool.status !== "complete" && (isPotentialGoalMutation(event.toolName, event.args) || (entry.session && this.mcpBridges.get(entry.session)?.isMutation(event.toolName))) &&
         (event.toolName !== "bash" || hasFreshValidation)
       ) {
         this.advanceGoalWorkRevision(entry);
@@ -1606,7 +2089,7 @@ export class AgentRuntime {
         conversationId,
         toolCallId: event.toolCallId,
         toolName: event.toolName,
-        activity: activityFromCall(event.toolName, event.args),
+        activity: this.mcpActivity(conversationId, event.toolName, activityFromCall(event.toolName, event.args)),
       });
       return;
     }
@@ -1614,7 +2097,7 @@ export class AgentRuntime {
     if (event.type === "tool_execution_update") {
       const activity = activityFromOutput(event.partialResult, event.toolName);
       if (!activity) return;
-      this.emit({ type: "tool_output", conversationId, toolCallId: event.toolCallId, activity });
+      this.emit({ type: "tool_output", conversationId, toolCallId: event.toolCallId, activity: this.mcpActivity(conversationId, event.toolName, activity) });
       return;
     }
 
@@ -1623,7 +2106,7 @@ export class AgentRuntime {
       this.toolArgs.delete(event.toolCallId);
       const goalContext = this.toolGoalContexts.get(event.toolCallId);
       this.toolGoalContexts.delete(event.toolCallId);
-      const activity = activityFromExecution(event.toolName, args, event.result, toolResultIsError(event.toolName, event.result, event.isError));
+      const activity = this.mcpActivity(conversationId, event.toolName, activityFromExecution(event.toolName, args, event.result, toolResultIsError(event.toolName, event.result, event.isError)));
       const entry = this.conversations.get(conversationId);
       const goal = entry?.snapshot.goal;
       if (entry && goalContext && event.toolName === "bash" && goal?.id === goalContext.goalId) {
@@ -1658,6 +2141,11 @@ export class AgentRuntime {
    */
   private handleAgentPiEvent(conversationId: string, agentId: string, event: AgentSessionEvent): void {
     const emit = (streamEvent: AgentRuntimeStreamEvent): void => {
+      const child = this.conversations.get(conversationId)?.control?.getSession(agentId);
+      if ((streamEvent.type === "tool_start" || streamEvent.type === "tool_output" || streamEvent.type === "tool_end") && child) {
+        const name = "toolName" in streamEvent ? streamEvent.toolName : event.type === "tool_execution_update" ? event.toolName : "";
+        streamEvent = { ...streamEvent, activity: this.mcpBridges.get(child)?.decorateActivity(name, streamEvent.activity) ?? streamEvent.activity };
+      }
       this.emit({ type: "agent_event", conversationId, agentId, event: streamEvent });
     };
     if (event.type === "message_start" && event.message.role === "assistant") {
@@ -1832,7 +2320,26 @@ export class AgentRuntime {
     return directory.selection.thinkingLevel;
   }
 
+  private redactMcpForConversation<T>(conversationId: string, value: T): T {
+    const entry = this.conversations.get(conversationId);
+    const bridge = entry?.session ? this.mcpBridges.get(entry.session) : undefined;
+    if (bridge) return bridge.redact(value);
+    if (!entry) return value;
+    try {
+      const secrets = [...this.mcpConfig.configuredSecrets(entry.snapshot.cwd), ...mcpConfiguredSecrets(this.mcpConfig.loadConfigSync(entry.snapshot.cwd).servers.map(item => item.config))];
+      return redactMcpDisplay(value, secrets) as T;
+    } catch { return value; }
+  }
+
+  private decorateMcpTranscript(conversationId: string, session: AgentSession | null, messages: TranscriptMessage[]): TranscriptMessage[] {
+    const bridge = session ? this.mcpBridges.get(session) : undefined;
+    return messages.map(message => ({ ...message, tools: message.tools.map(tool => ({ ...tool,
+      activity: bridge?.decorateActivity(tool.name, tool.activity) ?? (isMcpTool(tool.name) ? this.redactMcpForConversation(conversationId, tool.activity) : tool.activity),
+    })) }));
+  }
+
   private emit(event: RuntimeEvent): void {
+    if (event.type === "trace") event = this.redactMcpForConversation(event.conversationId, event);
     for (const listener of this.listeners) listener(event);
   }
 
@@ -1935,6 +2442,7 @@ export class AgentRuntime {
         catch (error) { this.failPrompt(entry, error instanceof Error ? error.message : "无法保存文件检查点"); }
       }
       entry.driving = false;
+      await this.refreshPendingMcp();
       entry.control?.setRootStatus(entry.stopRequested ? "aborted" : "idle");
       if (entry.snapshot.status === "streaming") {
         this.patchEntry(entry, { status: "ready", updatedAt: Date.now() });
@@ -2046,8 +2554,10 @@ export class AgentRuntime {
       throw new Error("先选择一个已登录或已配置密钥的模型");
     }
     const cwd = entry.snapshot.cwd;
-    const settingsManager = SettingsManager.inMemory();
+    const childNativeTools = () => [...agentToolNamesFor(input.kind), ...(this.options.browserRepl && input.kind === "general" ? browserToolNames : [])];
+    const settingsManager = SettingsManager.inMemory({ defaultTools: childNativeTools() });
     const instructions = entry.instructions.trim();
+    const mcp = this.createMcpBridge(cwd, entry.id, () => input.kind === "explore" || entry.snapshot.mode === "plan", childNativeTools);
     const resourceLoader = new DefaultResourceLoader({
       cwd,
       agentDir: this.options.agentDir,
@@ -2056,9 +2566,10 @@ export class AgentRuntime {
       noPromptTemplates: true,
       noThemes: true,
       noExtensions: true,
-      extensionFactories: input.kind === "explore"
-        ? [{ name: "vela-explore", hidden: true, factory: createExploreGuardExtension() }]
-        : [],
+      extensionFactories: [
+        ...(input.kind === "explore" ? [{ name: "vela-explore", hidden: true, factory: createExploreGuardExtension() }] : []),
+        ...mcp.factories(),
+      ],
       appendSystemPromptOverride: (base) => [
         ...base,
         ...(instructions ? [instructions] : []),
@@ -2078,7 +2589,7 @@ export class AgentRuntime {
         sessionManager.appendMessage(message as Parameters<SessionManager["appendMessage"]>[0]);
       }
     }
-    const sandboxTools = this.options.toolFactory?.(cwd) ?? [];
+    const sandboxTools = this.options.toolFactory?.(cwd, { conversationId: entry.id, sandboxMode: entry.scheduledSandboxMode }) ?? [];
     const childSandboxTools = input.kind === "explore"
       ? sandboxTools.filter((tool) => tool.name === "bash" || tool.name === "read")
       : sandboxTools;
@@ -2091,9 +2602,15 @@ export class AgentRuntime {
       sessionManager,
       settingsManager,
       resourceLoader,
-      tools: [...agentToolNamesFor(input.kind), ...(this.options.browserRepl && input.kind === "general" ? browserToolNames : [])],
+
       customTools: [...childSandboxTools, ...input.customTools, ...(input.kind === "general" ? this.browserTools(entry, input.agentId, input.kind) : [])],
     });
+    mcp.attach(session);
+    if (this.disposed) { await mcp.close(); session.dispose(); throw new Error("Vela runtime has closed"); }
+    this.mcpBridges.set(session, mcp);
+    try { await session.bindExtensions({}); }
+    catch (error) { await this.closeSession(session); throw error; }
+    session.setActiveToolsByName(this.mcpActiveTools(session, childNativeTools()));
     session.setSessionName(input.path);
     return session;
   }
@@ -2152,6 +2669,7 @@ export class AgentRuntime {
       try { await this.finishLatestCheckpoint(entry); }
       catch (error) { this.failPrompt(entry, error instanceof Error ? error.message : "无法保存文件检查点"); }
       entry.driving = false;
+      await this.refreshPendingMcp();
       entry.control?.setRootStatus(entry.stopRequested ? "aborted" : "idle");
       if (entry.snapshot.status === "streaming") {
         this.patchEntry(entry, { status: "ready", updatedAt: Date.now() });
@@ -2174,18 +2692,32 @@ export class AgentRuntime {
 
   private browserTools(entry: Conversation, agentId: string, kind?: SubagentKind): ToolDefinition[] {
     if (kind === "explore" || !this.options.browserRepl) return [];
-    return createBrowserTools({ service: this.options.browserRepl, permission: this.options.browserReplPermission,
+    return createBrowserTools({ service: this.options.browserRepl, permission: this.options.browserReplPermission ? { request: input => this.options.browserReplPermission!.request({ ...input, conversationId: entry.id, sandboxMode: entry.scheduledSandboxMode }) } : undefined,
       conversationId: entry.id, agentId, cwd: entry.snapshot.cwd,
       turnId: () => `${entry.id}:${entry.activeTurn?.startedAt ?? entry.snapshot.turnStartedAt ?? "idle"}`,
       allowed: () => entry.snapshot.mode !== "plan",
     });
   }
 
+  private nativeToolNames(mode: InteractionMode, plan: boolean): string[] {
+    return [...defaultToolPolicy.availableTools(mode, plan), ...(this.options.scheduledTasks ? (mode === "plan" ? ["list_scheduled_tasks"] : scheduledTaskToolNames) : [])];
+  }
+
   private applyActiveTools(entry: Conversation): void {
-    const tools = defaultToolPolicy.availableTools(entry.snapshot.mode, entry.snapshot.executionPlan !== null);
+    const tools = this.nativeToolNames(entry.snapshot.mode, entry.snapshot.executionPlan !== null);
     if (this.options.browserRepl && entry.snapshot.mode !== "plan") tools.push(...browserToolNames);
-    entry.session?.setActiveToolsByName(tools);
-    this.patchEntry(entry, { tools });
+    const session = entry.session;
+    const bridge = session ? this.mcpBridges.get(session) : undefined;
+    bridge?.refresh();
+    const active = session && bridge ? this.mcpActiveTools(session, tools) : tools;
+    session?.setActiveToolsByName(active);
+    this.patchEntry(entry, { tools: active });
+    for (const [child, other] of this.mcpBridges) {
+      if (other !== bridge && other.options.conversationId === entry.id) {
+        other.refresh();
+        child.setActiveToolsByName(this.mcpActiveTools(child, other.options.nativeTools()));
+      }
+    }
   }
 
   /** conversation 上的 plan 字段变化后，把只读快照同步给界面并持久化。 */

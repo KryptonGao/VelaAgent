@@ -1,11 +1,12 @@
 import type { AskUserQuestionRequest, ExecutionItemStatus, ToolActivity, ToolPlanItem, ToolTrace } from "@vela/shared";
 import { isAgentToolName } from "@vela/shared";
-import { memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type TransitionEvent } from "react";
+import { memo, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type TransitionEvent } from "react";
 import { QuestionContext } from "./QuestionContext";
 import { LazyMount } from "./LazyMount";
 import { ContentSwap } from "./BatchMotion";
 import { ActivityIndicator } from "./ActivityIndicator";
 import { Markdown } from "./Markdown";
+import { McpToolDetails } from "./McpToolDetails";
 import { ScrollFade } from "./ScrollFade";
 import {
   AgentStatusMark,
@@ -20,7 +21,7 @@ import type { ThemedToken } from "./preview/highlighter";
 import { QuestionCard } from "./QuestionCard";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { tokenStyle, useDiffHighlight, type HighlightedDiff } from "./diff-highlight";
-import { ArrowRightIcon, CheckIcon, CircleIcon, ExternalIcon, EyeIcon, FilePlusIcon, PencilIcon, StackIcon, SubagentIcon, TerminalIcon } from "./icons";
+import { ArrowRightIcon, CheckIcon, CircleIcon, ExternalIcon, EyeIcon, FilePlusIcon, McpIcon, PencilIcon, StackIcon, SubagentIcon, TerminalIcon, ToolIcon } from "./icons";
 import {
   compactSummaryParts,
   diffStat,
@@ -122,6 +123,7 @@ interface ToolCardProps {
 /** 入口分发:提问和子代理各自有卡片,其余走通用折叠卡片。 */
 export const ToolCard = memo(function ToolCard(props: ToolCardProps) {
   useContext(QuestionContext);
+  if (props.tool.activity?.mcp) return <GenericToolCard {...props} />;
   if (props.tool.name === "ask_user_question") {
     return (
       <QuestionCard
@@ -363,36 +365,16 @@ function taskReport(body: string | undefined): string {
 
 function GenericToolCard({ tool, compact = false }: ToolCardProps) {
   const [open, setOpen] = useToolExpanded(foldRowId(tool.id), compact);
-  const [full, setFull] = useState(false);
-  const [overflows, setOverflows] = useState(false);
-  const sheetRef = useRef<HTMLDivElement>(null);
-  const { settled, onTransitionEnd } = useExpandSettle(open);
   const preview = useFilePreview();
-  const kind = toolKind(tool.name);
   const activity = tool.activity ?? {};
-  const subject = subjectOf(kind, activity, tool.name);
+  const mcp = activity.mcp;
+  const kind = mcp ? "other" : toolKind(tool.name);
+  const subject = mcp ? { name: mcp.tool, dir: "" } : subjectOf(kind, activity, tool.name);
   const planFirst = activity.plan?.[0] ?? null;
   const stat = diffStat(activity.diff);
   const lines = kind === "read" ? readLineCount(activity.body) : null;
-  const previewPath = kind === "bash" ? null : activity.path?.trim() || null;
+  const previewPath = kind === "bash" || mcp ? null : activity.path?.trim() || null;
   const canPreview = Boolean(preview && previewPath);
-
-  useLayoutEffect(() => {
-    if (!settled || full) return;
-    const node = sheetRef.current;
-    if (!node) return;
-    const measure = () => {
-      if (node.clientHeight < 1) {
-        setOverflows(false);
-        return;
-      }
-      setOverflows(node.scrollHeight - node.clientHeight > 1);
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [settled, full, activity.body, activity.diff, activity.command, tool.status]);
 
   return (
     <article className={`tool-card tool-kind-${kind} is-${tool.status}${open ? " open" : ""}`}>
@@ -401,13 +383,13 @@ function GenericToolCard({ tool, compact = false }: ToolCardProps) {
           className="tool-card-head"
           type="button"
           aria-expanded={open}
-          title={activity.command || activity.path || kindLabels[kind]}
+          title={mcp ? `${mcp.server} · ${mcp.tool}` : activity.command || activity.path || kindLabels[kind]}
           onClick={() => setOpen((value) => !value)}
         >
           <span className="tool-card-icon" aria-hidden="true">
-            <KindIcon kind={kind} />
+            {mcp ? <McpIcon size={13} /> : <KindIcon kind={kind} />}
           </span>
-          <span className="tool-kind-label">{toolLabel(tool.name, kind)}</span>
+          <span className="tool-kind-label">{mcp ? "MCP" : toolLabel(tool.name, kind)}</span>
           <span className="tool-card-main">
             <span className={`tool-card-name${subject.dir ? "" : " grow"}`}>
               {planFirst ? <PlanStatusIcon status={planFirst.status} className="plan-status-inline" /> : null}
@@ -415,6 +397,7 @@ function GenericToolCard({ tool, compact = false }: ToolCardProps) {
             </span>
             {subject.dir ? <span className="tool-card-dir">{subject.dir}</span> : null}
           </span>
+          {mcp ? <span className="tool-mcp-source" aria-label={tr(`MCP 服务器：${mcp.server}`, `MCP server: ${mcp.server}`)}>{mcp.server}</span> : null}
           {stat ? (
             <span className="tool-stat">
               {stat.added > 0 ? <span className="tool-stat-add">+{stat.added}</span> : null}
@@ -442,17 +425,15 @@ function GenericToolCard({ tool, compact = false }: ToolCardProps) {
           </button>
         ) : null}
       </div>
-      <ToolCollapse open={open} onTransitionEnd={onTransitionEnd}>
+      <ToolCollapse open={open}>
         {() => <>
         <div className="tool-card-body">
-          <div ref={sheetRef} className={`tool-clip${full ? " full" : ""}`}>
+          {mcp ? <McpToolDetails tool={tool} /> : <ScrollFade
+            className="tool-details-scroll"
+            ariaLabel={tr("工具详情，可在区域内滚动", "Tool details, scrollable")}
+          >
             <ToolBody kind={kind} activity={activity} status={tool.status} />
-          </div>
-          {(settled && overflows) || full ? (
-            <button className="tool-expand" type="button" onClick={() => setFull((value) => !value)}>
-              {full ? tr("收起", "Collapse") : tr("展开全部", "Expand all")}
-            </button>
-          ) : null}
+          </ScrollFade>}
         </div>
         </>}
       </ToolCollapse>
@@ -684,7 +665,9 @@ export function CompactToolLine({
         <ToolCollapse open={open}>
         {() => <>
           <div className="tool-compact-out">
-            <BashView command={activity.command} output={activity.body} running={running} failed={failed} />
+            <ScrollFade className="tool-details-scroll" ariaLabel={tr("命令和输出，可在区域内滚动", "Command and output, scrollable")}>
+              <BashView command={activity.command} output={activity.body} running={running} failed={failed} />
+            </ScrollFade>
           </div>
           </>}
       </ToolCollapse>
@@ -784,7 +767,9 @@ export function CompactToolLine({
                 note={activity.body}
               />
             ) : (
-              <ToolBody kind={kind} activity={activity} status={tool.status} />
+              <ScrollFade className="tool-details-scroll" ariaLabel={tr("工具详情，可在区域内滚动", "Tool details, scrollable")}>
+                <ToolBody kind={kind} activity={activity} status={tool.status} />
+              </ScrollFade>
             )}
           </div>
           </>}
@@ -865,7 +850,7 @@ function CompactDiffCard({ fileName, filePath, diff, note }: { fileName: string;
           {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
         </button>
       </header>
-      {note ? <p className="compact-diff-card-note">{note}</p> : null}
+      {note ? <ToolMarkdown text={note} className="compact-diff-card-note" /> : null}
       <CompactDiffView diff={diff} path={filePath} />
     </section>
   );
@@ -874,18 +859,13 @@ function CompactDiffCard({ fileName, filePath, diff, note }: { fileName: string;
 /** 紧凑 diff 保留改动附近的上下文,长段未改内容自动折叠。 */
 function CompactDiffView({ diff, path }: { diff: string; path?: string }) {
   return (
-    <div className="compact-diff-scroll-shell">
-      <div
-        className="compact-diff-scroll-viewport"
-        role="region"
-        aria-label={tr("文件差异，可在区域内滚动", "File diff, scrollable")}
-        tabIndex={0}
-      >
-        <div className="compact-diff-scroll-content">
-          <DiffView diff={diff} path={path} compact />
-        </div>
-      </div>
-    </div>
+    <ScrollFade
+      className="compact-diff-scroll-shell"
+      contentClassName="compact-diff-scroll-content"
+      ariaLabel={tr("文件差异，可在区域内滚动", "File diff, scrollable")}
+    >
+      <DiffView diff={diff} path={path} compact />
+    </ScrollFade>
   );
 }
 
@@ -921,6 +901,10 @@ function PlanChecklist({ items }: { items: ToolPlanItem[] }) {
   );
 }
 
+function ToolMarkdown({ text, className = "tool-note" }: { text: string; className?: string }) {
+  return <div className={`tool-markdown ${className}`}><Markdown text={text} /></div>;
+}
+
 function ToolBody({
   kind,
   activity,
@@ -937,7 +921,7 @@ function ToolBody({
     const output = body.replace(pattern, "").trim();
     return <>
       {activity.command ? <pre className="tool-note">{activity.command}</pre> : null}
-      {output ? <pre className="tool-note">{output}</pre> : null}
+      {output ? <ToolMarkdown text={output} /> : null}
       {screenshots.map((src, index) => <img key={index} src={src} alt={tr("浏览器截图", "Browser screenshot")} style={{ maxWidth: "100%", height: "auto" }} />)}
     </>;
   }
@@ -952,18 +936,18 @@ function ToolBody({
     );
   }
   if (status === "error") {
-    return <pre className="tool-error">{activity.body ? localizeError(activity.body) : tr("执行失败", "Execution failed")}</pre>;
+    return <ToolMarkdown className="tool-error" text={activity.body ? localizeError(activity.body) : tr("执行失败", "Execution failed")} />;
   }
   if (activity.plan && activity.plan.length > 0) return <PlanChecklist items={activity.plan} />;
   if (kind === "read") return <ReadView body={activity.body} running={status === "running"} />;
   if (kind === "edit" || kind === "write") {
     return (
       <>
-        {activity.body && activity.diff ? <p className="tool-note">{activity.body}</p> : null}
+        {activity.body && activity.diff ? <ToolMarkdown text={activity.body} /> : null}
         {activity.diff ? (
           <DiffView diff={activity.diff} path={activity.path} />
         ) : activity.body ? (
-          <p className="tool-note">{activity.body}</p>
+          <ToolMarkdown text={activity.body} />
         ) : status === "running" ? (
           <p className="tool-wait">{kind === "edit" ? tr("正在修改", "Editing…") : tr("正在写入", "Writing…")}</p>
         ) : (
@@ -972,7 +956,7 @@ function ToolBody({
       </>
     );
   }
-  if (activity.body) return <pre className="tool-note">{activity.body}</pre>;
+  if (activity.body) return <ToolMarkdown text={activity.body} />;
   if (status === "running") return <p className="tool-wait">{tr("正在执行", "Running…")}</p>;
   return null;
 }
@@ -1132,6 +1116,7 @@ function StatusMarkContent({ status, compact = false }: { status: ToolTrace["sta
 }
 
 function KindIcon({ kind }: { kind: ToolKind }): ReactNode {
+  if (kind === "other") return <ToolIcon size={13} />;
   if (kind === "bash") return <TerminalIcon size={13} />;
   if (kind === "read") return <EyeIcon size={13} />;
   if (kind === "edit") return <PencilIcon size={13} />;

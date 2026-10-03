@@ -498,6 +498,11 @@ export function TraceInspector({
                       <Field label={tr("工具名称", "Tool")}>
                         <code>{node.toolName}</code>
                       </Field>
+                      {node.mcp ? (
+                        <Field label={tr("MCP 服务", "MCP server")}>
+                          <code><bdi>{node.mcp.server}</bdi></code>
+                        </Field>
+                      ) : null}
                       <Field label={tr("层级", "Parent")}>
                         {tr("助手消息", "Assistant message")}
                       </Field>

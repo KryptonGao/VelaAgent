@@ -3,6 +3,9 @@ import { describe, it } from "node:test";
 import type { AgentRuntimeStreamEvent } from "@vela/shared";
 import {
   applyAgentStreamEvent,
+  applyStreamEvent,
+  type MessageBuckets,
+  toUiMessage,
   type AgentMessageBuckets,
 } from "../src/renderer/hooks/useSession.ts";
 
@@ -135,5 +138,42 @@ describe("子代理运行流 reducer", () => {
       buckets["conv-1"]?.["a2"]?.map((message) => message.text),
       ["另一个"],
     );
+  });
+});
+
+
+describe("MCP renderer activity", () => {
+  it("preserves the MCP marker when the main conversation finishes with an output-only event", () => {
+    let buckets: MessageBuckets = {};
+    for (const event of [
+      { type: "tool_start" as const, conversationId: "main", toolCallId: "remote", toolName: "opaque", activity: { mcp: { server: "docs", tool: "lookup" } } },
+      { type: "tool_output" as const, conversationId: "main", toolCallId: "remote", activity: { body: "Searching" } },
+      { type: "tool_end" as const, conversationId: "main", toolCallId: "remote", toolName: "opaque", isError: true, activity: { body: "Failed" } },
+    ]) buckets = applyStreamEvent(buckets, event);
+    assert.deepEqual(buckets.main?.[0]?.tools[0]?.activity.mcp, { server: "docs", tool: "lookup" });
+    assert.equal(buckets.main?.[0]?.tools[0]?.status, "error");
+    assert.equal(buckets.main?.[0]?.tools[0]?.activity.body, "Failed");
+  });
+
+  it("retains server metadata through output and completion patches without parsing the registered name", () => {
+    const messages = reduce([
+      { type: "tool_start", toolCallId: "remote", toolName: "opaque-registered-name", activity: { mcp: { server: "docs", tool: "lookup" } } },
+      { type: "tool_output", toolCallId: "remote", activity: { body: "Searching" } },
+      { type: "tool_end", toolCallId: "remote", toolName: "opaque-registered-name", isError: false, activity: { body: "Found a result" } },
+    ]);
+    assert.deepEqual(messages[0]?.tools[0]?.activity.mcp, { server: "docs", tool: "lookup" });
+    assert.equal(messages[0]?.tools[0]?.activity.body, "Found a result");
+    assert.equal(messages[0]?.tools[0]?.status, "done");
+  });
+
+  it("keeps MCP identity when restoring historical tool output", () => {
+    const message = toUiMessage({ id: "history", role: "assistant", text: "", thinking: "", tools: [{ id: "remote", name: "opaque-registered-name", status: "done", activity: { body: "Saved result", mcp: { server: "docs", tool: "lookup" } } }] });
+    assert.deepEqual(message.tools[0]?.activity.mcp, { server: "docs", tool: "lookup" });
+    assert.equal(message.historical, true);
+  });
+
+  it("ignores malformed metadata and does not infer a server from an MCP-looking tool name", () => {
+    const messages = reduce([{ type: "tool_start", toolCallId: "unmarked", toolName: "mcp__docs__lookup", activity: { mcp: { server: "", tool: "lookup" } } }]);
+    assert.equal(messages[0]?.tools[0]?.activity.mcp, undefined);
   });
 });

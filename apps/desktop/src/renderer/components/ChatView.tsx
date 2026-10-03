@@ -12,7 +12,7 @@ import { ArrowLeftIcon, BranchIcon, CheckIcon, CopyIcon, FolderIcon, PlusIcon, S
 import { trackEnteredMessages, type EnterTrack } from "./message-motion";
 import type { useModels } from "../hooks/useModels";
 import type { ProjectApi } from "../hooks/useProject";
-import type { ToolDisplay, ToolFold } from "../hooks/usePreferences";
+import type { SendButtonIcon, ToolDisplay, ToolFold } from "../hooks/usePreferences";
 import type { UiMessage } from "../hooks/useSession";
 import { RepoCard } from "./RepoCard";
 import { Composer } from "./Composer";
@@ -152,6 +152,7 @@ export interface ChatViewProps {
   thinkingSummaries?: ThinkingSummariesApi;
   /** 在输入框模型列表中隐藏的模型，key 为 `provider/id`。 */
   hiddenModels?: string[];
+  sendButtonIcon?: SendButtonIcon;
   onSend: (text: string, images?: import("@vela/shared").ImageAttachment[], deliverAs?: import("@vela/shared").RuntimeInstructionMode) => Promise<void>;
   /** 撤销一条还没被模型消费的排队/调整指令。 */
   onRemoveInstruction: (instructionId: string) => Promise<void>;
@@ -193,6 +194,7 @@ export function ChatView({
   toolFold = "message",
   thinkingSummaries,
   hiddenModels = [],
+  sendButtonIcon = "paper-plane",
   onSend,
   onRemoveInstruction,
   onEdit,
@@ -723,6 +725,7 @@ export function ChatView({
         thinkingLevel={session?.thinkingLevel ?? "medium"}
         thinkingLevels={session?.thinkingLevels ?? ["off"]}
         hiddenModels={hiddenModels}
+        sendButtonIcon={sendButtonIcon}
         models={models}
         mode={session?.mode ?? "agent"}
         sendError={sendError}

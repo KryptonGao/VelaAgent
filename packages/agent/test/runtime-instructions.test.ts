@@ -23,6 +23,8 @@ class FakeSession {
   readonly followUps: string[] = [];
   aborted = false;
   disposed = false;
+  inputHandler?: (text: string, mode: "steer" | "queue") => Promise<"handled" | "queued">;
+  consumeOnEnqueue = false;
   private steeringQueue: string[] = [];
   private followUpQueue: string[] = [];
   private readonly listeners = new Set<(event: AgentSessionEvent) => void>();
@@ -38,16 +40,22 @@ class FakeSession {
     };
   }
 
-  async steer(text: string): Promise<void> {
+  async steer(text: string): Promise<"handled" | "queued"> {
+    if (await this.inputHandler?.(text, "steer") === "handled") return "handled";
     this.steered.push(text);
     this.steeringQueue.push(text);
     this.emitQueue();
+    if (this.consumeOnEnqueue) this.deliver("steer");
+    return "queued";
   }
 
-  async followUp(text: string): Promise<void> {
+  async followUp(text: string): Promise<"handled" | "queued"> {
+    if (await this.inputHandler?.(text, "queue") === "handled") return "handled";
     this.followUps.push(text);
     this.followUpQueue.push(text);
     this.emitQueue();
+    if (this.consumeOnEnqueue) this.deliver("queue");
+    return "queued";
   }
 
   clearQueue(): { steering: string[]; followUp: string[] } {
@@ -123,6 +131,66 @@ function pendingTexts(entry: { snapshot: { pendingInstructions: Array<{ text: st
 }
 
 describe("runtime instructions", () => {
+  for (const mode of ["steer", "queue"] as const) {
+    it(`does not report ${mode} input consumed by an extension as a user message`, async t => {
+      const { runtime, id, entry, session, events } = await fixture(t);
+      entry.driving = true;
+      session.inputHandler = async () => "handled";
+      await runtime.prompt(id, "扩展处理", undefined, mode);
+      assert.deepEqual(pendingTexts(entry), []);
+      assert.equal(events.some(event => event.type === "user_message"), false);
+      assert.equal(runtime.listConversations().find(item => item.id === id)?.messageCount, 0);
+    });
+
+    it(`accounts for ${mode} delivery before the queued disposition resolves exactly once`, async t => {
+      const { runtime, id, entry, session, events } = await fixture(t);
+      entry.driving = true;
+      session.consumeOnEnqueue = true;
+      await runtime.prompt(id, "立即消费", undefined, mode);
+      assert.deepEqual(pendingTexts(entry), []);
+      assert.equal(events.filter(event => event.type === "user_message").length, 1);
+      assert.equal(runtime.listConversations().find(item => item.id === id)?.messageCount, 1);
+    });
+  }
+
+  it("does not mistake a pending input handler for delivery when an earlier input is consumed", async t => {
+    const { runtime, id, entry, session, events } = await fixture(t);
+    entry.driving = true;
+    await runtime.prompt(id, "已排队", undefined, "steer");
+    let resolveInput!: (result: "handled") => void;
+    session.inputHandler = () => new Promise(resolve => { resolveInput = resolve; });
+    const submitting = runtime.prompt(id, "被扩展处理", undefined, "steer");
+    session.deliver("steer");
+    assert.deepEqual(pendingTexts(entry), ["被扩展处理"]);
+    resolveInput("handled");
+    await submitting;
+    assert.deepEqual(pendingTexts(entry), []);
+    assert.deepEqual(events.filter(event => event.type === "user_message").map(event => event.text), ["已排队"]);
+  });
+
+  it("drops handled input during queue replay without fabricating delivery", async t => {
+    const { runtime, id, entry, session, events } = await fixture(t);
+    entry.driving = true;
+    await runtime.prompt(id, "撤销", undefined, "steer");
+    await runtime.prompt(id, "重建时处理", undefined, "steer");
+    await runtime.prompt(id, "留下", undefined, "queue");
+    session.inputHandler = async text => text === "重建时处理" ? "handled" : "queued";
+    await runtime.removeInstruction(id, runtime.getSnapshot().pendingInstructions[0]!.id);
+    assert.deepEqual(pendingTexts(entry), ["留下"]);
+    assert.equal(events.some(event => event.type === "user_message"), false);
+    session.deliver("queue");
+    assert.deepEqual(events.filter(event => event.type === "user_message").map(event => event.text), ["留下"]);
+  });
+
+  it("removes rejected input without reporting delivery", async t => {
+    const { runtime, id, entry, session, events } = await fixture(t);
+    entry.driving = true;
+    session.inputHandler = async () => { throw new Error("input failed"); };
+    await assert.rejects(runtime.prompt(id, "错误输入", undefined, "queue"), /input failed/);
+    assert.deepEqual(pendingTexts(entry), []);
+    assert.equal(events.some(event => event.type === "user_message"), false);
+  });
+
   it("steers a running session at the next boundary and reports delivery", async t => {
     const { runtime, id, entry, session, events } = await fixture(t);
     entry.driving = true;

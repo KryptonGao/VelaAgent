@@ -96,7 +96,7 @@ describe("P2 IPC 装配", () => {
 
   it("P2 写操作在 preload 与 VelaApi 上保持同名", async () => {
     const api = await readFile(sharedPath, "utf8");
-    const block = /export interface VelaApi \{([\s\S]*?)\n\}/.exec(api)?.[1] ?? "";
+    const block = /export interface VelaApi[^\{]*\{([\s\S]*?)\n\}/.exec(api)?.[1] ?? "";
     for (const name of [
       "createBranchAt",
       "previewHistoryOp",

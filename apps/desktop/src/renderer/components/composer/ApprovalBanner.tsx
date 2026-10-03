@@ -4,6 +4,7 @@ import { ShieldIcon } from "../icons";
 import { tr } from "../../locale";
 
 const kindLabels: Record<SandboxApprovalRequest["kind"], [string, string]> = {
+  mcp: ["调用 MCP 工具", "Call MCP tool"],
   browser_repl: ["运行 JavaScript", "Run JavaScript"],
   bash: ["运行命令", "Run command"],
   edit: ["修改文件", "Edit file"],
@@ -41,8 +42,13 @@ export function ApprovalBanner({
   approval: SandboxApprovalRequest;
   onReply: (id: string, allowed: boolean) => void;
 }) {
-  const summary =
-    (approval.kind === "bash" || approval.kind === "browser_repl")
+  const summary = approval.kind === "mcp"
+    ? [
+        `${tr("服务器", "Server")}: ${approval.mcp?.server ?? tr("(未知)", "(Unknown)")}`,
+        `${tr("工具", "Tool")}: ${approval.mcp?.tool ?? tr("(未知)", "(Unknown)")}`,
+        `${tr("参数", "Parameters")}: ${JSON.stringify(approval.mcp?.parameters ?? null, null, 2)}`,
+      ].join("\n")
+    : (approval.kind === "bash" || approval.kind === "browser_repl")
       ? approval.command ?? tr("(未提供命令)", "(No command provided)")
       : approval.path ?? tr("(未提供路径)", "(No path provided)");
   const [kindZh, kindEn] = kindLabels[approval.kind];

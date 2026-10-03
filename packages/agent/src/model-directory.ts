@@ -145,12 +145,14 @@ export class ModelDirectory {
     const models: ModelSummary[] = [];
 
     for (const provider of this.runtime.getProviders()) {
-      const methods = authMethods(provider.auth);
+      const methods = authMethods(provider.auth, provider.id);
       const status = this.runtime.getProviderAuthStatus(provider.id);
       const endpoint = customEndpoint(file.providers[provider.id]);
       const customProvider = provider.id in file.providers;
       const providerModels = provider.getModels();
       if (methods.length === 0 && !status.configured && !customProvider) continue;
+      // This is Vela's chat catalog. Pi 1.0 also supplies classifier-only providers.
+      if (providerModels.length === 0 && !customProvider) continue;
 
       providers.push({
         id: provider.id,
@@ -356,7 +358,9 @@ export class ModelDirectory {
     if (this.loginAbort) throw new Error("已有一个登录在进行");
     const provider = this.runtime.getProvider(providerId);
     if (!provider) throw new Error("找不到这个提供方");
-    if (type === "oauth" && !provider.auth.oauth) throw new Error("这个提供方不支持登录");
+    if (type === "oauth" && !authMethods(provider.auth, provider.id).some(method => method.type === "oauth")) {
+      throw new Error("这个提供方不支持登录");
+    }
     if (type === "api_key" && !provider.auth.apiKey?.login) throw new Error("这个提供方不支持填写密钥");
 
     const abort = new AbortController();
@@ -606,10 +610,12 @@ function summarizeModel(model: Model<Api>, providerName: string, available: bool
   };
 }
 
-function authMethods(auth: { apiKey?: { name?: string; login?: unknown }; oauth?: { name?: string; loginLabel?: string } }): AuthMethodSummary[] {
+function authMethods(auth: { apiKey?: { name?: string; login?: unknown }; oauth?: { name?: string; loginLabel?: string } }, providerId: string): AuthMethodSummary[] {
   const methods: AuthMethodSummary[] = [];
   if (auth.apiKey?.login) methods.push({ type: "api_key", label: auth.apiKey.name || "API 密钥" });
-  if (auth.oauth) methods.push({ type: "oauth", label: auth.oauth.loginLabel || auth.oauth.name || "登录" });
+  // Pi 1.0's new OpenAI ChatGPT flow requires host-managed installation identity.
+  // Preserve Vela's API-key / openai-codex flows until that login is integrated.
+  if (auth.oauth && providerId !== "openai") methods.push({ type: "oauth", label: auth.oauth.loginLabel || auth.oauth.name || "登录" });
   return methods;
 }
 

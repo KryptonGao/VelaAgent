@@ -17,8 +17,11 @@ import {
   type SidebarView,
 } from "./conversation-activity";
 import { ConversationSearchDialog } from "./ConversationSearchDialog";
+import { ClockIcon } from "./icons";
 
 interface SidebarProps {
+  onOpenScheduledTasks: () => void;
+  scheduledTasksOpen: boolean;
   collapsed: boolean;
   resize: SidebarResize;
   platform: string;
@@ -36,6 +39,8 @@ interface SidebarProps {
 }
 
 export function Sidebar({
+  onOpenScheduledTasks,
+  scheduledTasksOpen,
   collapsed,
   resize,
   platform,
@@ -185,6 +190,9 @@ export function Sidebar({
       </div>
 
       <div className="sidebar-quick-actions">
+        <button className="quick-action-item" type="button" aria-current={scheduledTasksOpen ? "page" : undefined} onClick={onOpenScheduledTasks}>
+          <span className="quick-action-item-left"><ClockIcon /><span>{tr("定时任务", "Scheduled Tasks")}</span></span>
+        </button>
         <button className="quick-action-item" type="button" onClick={() => onNewChat()}>
           <span className="quick-action-item-left">
             <ComposeIcon />

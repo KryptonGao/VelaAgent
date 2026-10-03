@@ -54,6 +54,9 @@
 - **本地工作区与 Git worktree：** 打开本机项目，在原工作区或独立 worktree 中处理任务。
 - **审阅与工作面板：** 查看 Git 差异和暂存状态；右侧标签页承载文件预览、变更与集成终端，`⌘T` 新建标签页。
 - **模型与账号：** 管理模型提供方，登录账号、填写 API 密钥或添加自定义模型接口。
+- **MCP 服务器：** 连接本机或远程 MCP 工具，支持全局与项目配置、按需发现、项目信任和只读授权。详细说明见 [docs/mcp.md](./docs/mcp.md)。
+- **定时任务：** 在侧栏页面或对话里按一次、每日、每周或 Cron 时间安排任务，每次执行在绑定工作区的新对话中运行，可选择执行权限、模型与推理强度。详细说明见 [docs/scheduled-tasks.md](./docs/scheduled-tasks.md)。
+- **集成：** 在设置中一键连接 Notion 等内置应用，无需填写 URL 或 Token；OAuth 在系统浏览器完成，凭据由系统安全存储加密。详细说明见 [docs/built-in-mcp-plugins.md](./docs/built-in-mcp-plugins.md)。
 - **外观与上下文：** 切换浅色 / 深色主题和中英文界面，查看上下文用量、思考强度与 Skill 活动；会话重启后可恢复。
 - **图片查看：** 点击消息缩略图，全屏缩放、拖动和切换多张图片。
 
@@ -102,7 +105,7 @@ pnpm dev
 
 - 执行权限分三档：「每次询问」在运行终端命令前请求批准，写入所选工作区之外的位置也会请求批准；「帮我批准」由当前对话选择的模型判断风险，只有风险操作或判断失败时才请求批准；「完全访问」跳过这些逐项确认。这里的权限设置是交互式审批策略，不是操作系统级沙箱。
 - 当前支持在本机工作区或 Git worktree 中运行；远程和隔离沙箱执行环境尚未实现。
-- 对话、模型账号、工作区记录、执行权限和执行轨迹保存在 `~/.vela`（轨迹写入 `~/.vela/traces`）。macOS 上对应 `/Users/<用户名>/.vela`；Electron 缓存仍保存在系统的应用支持目录。
+- 对话、模型账号、工作区记录、执行权限和执行轨迹保存在 `~/.vela`（轨迹写入 `~/.vela/traces`）。macOS 上对应 `/Users/<用户名>/.vela`；Electron 缓存仍保存在系统的应用支持目录。MCP 配置与凭据也保存在这里（`mcp.json`、`mcp-auth.json`、`mcp-policy.json` 和 `mcp.log`），项目服务器还使用工作区内的 `.pi/mcp.json`；内置集成使用 `integrations.json` 与 `integrations-auth.enc.json`，定时任务保存在 `scheduled-tasks.json`。
 
 用户 Skill 放在 `~/.vela/skills`。当前工作区的 `.pi/skills`、`.agents/skills` 和 `~/.agents/skills` 也会加载；同名时项目中的 Skill 优先。每个 Skill 是一个包含 `name` 和 `description` 的 `SKILL.md` 文件夹：
 
@@ -160,7 +163,7 @@ Vela 基于 [Pi Agent](https://github.com/earendil-works/pi) 构建，并通过 
 ### 技术栈
 
 - **桌面端：** Electron 44、electron-vite、React 19 和 TypeScript；pnpm workspace 管理桌面应用及共享包。
-- **Pi Agent：** `@earendil-works/pi-coding-agent`、`@earendil-works/pi-agent-core` 和 `@earendil-works/pi-ai`（`^0.87.1`）。Vela 在主进程调用 `createAgentSession()` 创建会话，不通过启动 Pi 命令行程序来运行 Agent。
+- **Pi Agent：** `@earendil-works/pi-coding-agent`、`@earendil-works/pi-agent-core` 和 `@earendil-works/pi-ai`（精确锁定 `1.0.0`）。Vela 在主进程调用 `createAgentSession()` 创建会话，不通过启动 Pi 命令行程序来运行 Agent。迁移依据、验证范围及未验证项见 [Pi 1.0 迁移记录](docs/pi-1.0-migration.md)。
 
 ### Agent 会话与模型
 
@@ -173,6 +176,7 @@ Vela 基于 [Pi Agent](https://github.com/earendil-works/pi) 构建，并通过 
 - 基础工具为 Pi 的 `read`、`bash`、`edit` 和 `write`。Vela 包装 `bash`、`edit`、`write`：默认权限模式下，Shell 命令逐条请求批准，工作区外的文件修改也需要批准；工作区内读写不逐项拦截。
 - `Plan` 模式通过 ToolPolicy 禁止文件编辑和写入，并只放行只读命令；模型以 `<proposed_plan>` 输出完整实施方案，每次修改生成新 revision，批准后可在当前或全新上下文执行，并用 `update_plan` 跟踪执行进度。`Goal` 模式通过 `update_goal` 记录进度与完成状态。详细行为与实现见 [docs/plan-mode.md](./docs/plan-mode.md) 与 [docs/plan-mode-architecture.md](./docs/plan-mode-architecture.md)。
 - SubAgents 通过 `spawn_agent`、`send_message` 和 `followup_task` 创建、通信与继续执行常驻子代理，支持嵌套任务。`explore` 子任务只读；`general` 子任务使用当前会话的权限，独立消息与运行记录会持久化。
+- MCP 工具默认通过 `tool_search` 按需发现，也可以设为直接提供或隐藏；项目配置需要确认信任。用户可以把具体工具确认为只读；Plan 和 `explore` 只提供明确授权的只读 MCP 工具与资源工具。未确认只读的 MCP 调用沿用当前执行权限，并在审批中显示服务器、工具和脱敏参数。详细说明见 [docs/mcp.md](./docs/mcp.md)。
 
 ### 工作区与 Electron 进程
 

@@ -11,7 +11,8 @@ import type {
 import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { useModels } from "../hooks/useModels";
 import type { ProjectApi } from "../hooks/useProject";
-import { CloseIcon, FileIcon, SendIcon, SteerIcon } from "./icons";
+import type { SendButtonIcon } from "../hooks/usePreferences";
+import { ArrowUpIcon, CloseIcon, FileIcon, SendIcon, SteerIcon } from "./icons";
 import { MotionList } from "./BatchMotion";
 import { useReducedMotion } from "../hooks/useMotionPresence";
 import { PopoverPresence } from "./MotionPresence";
@@ -46,6 +47,7 @@ export interface ComposerProps {
   thinkingLevels: ThinkingLevel[];
   /** 在输入框模型列表中隐藏的模型，key 为 `provider/id`。 */
   hiddenModels: string[];
+  sendButtonIcon?: SendButtonIcon;
   models: ReturnType<typeof useModels>;
   mode: InteractionMode;
   sendError: string | null;
@@ -73,6 +75,7 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
   thinkingLevel,
   thinkingLevels,
   hiddenModels,
+  sendButtonIcon = "paper-plane",
   models,
   mode,
   sendError,
@@ -491,7 +494,7 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
               onCancelLogin={models.cancelLogin}
               onDismissLogin={models.dismissLogin}
             />
-            <ComposerActions streaming={streaming} sendHint={sendHint} steerHint={steerHint}
+            <ComposerActions sendButtonIcon={sendButtonIcon} streaming={streaming} sendHint={sendHint} steerHint={steerHint}
               canQueue={Boolean(prompt)} disabled={disabled || !modelReady || !prompt}
               onSteer={() => void submit(true)} onAbort={onAbort} />
           </div>
@@ -511,7 +514,8 @@ function attachmentKey(entry: FileAttachmentPayload): string {
   return id;
 }
 
-function ComposerActions({ streaming, sendHint, steerHint, canQueue, disabled, onSteer, onAbort }: {
+function ComposerActions({ sendButtonIcon, streaming, sendHint, steerHint, canQueue, disabled, onSteer, onAbort }: {
+  sendButtonIcon: SendButtonIcon;
   streaming: boolean; sendHint: string; steerHint: string; canQueue: boolean; disabled: boolean;
   onSteer: () => void; onAbort: () => Promise<void>;
 }) {
@@ -522,10 +526,10 @@ function ComposerActions({ streaming, sendHint, steerHint, canQueue, disabled, o
   return <span className={`composer-action-slot${streaming ? " is-streaming" : ""}${steerButton ? " has-instruction" : ""}`}>
     {steerButton}
     <span className="composer-action-stack">
-      <button className="send-action-blue-btn send" type="submit" title={sendHint}
+      <button className={`send-action-blue-btn send${sendButtonIcon === "arrow-up" ? " send-icon-arrow-up" : ""}`} type="submit" title={sendHint}
         aria-label={streaming ? tr("排队发送", "Queue") : tr("发送", "Send")} disabled={disabled}
         inert={streaming && !canQueue} aria-hidden={streaming && !canQueue} tabIndex={streaming && !canQueue ? -1 : undefined}>
-        <SendIcon />
+        {sendButtonIcon === "arrow-up" ? <ArrowUpIcon size={15} /> : <SendIcon />}
       </button>
       <button className="send-action-blue-btn stop" type="button"
         title={tr("停止生成", "Stop generating")} aria-label={tr("停止生成", "Stop generating")}

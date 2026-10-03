@@ -106,7 +106,28 @@ test('CDP detach fails the current call and a later call reattaches',async()=>{
   revoke();host.dispose();
 });
 
-test('cursor stays visible through idle, completion, cancellation and navigation, ignoring stale callbacks',async()=>{
+test('manual browsing and read-only Browser Use do not create an Agent pointer',async()=>{
+  const {host,command,context}=fixture();
+  let revoke: (()=>void) | undefined;
+  try {
+    await command({type:'activate',conversationId:'one'});
+    await command({type:'open',id:'tab'});
+    assert.equal(host.state(10).tabs[0].agentCursor,undefined);
+    await command({type:'bind',tabId:'tab',guestId:2});
+    await command({type:'goto',tabId:'tab',url:'https://example.com/'});
+    await command({type:'reload',tabId:'tab'});
+    assert.equal(host.state(10).tabs[0].agentCursor,undefined);
+    revoke=host.beginInvocation(context);
+    await host.invoke(context,'tabs.selected');
+    await host.invoke(context,'snapshot','tab');
+    await host.invoke(context,'screenshot','tab');
+    assert.equal(host.state(10).tabs[0].agentCursor,undefined);
+    const opened=await host.invoke(context,'tabs.open',undefined,['https://example.com/']) as {id:string};
+    assert.equal(host.state(10).tabs.find(tab=>tab.id===opened.id)?.agentCursor,undefined);
+  } finally {revoke?.();host.dispose();}
+});
+
+test('cursor stays visible after Agent input through idle, completion, cancellation and navigation, ignoring stale callbacks',async()=>{
   const {host,guest,command,context}=fixture();
   await command({type:'activate',conversationId:'one'});await command({type:'open',id:'tab'});await command({type:'bind',tabId:'tab',guestId:2});
   const callbacks: ((action: BrowserAgentAction)=>void)[]=[];
@@ -114,7 +135,7 @@ test('cursor stays visible through idle, completion, cancellation and navigation
   const action: BrowserAgentAction={x:120,y:80,viewportWidth:1024,viewportHeight:768,kind:'click'};
   const abort=new AbortController();const owner={...context,signal:abort.signal};const revoke=host.beginInvocation(owner);
   try {
-    assert.equal(host.state(10).tabs[0].agentCursor?.active,false, 'page starts with an idle Agent pointer');
+    assert.equal(host.state(10).tabs[0].agentCursor,undefined, 'page has no Agent pointer before input');
     await host.invoke(owner,'click','tab',[{css:'button'}]);callbacks[0](action);
     assert.equal(host.state(10).tabs[0].agentCursor?.x,120);
     await command({type:'activate',conversationId:'two'});

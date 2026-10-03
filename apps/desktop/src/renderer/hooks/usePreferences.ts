@@ -24,6 +24,7 @@ export type ToolFold = "message" | "position";
 /** 思考总结的展示方式:跟在“思考”后面、替换“思考”作为标题、或跟随回复正文样式。 */
 export type ThinkingSummaryStyle = "inline" | "headline" | "prose";
 export type FileIconTheme = "devicon" | "material";
+export type SendButtonIcon = "paper-plane" | "arrow-up";
 
 const infoLayoutKey = "vela.infoLayout";
 const conversationLinkTargetKey = "vela.conversationLinkTarget";
@@ -39,6 +40,7 @@ const thinkingSummaryStyleKey = "vela.thinkingSummaryStyle";
 const thinkingSummaryModelKey = "vela.thinkingSummaryModel";
 const fileIconThemeKey = "vela.fileIconTheme";
 const composerCapsulesKey = "vela.composerCapsules";
+const sendButtonIconKey = "vela.sendButtonIcon";
 const hiddenModelsKey = "vela.hiddenModels";
 const darkQuery = "(prefers-color-scheme: dark)";
 
@@ -113,6 +115,10 @@ function isFileIconTheme(value: unknown): value is FileIconTheme {
   return value === "devicon" || value === "material";
 }
 
+function isSendButtonIcon(value: unknown): value is SendButtonIcon {
+  return value === "paper-plane" || value === "arrow-up";
+}
+
 function systemScheme(): ColorScheme {
   return window.matchMedia(darkQuery).matches ? "dark" : "light";
 }
@@ -166,6 +172,9 @@ export function usePreferences() {
   const [composerCapsules, setComposerCapsules] = useState(() =>
     readStored(composerCapsulesKey, (value): value is string => value === "true", "false") === "true",
   );
+  const [sendButtonIcon, setSendButtonIcon] = useState<SendButtonIcon>(() =>
+    readStored(sendButtonIconKey, isSendButtonIcon, "paper-plane"),
+  );
 
   const isModelHidden = useCallback(
     (provider: string, id: string) => hiddenModels.includes(modelKey(provider, id)),
@@ -218,6 +227,7 @@ export function usePreferences() {
   useEffect(() => writeStored(thinkingSummaryStyleKey, thinkingSummaryStyle), [thinkingSummaryStyle]);
   useEffect(() => writeStored(thinkingSummaryModelKey, JSON.stringify(thinkingSummaryModel)), [thinkingSummaryModel]);
   useEffect(() => writeStored(fileIconThemeKey, fileIconTheme), [fileIconTheme]);
+  useEffect(() => writeStored(sendButtonIconKey, sendButtonIcon), [sendButtonIcon]);
   useEffect(() => writeStored(hiddenModelsKey, JSON.stringify(hiddenModels)), [hiddenModels]);
   useEffect(() => {
     document.documentElement.dataset.composerCapsules = String(composerCapsules);
@@ -247,6 +257,8 @@ export function usePreferences() {
     hiddenModels,
     composerCapsules,
     setComposerCapsules,
+    sendButtonIcon,
+    setSendButtonIcon,
     isModelHidden,
     setModelHidden,
     showAllModels,

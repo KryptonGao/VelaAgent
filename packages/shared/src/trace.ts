@@ -53,6 +53,7 @@ export interface TraceSummaryRequest {
   usage: TraceUsage | null;
 }
 export interface TraceNode {
+  mcp?: { server: string; tool: string };
   id: string;
   sequence: number;
   kind: TraceKind;

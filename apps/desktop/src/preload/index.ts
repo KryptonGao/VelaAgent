@@ -1,7 +1,11 @@
 import { BrowserIpc, type BrowserWindowState } from "../../../../packages/shared/src/browser";
 import {
   IpcChannel,
+  ScheduledTasksIpc,
+  type ScheduledTasksState,
   type AgentSettings,
+  type McpStatusEvent,
+  type PluginStatusEvent,
   type AppLocale,
   type AgentStreamEvent,
   type AppState,
@@ -130,6 +134,41 @@ import {
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from "electron";
 
 const api: VelaApi = {
+  scheduledTasks: {
+    list: () => ipcRenderer.invoke(ScheduledTasksIpc.list),
+    create: (input) => ipcRenderer.invoke(ScheduledTasksIpc.create, input),
+    update: (id, patch) => ipcRenderer.invoke(ScheduledTasksIpc.update, id, patch),
+    delete: (id) => ipcRenderer.invoke(ScheduledTasksIpc.delete, id),
+    runNow: (id) => ipcRenderer.invoke(ScheduledTasksIpc.runNow, id),
+    subscribe: (listener) => {
+      const handler = (_event: IpcRendererEvent, state: ScheduledTasksState) => listener(state);
+      ipcRenderer.on(ScheduledTasksIpc.state, handler);
+      return () => { ipcRenderer.removeListener(ScheduledTasksIpc.state, handler); };
+    },
+  },
+  getPlugins: input => ipcRenderer.invoke("mcp:plugins", input),
+  connectPlugin: input => ipcRenderer.invoke("mcp:plugin-connect", input),
+  disconnectPlugin: input => ipcRenderer.invoke("mcp:plugin-disconnect", input),
+  onPluginStatus: listener => {
+    const handler = (_event: IpcRendererEvent, event: PluginStatusEvent) => listener(event);
+    ipcRenderer.on("plugins:status", handler);
+    return () => { ipcRenderer.removeListener("plugins:status", handler); };
+  },
+  getMcpCatalog: (input) => ipcRenderer.invoke("mcp:catalog", input),
+  saveMcpServer: (input) => ipcRenderer.invoke("mcp:save", input),
+  removeMcpServer: (input) => ipcRenderer.invoke("mcp:remove", input),
+  setMcpEnabled: (input) => ipcRenderer.invoke("mcp:enabled", input),
+  reconnectMcpServer: (input) => ipcRenderer.invoke("mcp:reconnect", input),
+  loginMcpServer: (input) => ipcRenderer.invoke("mcp:login", input),
+  cancelMcpLogin: (input) => ipcRenderer.invoke("mcp:cancel-login", input),
+  logoutMcpServer: (input) => ipcRenderer.invoke("mcp:logout", input),
+  setMcpProjectTrust: (input) => ipcRenderer.invoke("mcp:trust", input),
+  setMcpToolReadOnly: (input) => ipcRenderer.invoke("mcp:readonly", input),
+  onMcpStatus: (listener) => {
+    const handler = (_event: IpcRendererEvent, event: McpStatusEvent) => listener(event);
+    ipcRenderer.on("mcp:status", handler);
+    return () => { ipcRenderer.removeListener("mcp:status", handler); };
+  },
   browser: {
     command: (command) => ipcRenderer.invoke(BrowserIpc.command, command),
     subscribe: (listener) => {

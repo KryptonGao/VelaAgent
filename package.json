@@ -6,11 +6,13 @@
     "node": ">=22.19.0"
   },
   "scripts": {
+    "test:plugins": "pnpm --filter @vela/agent test:plugins && pnpm --filter @vela/desktop test:plugins && pnpm --filter @vela/desktop test:plugins:ui",
     "postinstall": "node node_modules/electron/install.js && node scripts/brand-electron-dev.mjs && node scripts/fix-native-modules.mjs",
     "dev": "pnpm --filter @vela/desktop dev",
     "build": "pnpm --filter @vela/desktop build",
     "package:mac": "pnpm --filter @vela/desktop dist:mac",
     "typecheck": "pnpm -r --if-present typecheck",
+    "test:mcp": "pnpm --filter @vela/agent test:mcp && pnpm --filter @vela/desktop test:mcp && pnpm --filter @vela/desktop test:mcp:ui && pnpm --filter @vela/desktop test:mcp:electron",
     "test:center": "pnpm --filter @vela/desktop test:center"
   },
   "devDependencies": {

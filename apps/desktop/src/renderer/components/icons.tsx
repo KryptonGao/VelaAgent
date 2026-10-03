@@ -2,6 +2,10 @@ interface IconProps {
   size?: number;
 }
 
+export function ClockIcon({ size = 13 }: IconProps) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>;
+}
+
 export function GlobeIcon({ size = 13 }: IconProps) {
   return <svg {...base(size)} aria-hidden="true"><circle cx="12" cy="12" r="9" />
     <path d="M3 12h18M12 3a18 18 0 0 1 0 18 18 18 0 0 1 0-18" /></svg>;
@@ -240,6 +244,22 @@ export function TerminalIcon({ size = 13 }: IconProps) {
       <rect x="3" y="4" width="18" height="16" rx="2" />
       <polyline points="7 9 10 12 7 15" />
       <line x1="12" y1="15" x2="17" y2="15" />
+    </svg>
+  );
+}
+
+export function McpIcon({ size = 13 }: IconProps) {
+  return (
+    <svg {...base(size)} aria-hidden="true">
+      <path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0V8ZM12 17v4" />
+    </svg>
+  );
+}
+
+export function ToolIcon({ size = 13 }: IconProps) {
+  return (
+    <svg {...base(size)} aria-hidden="true">
+      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76Z" />
     </svg>
   );
 }

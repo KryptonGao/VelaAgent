@@ -31,6 +31,7 @@ const mutatingToolNames = new Set(["bash", "edit", "write", "browser_repl"]);
 
 function toolMutatedWorkspace(toolName: string, mutated: boolean | undefined): boolean {
   if (mutatingToolNames.has(toolName)) return true;
+  if (toolName.startsWith("mcp__")) return mutated === true;
   return isAgentToolName(toolName) && mutated === true;
 }
 
@@ -232,8 +233,8 @@ export class SessionHost {
     });
   }
 
-  dispose(): void {
-    this.runtime.dispose();
+  dispose(): Promise<void> {
+    return this.runtime.dispose();
   }
 
   currentState(): AppState {

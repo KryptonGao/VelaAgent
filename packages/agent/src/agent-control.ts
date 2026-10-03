@@ -64,6 +64,8 @@ export interface AgentRootMessage {
 export interface AgentControlHost {
   /** 用父会话的模型、权限和指令创建一个独立 Pi 会话。 */
   createChildSession(input: AgentSessionRequest): Promise<AgentSession>;
+  disposeChildSession?(session: AgentSession): Promise<void>;
+  toolMutates?(session: AgentSession, toolName: string): boolean;
   /** 把子代理结论或消息投递给 root 会话；由运行时决定唤醒还是排队。 */
   deliverToRoot(input: { conversationId: string; message: AgentRootMessage }): void;
   /** 子代理会话的原始事件；运行时翻译成界面事件，供右侧 Agent Pane 实时渲染。 */
@@ -427,13 +429,18 @@ export class AgentControl {
   }
 
   /** 释放整棵树：销毁子会话并了结还在排队的等待者。root 会话由运行时负责。 */
-  dispose(): void {
+  dispose(): Promise<void> {
+    const closing: Promise<void>[] = [];
     for (const agent of this.agents.values()) {
       if (agent.info.kind === "root") continue;
       agent.disposed = true;
       agent.unsubscribe?.();
       agent.unsubscribe = null;
-      agent.session?.dispose();
+      if (agent.session) {
+        if (this.options.host.disposeChildSession) closing.push(this.options.host.disposeChildSession(agent.session));
+        else agent.session.dispose();
+      }
+      if (!agent.session && agent.sessionPromise) closing.push(agent.sessionPromise.then(() => undefined, () => undefined));
       agent.session = null;
       while (agent.queue.length > 0) {
         const task = agent.queue.shift();
@@ -442,6 +449,7 @@ export class AgentControl {
     }
     this.agents.clear();
     this.spawnSequence = 0;
+    return Promise.allSettled(closing).then(() => undefined);
   }
 
   private requireAgent(agentId: string): ManagedAgent {
@@ -564,7 +572,8 @@ export class AgentControl {
       sessionFile: agent.sessionFile,
     });
     if (agent.disposed) {
-      session.dispose();
+      if (this.options.host.disposeChildSession) await this.options.host.disposeChildSession(session);
+      else session.dispose();
       throw new Error("子代理已结束。");
     }
     agent.session = session;
@@ -599,7 +608,7 @@ export class AgentControl {
         summary: current?.summary ?? event.toolName,
         status: toolResultIsError(event.toolName, event.result, event.isError) ? "error" : "done",
       });
-      if (mutatingToolNames.has(event.toolName)) agent.info.mutated = true;
+      if (mutatingToolNames.has(event.toolName) || (agent.session && this.options.host.toolMutates?.(agent.session, event.toolName))) agent.info.mutated = true;
       agent.info.updatedAt = Date.now();
       this.emit();
     }

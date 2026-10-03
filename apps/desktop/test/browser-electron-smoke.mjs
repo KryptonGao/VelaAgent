@@ -104,10 +104,11 @@ async function run() {
       win.webContents.send('browser:state', cursorState);
     };
     try {
-      await until(() => evaluate("!!document.querySelector('.browser-agent-pointer.is-idle')"), 'initial idle Agent pointer');
-      await evaluate("window.__cursorPointer=document.querySelector('.browser-agent-pointer');true");
+      assert.equal(cursorTab.agentCursor, undefined, 'manual browsing has no Agent cursor state');
+      assert.equal(await evaluate("!!document.querySelector('.browser-agent-pointer')"), false, 'manual browsing has no Agent pointer');
       await adapter.call('click', [{ css: '#saved' }], undefined, undefined, notify);
       await until(() => evaluate("!!document.querySelector('.browser-agent-pointer.is-click')"), 'Agent click pointer');
+      await evaluate("window.__cursorPointer=document.querySelector('.browser-agent-pointer');true");
       await pause(360);
       assert.equal(await evaluate("document.querySelector('.browser-agent-pointer')===window.__cursorPointer"), true);
       const pointer = await evaluate("(() => { const n=document.querySelector('.browser-agent-pointer'), f=n.closest('.browser-guest-frame'), p=n.getBoundingClientRect(), r=f.getBoundingClientRect(); return {x:p.left-r.left,y:p.top-r.top,label:n.textContent,passthrough:getComputedStyle(n.closest('.browser-agent-overlay')).pointerEvents,under:document.elementFromPoint(p.left,p.top)?.tagName}; })()");

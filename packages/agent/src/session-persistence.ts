@@ -4,13 +4,13 @@ import { existsSync, writeFileSync } from "node:fs";
 /**
  * 新建一个立即落盘的持久会话。
  *
- * Pi 的 SessionManager 要等到首条 assistant 消息写入时才创建 JSONL 文件,
- * 还没有收到回复的新对话因此始终没有文件;应用被强制关闭后重启时,
- * 这类对话会被当成已被清理的会话丢掉。
+ * Pi 1.0 会在首条 user 或 assistant 消息时创建 JSONL 文件,但空会话
+ * 仍然没有文件。Vela 在用户创建对话时就登记持久状态,因此仍需立即
+ * 写入 header,避免未发送消息的对话在重启时被当成已清理会话丢掉。
  *
  * 这里在创建后立刻写入只有 header 的会话文件,再用 open() 重新打开:
  * 空对话当次就有文件可恢复,manager 进入已落盘状态,用户消息也会即时追加,
- * 而不是等到第一条回复完成才和新对话一起补写。
+ * 而不是依赖 Pi 的首条消息触发创建。
  */
 export function createPersistedSession(cwd: string, sessionDir: string): SessionManager {
   const manager = SessionManager.create(cwd, sessionDir);
