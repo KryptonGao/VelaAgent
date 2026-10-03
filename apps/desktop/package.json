@@ -30,7 +30,7 @@
     "test:browser-repl": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --experimental-test-module-mocks --test test/browser-repl-manager.test.ts test/browser-repl-worker.test.ts",
     "test:browser:electron": "electron test/browser-electron-smoke.mjs",
     "test:browser-use:electron": "node test/browser-use-electron-smoke.mjs",
-    "test:mcp": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --experimental-test-module-mocks --test test/mcp-host.test.ts test/mcp-settings.test.ts test/sandbox-approval.test.ts",
+    "test:mcp": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --experimental-test-module-mocks --test test/mcp-host.test.ts test/mcp-settings.test.ts test/mcp-tool-result.test.ts test/sandbox-approval.test.ts",
     "test:mcp:ui": "node test/mcp-settings-ui.mjs",
     "test:mcp:electron": "node test/mcp-electron-smoke.mjs",
     "test:scheduled-tasks": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --test test/scheduled-tasks.test.ts ../../packages/agent/test/scheduled-tasks.test.ts",
