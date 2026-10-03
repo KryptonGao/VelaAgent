@@ -2,7 +2,7 @@ import type { WebContents } from "electron";
 import { isUiBrowserUrl, UI_BROWSER_PARTITION } from "../browser-policy";
 
 /** Only the local workbench may attach guests. Remote pages get no Vela preload or IPC. */
-export function registerUiBrowserSecurity(embedder: WebContents): void {
+export function registerUiBrowserSecurity(embedder: WebContents, onGuest?: (guest: WebContents) => void): void {
   embedder.on("will-attach-webview", (event, preferences, params) => {
     if (params.partition !== UI_BROWSER_PARTITION || !isUiBrowserUrl(params.src)) {
       event.preventDefault();
@@ -20,6 +20,7 @@ export function registerUiBrowserSecurity(embedder: WebContents): void {
     preferences.navigateOnDragDrop = false;
   });
   embedder.on("did-attach-webview", (_event, guest) => {
+    onGuest?.(guest);
     guest.on("will-frame-navigate", (event) => {
       if (!isUiBrowserUrl(event.url)) event.preventDefault();
     });

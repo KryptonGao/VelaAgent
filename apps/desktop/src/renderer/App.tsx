@@ -15,6 +15,7 @@ import { RenameConversationDialog } from "./components/RenameConversationDialog"
 import { FilePreviewProvider, type PreviewFileDescriptor } from "./components/preview/FilePreviewContext";
 import type { StartTabAction } from "./components/StartView";
 import { WorkbenchPanel, type WorkbenchTab } from "./components/WorkbenchPanel";
+import { BrowserViewHost } from "./components/browser/BrowserViewHost";
 import { useBrowserTabs } from "./browser/useBrowserTabs";
 import { routeConversationLink } from "./browser/conversation-link-policy";
 import { useModels } from "./hooks/useModels";
@@ -141,7 +142,19 @@ export function App() {
   const [workbenchCollapsed, setWorkbenchCollapsed] = useState(false);
   useEffect(() => { setWorkbenchCollapsed(false); }, [activeWorkbenchTabId]);
   const [startTabState, setStartTabState] = useState<{ id: string }[]>([]);
-  const browser = useBrowserTabs();
+  const browser = useBrowserTabs(session.activeConversationId);
+  const pendingBrowserTab = useRef<string | null>(null);
+  const previousBrowserConversation = useRef(session.activeConversationId);
+  const browserFocusNonce = useRef<number | null>(null);
+  useEffect(() => {
+    const focus = browser.state.focusRequest;
+    if (!focus || browserFocusNonce.current === focus.nonce) return;
+    browserFocusNonce.current = focus.nonce;
+    if (!browser.tabs.some(tab => tab.id === focus.tabId)) return;
+    setSettingsOpen(false);
+    setWorkbenchCollapsed(false);
+    setActiveWorkbenchTabId(focus.tabId);
+  }, [browser.state.focusRequest, browser.tabs]);
   // 终端与文件浏览标签不按工作区拆开存:工作区状态加载前(地址为空)创建的标签
   // 不能因为工作区地址随后确定而消失;真正切换工作区时再统一关闭。
   const [terminalTabState, setTerminalTabState] = useState<{ id: string; sessionId: string; label: string }[]>([]);
@@ -275,8 +288,13 @@ export function App() {
   }, []);
 
   const openBrowserTab = useCallback((url?: string) => {
-    const id = `browser:${++tabSeq.current}`;
-    browser.open(id, url);
+    const id = `browser:${crypto.randomUUID()}`;
+    pendingBrowserTab.current = id;
+    void browser.open(id, url).catch((error: unknown) => {
+      if (pendingBrowserTab.current === id) pendingBrowserTab.current = null;
+      setActiveWorkbenchTabId(current => current === id ? null : current);
+      console.error("Could not open browser tab", error);
+    });
     setWorkbenchCollapsed(false);
     setActiveWorkbenchTabId(id);
   }, [browser.open]);
@@ -374,9 +392,25 @@ export function App() {
   }, [unorderedTabs]);
 
   useEffect(() => {
+    const changedConversation = previousBrowserConversation.current !== session.activeConversationId;
+    previousBrowserConversation.current = session.activeConversationId;
+    if (changedConversation) pendingBrowserTab.current = null;
+    const selected = browser.state.selected[conversationKey];
+    if (selected && browser.tabs.some(tab => tab.id === selected) &&
+      (changedConversation || activeWorkbenchTab?.kind === "browser") && !pendingBrowserTab.current) {
+      setActiveWorkbenchTabId(selected);
+    }
+  }, [session.activeConversationId, conversationKey, browser.state.selected, browser.tabs, activeWorkbenchTab?.kind]);
+
+  useEffect(() => {
+    if (pendingBrowserTab.current) {
+      if (!workbenchTabs.some(tab => tab.id === pendingBrowserTab.current)) return;
+      pendingBrowserTab.current = null;
+    }
     if (activeWorkbenchTabId && workbenchTabs.some((tab) => tab.id === activeWorkbenchTabId)) return;
-    setActiveWorkbenchTabId(workbenchTabs.at(-1)?.id ?? null);
-  }, [activeWorkbenchTabId, workbenchTabs]);
+    const selected = browser.state.selected[conversationKey];
+    setActiveWorkbenchTabId(workbenchTabs.some(tab => tab.id === selected) ? selected : workbenchTabs.at(-1)?.id ?? null);
+  }, [activeWorkbenchTabId, workbenchTabs, browser.state.selected, conversationKey]);
 
   // 真正切换工作区后旧目录的终端已失效,连同文件浏览标签一起关闭;
   // 启动时 "" → 工作区地址只是状态尚未到位,保留已有标签。
@@ -524,6 +558,9 @@ export function App() {
     <FileIconThemeProvider value={preferences.fileIconTheme}>
       <AppLocaleProvider locale={preferences.locale}>
         <div className="app-screens">
+          <BrowserViewHost tabs={browser.allTabs}
+            activeTabId={browser.tabs.some(tab => tab.id === activeWorkbenchTabId) ? activeWorkbenchTabId : null}
+            visible={onboardingComplete && !settingsOpen && !workbenchCollapsed} hosted={browser.hosted} command={browser.command} />
           <ScreenPresence present={!onboardingComplete} className="app-screen-onboarding">
             <div className={`vela-window platform-${platform} onboarding-window`}>
               <OnboardingView
@@ -581,7 +618,7 @@ export function App() {
                   onCloseFileTab={onCloseFileTab}
                   onCloseAllFileTabs={onCloseAllFileTabs}
                 >
-                  <Presence present={!settingsOpen} className="main-stage-pane" keepMounted={browser.tabs.length > 0}>
+                  <Presence present={!settingsOpen} className="main-stage-pane">
                     <PlanDocumentProvider
                       plans={session.state?.session.planRevisions ?? []}
                       draft={session.planDraft}
@@ -646,6 +683,7 @@ export function App() {
                         />
                       </AgentWorkspaceProvider>
                       <WorkbenchPanel
+                        browserOperating={browser.state.operating.includes(conversationKey)}
                         tabs={workbenchTabs}
                         collapsed={workbenchCollapsed}
                         onCollapse={() => {
@@ -678,7 +716,10 @@ export function App() {
                         onNewTab={openStartTab}
                         onStartAction={handleStartAction}
                         gitAvailable={Boolean(project.git?.repo)}
-                        onActivateTab={(tab) => setActiveWorkbenchTabId(tab.id)}
+                        onActivateTab={(tab) => {
+                          if (tab.kind === "browser") browser.select(tab.id);
+                          setActiveWorkbenchTabId(tab.id);
+                        }}
                         onCloseTab={closeWorkbenchTab}
                       />
                       {!floatingInfo ? <ContextPanel

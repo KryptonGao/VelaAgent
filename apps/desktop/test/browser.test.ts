@@ -121,3 +121,40 @@ describe("BrowserController lifecycle and navigation", () => {
     controller.attach(guest); guest.emit("dom-ready"); assert.equal(state().url, guest.url);
   });
 });
+
+describe("BrowserController Host projection", () => {
+  it("routes every manual navigation command through Host without accessing the guest", () => {
+    const commands: unknown[] = [];
+    const controller = new BrowserController({ tabId: "shared", command: command => commands.push(command) });
+    const guest = new Guest();
+    controller.attach(guest);
+    guest.emit("dom-ready");
+    controller.setAddress("localhost:5173"); controller.navigate();
+    controller.back(); controller.forward(); controller.refresh(); controller.stop();
+    assert.deepEqual(guest.calls, []);
+    assert.deepEqual(commands, [
+      { type: "goto", tabId: "shared", url: "http://localhost:5173/" },
+      { type: "back", tabId: "shared" }, { type: "forward", tabId: "shared" },
+      { type: "reload", tabId: "shared" }, { type: "stop", tabId: "shared" },
+    ]);
+    assert.equal(controller.store.getSnapshot().ready, false);
+  });
+  it("projects authoritative state, preserves address drafts and survives view detachment", () => {
+    const controller = new BrowserController({ tabId: "shared", command: () => {} });
+    const tab = { id: "shared", conversationId: "a", url: "https://example.com/", title: "Example",
+      loading: true, ready: true, canGoBack: true, canGoForward: false, error: null, width: 1024, height: 768 };
+    controller.project(tab);
+    assert.equal(controller.store.getSnapshot().address, tab.url);
+    controller.setAddress("draft.example");
+    controller.project({ ...tab, url: "https://example.com/redirect", loading: false });
+    assert.equal(controller.store.getSnapshot().address, "draft.example");
+    assert.equal(controller.store.getSnapshot().url, "https://example.com/redirect");
+    const snapshot = controller.store.getSnapshot();
+    controller.detach();
+    assert.equal(controller.store.getSnapshot(), snapshot);
+    controller.resetAddress();
+    assert.equal(controller.store.getSnapshot().address, "https://example.com/redirect");
+    controller.setAddress("file:///private"); controller.navigate();
+    assert.equal(controller.store.getSnapshot().error?.code, "invalid-address");
+  });
+});

@@ -1,66 +1,70 @@
-/** Future Agent browsers are provider-owned sessions. Never adapt the manual UI webview. */
-export type BrowserUseCapability = "snapshot" | "screenshot" | "actions";
+import { toolResultIsError } from "./tool-activity";
+import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 
-export interface BrowserUseSessionOptions {
-  /** Logical ownership for cleanup and concurrency isolation. */
-  ownerId: string;
-  /** Provider-specific profile; must not refer to the manual UI browser partition. */
-  profileId?: string;
-  initialUrl?: string;
-  signal?: AbortSignal;
+export type BrowserReplContent =
+  | { type: "text"; text: string }
+  | { type: "image"; data: string; mimeType: string };
+
+/** Operates the conversation's existing Browser Panel guests. Host owns isolation and lifecycle. */
+export interface BrowserReplService {
+  execute(input: {
+    conversationId: string; agentId: string; turnId: string; invocationId: string;
+    code: string; timeoutMs?: number; cwd: string; signal?: AbortSignal;
+  }): Promise<{ content: BrowserReplContent[]; details?: unknown; isError?: boolean }>;
+  reset(input: { conversationId: string; agentId: string; signal?: AbortSignal }): Promise<void>;
+  dispose?(): void | Promise<void>;
 }
 
-export interface BrowserUseTarget {
-  /** A reference from a provider's latest snapshot, or a provider-supported selector. */
-  ref?: string;
-  selector?: string;
+export interface BrowserReplPermission {
+  request(input: { kind: "browser_repl"; command: string; cwd: string; workspace: string; signal?: AbortSignal }): Promise<boolean>;
 }
 
-export type BrowserUseAction =
-  | { type: "click"; target: BrowserUseTarget }
-  | { type: "fill"; target: BrowserUseTarget; value: string }
-  | { type: "press"; key: string; target?: BrowserUseTarget }
-  | { type: "scroll"; x: number; y: number; target?: BrowserUseTarget };
+export const browserToolNames = ["browser_repl", "browser_repl_reset"] as const;
+export const browserUseInstructions = `Browser Use operates the same pages as the right-hand Browser Panel, including existing login state.
+Use browser_repl with persistent JavaScript and top-level await. Start with const browser = await agent.browsers.get("iab"); inspect browser.tabs.list() or browser.tabs.selected().
+Inspect tab.snapshot() before acting. Use tab.query({ref}), {role,name}, {text}, or {css}; locators support click, fill, type, press, selectOption. References become stale after navigation or node replacement; inspect again.
+Use nodeRepl.write(value) for text and nodeRepl.emitImage(await tab.screenshot()) for real image output. Check the same page after edits/HMR. Console and network diagnostics are available via tab.console() and tab.network().
+Await all browser operations. Calls default to 30 seconds and permit at most 120 seconds. browser_repl_reset clears JavaScript bindings while retaining pages and login state.
+This Node REPL can modify local files; existing execution permissions apply. Browser REPL calls invalidate Goal validation; revalidate after using them.`;
 
-export interface BrowserUseSnapshot {
-  url: string;
-  title: string;
-  /** Provider-neutral text / accessibility representation, with action references. */
-  content: string;
-}
-
-export interface BrowserUseScreenshot {
-  data: Uint8Array;
-  mimeType: "image/png" | "image/jpeg";
-}
-
-/** Playwright/CDP implementations own their transport and browser resources. */
-export interface BrowserUseSession {
-  readonly id: string;
-  readonly providerId: string;
-  readonly ownerId: string;
-  readonly capabilities: readonly BrowserUseCapability[];
-  navigate(url: string, signal?: AbortSignal): Promise<void>;
-  snapshot(signal?: AbortSignal): Promise<BrowserUseSnapshot>;
-  screenshot(signal?: AbortSignal): Promise<BrowserUseScreenshot>;
-  perform(action: BrowserUseAction, signal?: AbortSignal): Promise<void>;
-  /** Idempotent; releases only this session's provider-owned resources. */
-  close(): Promise<void>;
-}
-
-export interface BrowserUseProvider {
-  readonly id: string;
-  readonly capabilities: readonly BrowserUseCapability[];
-  createSession(options: BrowserUseSessionOptions): Promise<BrowserUseSession>;
-}
-
-/** Registry/lifecycle contract only; not instantiated or registered as an Agent tool yet. */
-export interface BrowserUseManager {
-  registerProvider(provider: BrowserUseProvider): void;
-  createSession(providerId: string, options: BrowserUseSessionOptions): Promise<BrowserUseSession>;
-  getSession(sessionId: string): BrowserUseSession | undefined;
-  listSessions(ownerId?: string): readonly BrowserUseSession[];
-  closeSession(sessionId: string): Promise<void>;
-  closeOwnerSessions(ownerId: string): Promise<void>;
-  dispose(): Promise<void>;
+export function createBrowserTools(input: {
+  service: BrowserReplService; permission?: BrowserReplPermission;
+  conversationId: string; agentId: string; cwd: string;
+  turnId: () => string; allowed: () => boolean;
+}): ToolDefinition[] {
+  const guard = (signal?: AbortSignal): void => {
+    signal?.throwIfAborted();
+    if (!input.allowed()) throw new Error("Browser REPL is unavailable in Plan or explore mode.");
+  };
+  return [defineTool({
+    name: "browser_repl", label: "Browser REPL",
+    description: browserUseInstructions,
+    parameters: Type.Object({ code: Type.String({ minLength: 1 }), timeoutMs: Type.Optional(Type.Integer({ minimum: 1, maximum: 120000 })) }),
+    async execute(invocationId, params, signal) {
+      guard(signal);
+      if (params.timeoutMs !== undefined && (!Number.isInteger(params.timeoutMs) || params.timeoutMs < 1 || params.timeoutMs > 120000)) throw new Error("timeoutMs must be between 1 and 120000.");
+      if (!params.code.trim()) throw new Error("JavaScript code is required.");
+      if (!input.permission || !await input.permission.request({ kind: "browser_repl", command: params.code, cwd: input.cwd, workspace: input.cwd, signal })) {
+        throw new Error("Browser REPL execution permission denied.");
+      }
+      guard(signal);
+      const result = await input.service.execute({ conversationId: input.conversationId, agentId: input.agentId,
+        turnId: input.turnId(), invocationId, code: params.code, timeoutMs: params.timeoutMs ?? 30000, cwd: input.cwd, signal });
+      if (toolResultIsError("browser_repl", result, false)) {
+        const message = result.content.filter(part => part.type === "text").map(part => part.text).join("\n");
+        throw new Error(message || "Browser REPL execution failed.");
+      }
+      return { ...result, details: result.details ?? {} };
+    },
+  }), defineTool({
+    name: "browser_repl_reset", label: "Reset Browser REPL",
+    description: "Reset JavaScript bindings for this agent; retain browser pages and login state.",
+    parameters: Type.Object({}),
+    async execute(_invocationId, _params, signal) {
+      guard(signal);
+      await input.service.reset({ conversationId: input.conversationId, agentId: input.agentId, signal });
+      return { content: [{ type: "text", text: "Browser REPL context reset; pages retained." }], details: {} };
+    },
+  })];
 }

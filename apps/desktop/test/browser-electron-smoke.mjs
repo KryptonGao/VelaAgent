@@ -4,6 +4,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, session, webContents } from "electron";
 
 const temporary = mkdtempSync(join(tmpdir(), "vela-browser-smoke-"));
@@ -43,7 +45,7 @@ async function run() {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
-    await import("../out/main/index.mjs");
+    await import(process.env.VELA_BROWSER_SMOKE_APP_PATH ?? "../out/main/index.mjs");
     await until(() => BrowserWindow.getAllWindows().length > 0, "application window");
     const win = BrowserWindow.getAllWindows()[0];
     win.webContents.on("console-message", (event) => {
@@ -86,8 +88,67 @@ async function run() {
     assert.notEqual(guest.session, win.webContents.session);
     console.log("PASS real guest navigation, address/title/loading synchronization and isolation");
 
+    // Feed real CDP action coordinates through the product's normal state projection.
+    // No model credentials are needed, and page screenshots remain overlay-free.
+    const require = createRequire(new URL('../package.json', import.meta.url));
+    const adapterPath = join(temporary, 'browser-cdp.mjs');
+    await require('esbuild').build({ entryPoints: [fileURLToPath(new URL('../src/main/browser-cdp.ts', import.meta.url))],
+      outfile: adapterPath, bundle: true, platform: 'node', format: 'esm', target: 'node22', external: ['electron'] });
+    const { BrowserCdp } = await import(adapterPath);
+    const adapter = new BrowserCdp(guest);
+    let cursorState = await evaluate("window.vela.browser.command({type:'state'})");
+    const cursorTab = cursorState.tabs.find(tab => tab.url === base + '/one');
+    let cursorSequence = 0;
+    const notify = action => {
+      cursorTab.agentCursor = { ...action, sequence: ++cursorSequence };
+      win.webContents.send('browser:state', cursorState);
+    };
+    try {
+      await until(() => evaluate("!!document.querySelector('.browser-agent-pointer.is-idle')"), 'initial idle Agent pointer');
+      await evaluate("window.__cursorPointer=document.querySelector('.browser-agent-pointer');true");
+      await adapter.call('click', [{ css: '#saved' }], undefined, undefined, notify);
+      await until(() => evaluate("!!document.querySelector('.browser-agent-pointer.is-click')"), 'Agent click pointer');
+      await pause(360);
+      assert.equal(await evaluate("document.querySelector('.browser-agent-pointer')===window.__cursorPointer"), true);
+      const pointer = await evaluate("(() => { const n=document.querySelector('.browser-agent-pointer'), f=n.closest('.browser-guest-frame'), p=n.getBoundingClientRect(), r=f.getBoundingClientRect(); return {x:p.left-r.left,y:p.top-r.top,label:n.textContent,passthrough:getComputedStyle(n.closest('.browser-agent-overlay')).pointerEvents,under:document.elementFromPoint(p.left,p.top)?.tagName}; })()");
+      assert.ok(Math.abs(pointer.x - cursorTab.agentCursor.x) < 2); assert.ok(Math.abs(pointer.y - cursorTab.agentCursor.y) < 2);
+      assert.equal(pointer.label, ''); assert.equal(pointer.passthrough, 'none'); assert.equal(pointer.under, 'WEBVIEW');
+      assert.equal(await guest.executeJavaScript("!!document.querySelector('.browser-agent-pointer')"), false);
+      if (process.env.VELA_BROWSER_CURSOR_CAPTURE_DIR) {
+        mkdirSync(process.env.VELA_BROWSER_CURSOR_CAPTURE_DIR, { recursive: true });
+        writeFileSync(join(process.env.VELA_BROWSER_CURSOR_CAPTURE_DIR, 'agent-cursor-light.png'), (await win.webContents.capturePage()).toPNG());
+        await evaluate("document.documentElement.dataset.scheme='dark'"); await pause(100);
+        writeFileSync(join(process.env.VELA_BROWSER_CURSOR_CAPTURE_DIR, 'agent-cursor-dark.png'), (await win.webContents.capturePage()).toPNG());
+        await evaluate("document.documentElement.dataset.scheme='light'");
+      }
+      cursorTab.agentCursor = { ...cursorTab.agentCursor, active: false }; win.webContents.send('browser:state', cursorState);
+      await pause(2000);
+      assert.equal(await evaluate("document.querySelector('.browser-agent-pointer')===window.__cursorPointer && window.__cursorPointer.textContent===''"), true);
+      await adapter.call('type', [{ css: '#saved' }, '-agent'], undefined, undefined, notify);
+      await until(() => evaluate("!!document.querySelector('.browser-agent-pointer.is-type')"), 'Agent typing pointer');
+      assert.equal(await guest.executeJavaScript("document.querySelector('#saved').value"), 'original-agent');
+      await adapter.call('scroll', [{ y: 120 }], undefined, undefined, notify);
+      await until(() => evaluate("!!document.querySelector('.browser-agent-pointer.is-scroll')"), 'Agent scroll pointer');
+      assert.equal(await evaluate("document.querySelector('.browser-agent-pointer')===window.__cursorPointer"), true);
+      await pause(360);
+      assert.equal(await evaluate("document.querySelector('.browser-agent-pointer').textContent"), '');
+      win.webContents.debugger.attach('1.3');
+      try {
+        await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+        assert.ok(Number.parseFloat(await evaluate("getComputedStyle(document.querySelector('.browser-agent-pointer')).transitionDuration")) <= .0001);
+        assert.equal(await evaluate("getComputedStyle(document.querySelector('.browser-agent-feedback')).animationName"), 'none');
+      } finally { win.webContents.debugger.detach(); }
+      // Stopping removes action feedback while preserving the cursor and guest.
+      cursorTab.agentCursor = { ...cursorTab.agentCursor, active: false }; win.webContents.send('browser:state', cursorState);
+      await until(() => evaluate("!!document.querySelector('.browser-agent-pointer.is-idle')"), 'Agent pointer returns to idle');
+      assert.equal(await evaluate("document.querySelector('.browser-agent-pointer')===window.__cursorPointer && !document.querySelector('.browser-agent-feedback')"), true);
+      assert.equal(guest.isDestroyed(), false);
+    } finally { adapter.dispose(); }
+    console.log("PASS persistent Agent pointer, smooth movement, click/type/scroll feedback, input passthrough, reduced motion and stop retention");
+
     await guest.executeJavaScript("document.querySelector('#saved').value='preserved';window.fixtureMarker=42;scrollTo(0,350)");
     const originalScroll = await guest.executeJavaScript("scrollY");
+    const originalViewport = await guest.executeJavaScript("({width:innerWidth,height:innerHeight})");
     const originalRequests = requests.get("/one");
     await evaluate("document.querySelector('.workbench-new-tab').click()");
     await pause(200);
@@ -99,6 +160,7 @@ async function run() {
     assert.equal(await evaluate("document.querySelector('.workbench-panel').inert"), true);
     assert.equal(await evaluate("getComputedStyle(document.querySelector('.main-chat-view')).getPropertyValue('--paper-right-radius').trim() === '0px'"), false);
     assert.equal(guest.isDestroyed(), false);
+    assert.deepEqual(await guest.executeJavaScript("({width:innerWidth,height:innerHeight})"), originalViewport);
     await evaluate("document.querySelector('[aria-label=\"Expand workbench\"]').click()"); await pause(500);
     assert.deepEqual(await guest.executeJavaScript("({value:document.querySelector('#saved').value,marker:window.fixtureMarker,scroll:scrollY})"),
       { value: "preserved", marker: 42, scroll: originalScroll });
@@ -107,11 +169,38 @@ async function run() {
 
     await evaluate("document.querySelector('.sidebar-user-pill').click()"); await pause(650);
     assert.equal(guest.isDestroyed(), false);
-    assert.equal(await evaluate("document.querySelector('.main-stage-pane.is-overlay').inert"), true);
+    assert.equal(await evaluate("Array.from(document.querySelectorAll('.browser-guest-frame')).every(n => n.inert)"), true);
     await evaluate("document.querySelector('.sidebar-user-pill').click()"); await pause(500);
     assert.equal(await guest.executeJavaScript("window.fixtureMarker"), 42);
     assert.equal(requests.get("/one"), originalRequests);
     console.log("PASS opening/closing Settings retains the guest and excludes hidden controls");
+
+    const originalConversationId = (await evaluate("window.vela.getState()")).activeConversationId;
+    await guest.executeJavaScript("document.cookie='manualLogin=present; path=/';localStorage.setItem('loginFixture','present')");
+    const anotherConversation = await evaluate("window.vela.createConversation()");
+    await until(() => evaluate("!Array.from(document.querySelectorAll('.workbench-tab')).some(n => n.textContent.includes('Page One'))"), "conversation-owned tab bar");
+    assert.equal(guest.isDestroyed(), false);
+    assert.equal(await guest.executeJavaScript("window.fixtureMarker"), 42);
+    await evaluate("document.querySelector('.workbench-new-tab').click()");
+    await until(() => evaluate("!!document.querySelector('.start-option')"), "new conversation start tab");
+    await evaluate("Array.from(document.querySelectorAll('.start-option')).find(n => n.textContent.includes('Browser')).click()");
+    await until(() => webContents.getAllWebContents().filter(item => item.getType() === 'webview').length === 2, "other conversation guest");
+    const conversationGuest = webContents.getAllWebContents().find(item => item.getType() === 'webview' && item.id !== guest.id);
+    await until(() => evaluate("document.querySelector('.workbench-tabpanel:not(.is-inactive) [aria-label=\"Reload\"]')?.disabled === false"), "other conversation guest ready");
+    await navigate("/two"); await loaded("/two", "Page Two");
+    assert.equal(await conversationGuest.executeJavaScript("document.cookie.includes('manualLogin=present') && localStorage.getItem('loginFixture') === 'present'"), true);
+    await evaluate(`window.vela.switchConversation(${JSON.stringify(originalConversationId)})`);
+    await loaded("/one", "Page One");
+    assert.equal(conversationGuest.isDestroyed(), false);
+    assert.equal(await guest.executeJavaScript("window.fixtureMarker"), 42);
+    assert.equal(requests.get("/one"), originalRequests);
+    await evaluate(`window.vela.switchConversation(${JSON.stringify(anotherConversation.activeConversationId)})`);
+    await loaded("/two", "Page Two");
+    await evaluate("(() => { const tabs=Array.from(document.querySelectorAll('.workbench-tab')); document.querySelectorAll('.workbench-tab-close')[tabs.findIndex(n=>n.getAttribute('aria-selected')==='true')].click(); })()");
+    await until(() => conversationGuest.isDestroyed(), "other conversation guest close");
+    await evaluate(`window.vela.switchConversation(${JSON.stringify(originalConversationId)})`);
+    await loaded("/one", "Page One");
+    console.log("PASS conversation tab isolation, empty-conversation retention and shared manual login storage");
 
     await navigate("/redirect"); await loaded("/two", "Page Two");
     await evaluate("document.querySelector('[aria-label=\"Back\"]').click()"); await loaded("/one", "Page One");
@@ -209,7 +298,7 @@ async function run() {
     await openLinkSettings();
     await until(() => evaluate("document.querySelectorAll('[aria-label=\"Conversation links\"] button')[1]?.getAttribute('aria-checked') === 'true'"), "restored link preference");
     console.log("PASS setting changes apply to existing messages and persist across renderer reload");
-    console.log("Browser Electron smoke: 8 checks passed");
+    console.log("Browser Electron smoke: 10 checks passed");
     clearTimeout(watchdog);
     server.closeAllConnections(); server.close();
     app.quit();

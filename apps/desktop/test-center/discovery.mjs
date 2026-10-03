@@ -161,6 +161,10 @@ export function discoverTasks() {
   const tasks = [...nodeTasks(), ...uiTasks()];
   const packageJsonText = readFileSync(join(desktopDir, "package.json"), "utf8");
   const features = parseFeatureGroups(packageJsonText, tasks);
+  for (const fixture of browserFixtures) {
+    const feature = features.find((entry) => entry.id === fixture.feature);
+    if (feature) feature.taskIds.push(fixture.id);
+  }
   for (const task of tasks) {
     const feature = features.find((entry) => entry.taskIds.includes(task.id));
     task.feature = feature ? feature.id : null;

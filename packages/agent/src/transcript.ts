@@ -4,7 +4,7 @@ import type { ProposedPlanItem, TranscriptMessage, TranscriptTool } from "@vela/
 import { randomUUID } from "node:crypto";
 import { userMessageText } from "./context-usage";
 import { isPlanExecutionPrompt, extractProposedPlans, normalizePlanMarkdown, sortPlans } from "./plan";
-import { activityFromCall, activityFromExecution } from "./tool-activity";
+import { activityFromCall, activityFromExecution, toolResultIsError } from "./tool-activity";
 import type { TurnTiming } from "./turn-timing";
 
 /** 一条界面消息,以及它在 Pi 会话文件里的来源条目和时间。 */
@@ -180,12 +180,12 @@ function transcriptFromSources(sources: TranscriptSource[], plans: readonly Prop
       for (const entry of result) {
         const tool = entry.tools.find((item) => item.id === message.toolCallId);
         if (!tool) continue;
-        tool.status = message.isError ? "error" : "done";
+        tool.status = toolResultIsError(message.toolName || tool.name, message, message.isError) ? "error" : "done";
         tool.activity = activityFromExecution(
           message.toolName || tool.name,
           argsByCall.get(message.toolCallId),
           message,
-          message.isError,
+          toolResultIsError(message.toolName || tool.name, message, message.isError),
         );
       }
     }

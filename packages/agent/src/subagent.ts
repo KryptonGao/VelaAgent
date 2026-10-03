@@ -47,6 +47,9 @@ export function exploreCommandAllowed(command: string): boolean {
 export function createExploreGuardExtension(): ExtensionFactory {
   return (pi) => {
     pi.on("tool_call", async (event) => {
+      if (event.toolName === "browser_repl" || event.toolName === "browser_repl_reset") {
+        return { block: true, reason: "查阅子代理不能使用 Browser REPL。" };
+      }
       if (isToolCallEventType("edit", event) || isToolCallEventType("write", event)) {
         return { block: true, reason: "查阅子代理不能修改文件。" };
       }

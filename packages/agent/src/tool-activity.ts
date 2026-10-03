@@ -10,6 +10,7 @@ export function activityFromCall(toolName: string, args: unknown): ToolActivity 
     return agentMessageCallActivity(toolName, args);
   }
   if (toolName === "update_plan") return planActivity(args);
+  if (toolName === "browser_repl") return { command: readString(args, "code") };
   const command = readString(args, "command");
   const path = readString(args, "path") ?? readString(args, "file_path");
   if (toolName === "bash") return command ? { command } : {};
@@ -40,6 +41,7 @@ export function activityFromExecution(
   }
   const call = activityFromCall(toolName, args);
   const text = textOf(result);
+  if (toolName === "browser_repl") return { ...call, body: browserResultBody(result, text) };
   if (isError) {
     return { command: call.command, path: call.path, body: clip(text) || "执行失败" };
   }
@@ -350,4 +352,26 @@ function readOptionLabels(source: unknown, key: string): string[] {
   return value
     .map((item) => (item && typeof item === "object" ? readString(item, "label")?.trim() : undefined))
     .filter((item): item is string => Boolean(item));
+}
+
+/** Stored in the existing activity body so restored transcripts retain screenshot previews. */
+function browserResultBody(result: unknown, text: string): string {
+  const content = result && typeof result === "object" ? (result as { content?: unknown }).content : undefined;
+  const previews: string[] = [];
+  if (Array.isArray(content)) for (const part of content) {
+    if (part?.type === "image" && typeof part.data === "string" &&
+        /^image\/(png|jpeg|webp|gif)$/.test(part.mimeType) && /^[A-Za-z0-9+/=\r\n]+$/.test(part.data)) {
+      previews.push(`![Browser screenshot](data:${part.mimeType};base64,${part.data.replace(/\s/g, "")})`);
+    }
+  }
+  return [clip(text), ...previews].filter(Boolean).join("\n\n");
+}
+
+
+/** Pi can omit its error flag for tools returning a normalized Browser Host failure. */
+export function toolResultIsError(toolName: string, result: unknown, isError: boolean): boolean {
+  if (isError) return true;
+  if (toolName !== "browser_repl" || !result || typeof result !== "object") return false;
+  const record = result as { isError?: unknown; details?: { isError?: unknown } };
+  return record.isError === true || record.details?.isError === true;
 }

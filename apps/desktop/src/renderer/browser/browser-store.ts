@@ -1,5 +1,5 @@
 export interface BrowserError {
-  code: "invalid-address" | "load-failed" | "renderer-gone";
+  code: string;
   detail?: string;
 }
 

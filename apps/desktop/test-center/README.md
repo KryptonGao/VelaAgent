@@ -4,6 +4,7 @@
 
 - **Node 单测**:`packages/agent/test`、`packages/workspace/test`、`apps/desktop/test` 下的全部 `*.test.ts`,一个 `node --test` 批次运行,按文件实时汇报。
 - **浏览器 UI 检查**:`apps/desktop/test` 里带 `?checks=1` 的预览页,由 Electron 驱动隐藏窗口逐个运行,自动收集 PASS/FAIL。
+- **Agent 鼠标**:「Agent 鼠标 · 界面与动效」检查生产组件的持续显示、坐标、动作反馈、无文字标签、连续平滑移动、点击透传和隐藏/停止状态；「Agent 鼠标 · Electron 网页操作」先构建当前代码，再运行真实 App/CDP/webview 冒烟，包含空闲时保留指针、输入、滚动、减少动画、页面保留和导航。两项都归入 UI 和 `browser` 功能分组。
 - 运行结果落盘到 `.runs/last-run.json`,刷新页面或重启服务后仍能看到上次结果。
 
 ## 快速开始
@@ -26,6 +27,7 @@ node apps/desktop/test-center/server.mjs --list                 # 列出全部�
 node apps/desktop/test-center/server.mjs --run all              # 运行全部
 node apps/desktop/test-center/server.mjs --run failed           # 只重跑上次失败的任务
 node apps/desktop/test-center/server.mjs --run node:apps/desktop/test/shell-path.test.ts
+node apps/desktop/test-center/server.mjs --run ui:browser-agent-cursor,ui:browser-electron
 ```
 
 `--run` 把 SSE 消息以 NDJSON 写到 stdout,摘要写到 stderr;有失败或运行未正常结束时退出码为 1。选中浏览器检查时会自动把看板服务一起拉起。
@@ -59,6 +61,8 @@ node apps/desktop/test-center/server.mjs --run node:apps/desktop/test/shell-path
 
 3. 在 `test-center/fixtures.mjs` 登记:`id`、`title`、`page`(带 `?checks=1`)、`resultSelector`、`timeoutMs`。
 
+真实 Electron 应用检查可在 fixture 中额外配置 `script`（相对于 `apps/desktop` 的 Node 入口）和 `successText`（完整通过标记）。运行器收集 stdout/stderr，要求退出码为 0 且包含通过标记；超时或停止时清理该检查的进程组。`page` 仍用于看板里的预览链接。`feature` 可将 UI 项加入已有的功能分组。
+
 运行器只认 `data-status`;没有标记时,只有出现以 `FAIL` 开头的行才会判失败,成功会一直等到超时(避免页面刚写出第一行 PASS 就提前收工)。
 
 ## 环境变量
@@ -79,6 +83,7 @@ protocol.mjs         纯逻辑:reporter 事件归约、fixture 判定、flag 探
 runner.mjs           RunManager:Node 批次与 Electron 批次、超时、取消、落盘
 ndjson-reporter.mjs  node:test 自定义 reporter(逐行 JSON)
 ui-checks-runner.mjs Electron 主进程:加载 fixture 并轮询结果元素
+script-fixture-runner.mjs 真实应用脚本的输出、通过标记、超时和进程清理
 fixtures.mjs         浏览器检查清单
 dashboard.*          看板页面(React + TSX,由 Vite 实时转译)
 .runs/               运行结果(已 gitignore)

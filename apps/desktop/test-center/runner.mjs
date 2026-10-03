@@ -254,6 +254,8 @@ export class RunManager extends EventEmitter {
         url: `http://127.0.0.1:${this.port}/${fixture.page}`,
         resultSelector: fixture.resultSelector,
         timeoutMs: fixture.timeoutMs,
+        script: fixture.script ? join(repoRoot, "apps/desktop", fixture.script) : undefined,
+        successText: fixture.successText,
       };
     });
 
@@ -275,7 +277,7 @@ export class RunManager extends EventEmitter {
     }
 
     const configPath = join(tmpdir(), `vela-test-center-${run.id}.json`);
-    await writeFile(configPath, JSON.stringify({ fixtures }), "utf8");
+    await writeFile(configPath, JSON.stringify({ fixtures, nodePath: process.execPath, cwd: repoRoot }), "utf8");
 
     const totalTimeout = fixtures.reduce((sum, fixture) => sum + fixture.timeoutMs, 0) + 60_000;
     await new Promise((resolve) => {

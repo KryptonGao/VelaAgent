@@ -9,3 +9,4 @@ out/
 .zcode/
 .scratch-logo/chrome-profile/
 apps/desktop/test-center/.runs/
+output/

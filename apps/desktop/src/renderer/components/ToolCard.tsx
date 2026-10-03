@@ -37,9 +37,10 @@ import { DurationLabel, ToolDurationLabel, useToolExpanded, useToolProcessDetail
 import type { ToolDisplay } from "../hooks/usePreferences";
 import { localizeError, tr } from "../locale";
 
-type ToolKind = "bash" | "read" | "edit" | "write" | "other";
+type ToolKind = "browser" | "bash" | "read" | "edit" | "write" | "other";
 
 const kindLabels: Record<ToolKind, string> = {
+  browser: "Browser REPL",
   bash: "Bash",
   read: "Read",
   edit: "Edit",
@@ -929,6 +930,17 @@ function ToolBody({
   activity: ToolActivity;
   status: ToolTrace["status"];
 }) {
+  if (kind === "browser") {
+    const body = activity.body ?? "";
+    const pattern = /!\[Browser screenshot\]\((data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+)\)/g;
+    const screenshots = [...body.matchAll(pattern)].map((match) => match[1]);
+    const output = body.replace(pattern, "").trim();
+    return <>
+      {activity.command ? <pre className="tool-note">{activity.command}</pre> : null}
+      {output ? <pre className="tool-note">{output}</pre> : null}
+      {screenshots.map((src, index) => <img key={index} src={src} alt={tr("浏览器截图", "Browser screenshot")} style={{ maxWidth: "100%", height: "auto" }} />)}
+    </>;
+  }
   if (kind === "bash") {
     return (
       <BashView
@@ -1142,6 +1154,7 @@ function toolKindLabel(kind: ToolKind): string {
 }
 
 function toolKind(name: string): ToolKind {
+  if (name === "browser_repl" || name === "browser_repl_reset") return "browser";
   if (name === "bash" || name === "read" || name === "edit" || name === "write") return name;
   return "other";
 }

@@ -1,3 +1,4 @@
+import { browserToolNames, browserUseInstructions, createBrowserTools, type BrowserReplService, type BrowserReplPermission } from "./browser-use";
 import { TurnCheckpoints, type TurnCheckpoint } from "./turn-checkpoints";
 import { TraceRecorder } from "./trace";
 import type { TraceSummaryRequest, TraceUpdate } from "@vela/shared";
@@ -14,6 +15,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
   thinkingLevels,
   type AgentInfo,
+  type SubagentKind,
   type AgentRuntimeStreamEvent,
   type AgentSettings,
   type AskUserQuestionEvent,
@@ -116,7 +118,7 @@ import {
   setSkillEnabled as storeSkillEnabled,
 } from "./skill-management";
 import { migrateExternalSkills, scanExternalSkills as scanExternalSkillSources } from "./skill-migration";
-import { activityFromCall, activityFromExecution, activityFromOutput } from "./tool-activity";
+import { activityFromCall, activityFromExecution, activityFromOutput, toolResultIsError } from "./tool-activity";
 import {
   branchLeafForTurn,
   isVisibleTranscriptMessage,
@@ -159,6 +161,9 @@ export interface AgentRuntimeOptions {
   cwd: string;
   /** Vela 自己的模型目录，不读取本机 Pi 配置。 */
   agentDir: string;
+  /** Optional desktop host for persistent Browser Panel JavaScript contexts. */
+  browserRepl?: BrowserReplService;
+  browserReplPermission?: BrowserReplPermission;
   /** 按会话 cwd 构造沙箱化的 bash/edit/write 工具,以同名覆盖 Pi 内置实现。 */
   toolFactory?: (cwd: string) => ToolDefinition[];
   /** 激活对话的 cwd 变化时回调(用于让工作区等界面状态跟随会话)。 */
@@ -1159,6 +1164,7 @@ export class AgentRuntime {
   }
 
   dispose(): void {
+    void Promise.resolve().then(() => this.options.browserRepl?.dispose?.()).catch(() => {});
     this.thinkingSummaries.dispose();
     this.textAssist.dispose();
     for (const trace of this.traces.values()) trace.dispose();
@@ -1368,7 +1374,7 @@ export class AgentRuntime {
             hasExecutionPlan: entry.snapshot.executionPlan !== null,
           })),
         }],
-        appendSystemPromptOverride: instructions ? (base) => [...base, instructions] : undefined,
+        appendSystemPromptOverride: (base) => [...base, ...(instructions ? [instructions] : []), ...(this.options.browserRepl ? [browserUseInstructions] : [])],
       });
       await resourceLoader.reload();
       const control = new AgentControl({
@@ -1395,9 +1401,10 @@ export class AgentRuntime {
           model: chosen,
           thinkingLevel,
           // tools 是 Pi 的注册表白名单(内置与自定义都过滤),模式和 agent 树工具必须并入才能被激活。
-          tools: [...defaultToolNames, ...modeToolNames, ...agentToolNames],
+          tools: [...defaultToolNames, ...modeToolNames, ...agentToolNames, ...(this.options.browserRepl ? browserToolNames : [])],
           customTools: [
             ...(this.options.toolFactory?.(cwd) ?? []),
+            ...this.browserTools(entry, entry.id),
             ...createModeTools({
               updateExecutionPlan: (items) => this.updateExecutionPlan(entry, items),
               updateGoal: (status, note) => this.updateGoal(entry, status, note),
@@ -1616,7 +1623,7 @@ export class AgentRuntime {
       this.toolArgs.delete(event.toolCallId);
       const goalContext = this.toolGoalContexts.get(event.toolCallId);
       this.toolGoalContexts.delete(event.toolCallId);
-      const activity = activityFromExecution(event.toolName, args, event.result, event.isError);
+      const activity = activityFromExecution(event.toolName, args, event.result, toolResultIsError(event.toolName, event.result, event.isError));
       const entry = this.conversations.get(conversationId);
       const goal = entry?.snapshot.goal;
       if (entry && goalContext && event.toolName === "bash" && goal?.id === goalContext.goalId) {
@@ -1626,7 +1633,7 @@ export class AgentRuntime {
           entry.goalValidationEvidence.set(event.toolCallId, {
             toolCallId: event.toolCallId,
             command: command.slice(0, 1000),
-            result: event.isError ? "failed" : "passed",
+            result: toolResultIsError(event.toolName, event.result, event.isError) ? "failed" : "passed",
             output: (activity.body ?? "").slice(0, 1200),
             completedAt: Date.now(),
             sequence: entry.goalValidationSequence,
@@ -1639,7 +1646,7 @@ export class AgentRuntime {
         conversationId,
         toolCallId: event.toolCallId,
         toolName: event.toolName,
-        isError: event.isError,
+        isError: toolResultIsError(event.toolName, event.result, event.isError),
         activity,
       });
     }
@@ -1696,8 +1703,8 @@ export class AgentRuntime {
         type: "tool_end",
         toolCallId: event.toolCallId,
         toolName: event.toolName,
-        isError: event.isError,
-        activity: activityFromExecution(event.toolName, args, event.result, event.isError),
+        isError: toolResultIsError(event.toolName, event.result, event.isError),
+        activity: activityFromExecution(event.toolName, args, event.result, toolResultIsError(event.toolName, event.result, event.isError)),
       });
     }
   }
@@ -2056,6 +2063,7 @@ export class AgentRuntime {
         ...base,
         ...(instructions ? [instructions] : []),
         agentKindPrompt(input.kind),
+        ...(this.options.browserRepl && input.kind === "general" ? [browserUseInstructions] : []),
       ],
     });
     await resourceLoader.reload();
@@ -2083,8 +2091,8 @@ export class AgentRuntime {
       sessionManager,
       settingsManager,
       resourceLoader,
-      tools: agentToolNamesFor(input.kind),
-      customTools: [...childSandboxTools, ...input.customTools],
+      tools: [...agentToolNamesFor(input.kind), ...(this.options.browserRepl && input.kind === "general" ? browserToolNames : [])],
+      customTools: [...childSandboxTools, ...input.customTools, ...(input.kind === "general" ? this.browserTools(entry, input.agentId, input.kind) : [])],
     });
     session.setSessionName(input.path);
     return session;
@@ -2164,8 +2172,18 @@ export class AgentRuntime {
     }
   }
 
+  private browserTools(entry: Conversation, agentId: string, kind?: SubagentKind): ToolDefinition[] {
+    if (kind === "explore" || !this.options.browserRepl) return [];
+    return createBrowserTools({ service: this.options.browserRepl, permission: this.options.browserReplPermission,
+      conversationId: entry.id, agentId, cwd: entry.snapshot.cwd,
+      turnId: () => `${entry.id}:${entry.activeTurn?.startedAt ?? entry.snapshot.turnStartedAt ?? "idle"}`,
+      allowed: () => entry.snapshot.mode !== "plan",
+    });
+  }
+
   private applyActiveTools(entry: Conversation): void {
     const tools = defaultToolPolicy.availableTools(entry.snapshot.mode, entry.snapshot.executionPlan !== null);
+    if (this.options.browserRepl && entry.snapshot.mode !== "plan") tools.push(...browserToolNames);
     entry.session?.setActiveToolsByName(tools);
     this.patchEntry(entry, { tools });
   }
@@ -2492,7 +2510,7 @@ function cloneGoal(goal: ConversationGoal | null): ConversationGoal | null {
 }
 
 function isPotentialGoalMutation(toolName: string, args: unknown): boolean {
-  if (toolName === "bash" || toolName === "edit" || toolName === "write") return true;
+  if (toolName === "browser_repl" || toolName === "bash" || toolName === "edit" || toolName === "write") return true;
   if (toolName !== spawnAgentToolName) return false;
   if (!args || typeof args !== "object") return true;
   return (args as { agent?: unknown }).agent !== "explore";

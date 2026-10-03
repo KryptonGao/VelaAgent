@@ -207,6 +207,7 @@ describe("agent 树", () => {
     // 子代理自己的会话事件按 agentId 透出，供右侧 Agent Pane 实时渲染。
     assert.ok(host.agentEvents.some((item) => item.agentId === info.id && item.event.type === "turn_end"));
     assert.ok(host.agentEvents.every((item) => item.conversationId === "root-id"));
+    assert.equal(host.requests[0]?.agentId, info.id);
   });
 
   it("子代理可以继续派子代理，路径逐层累加", async () => {
@@ -343,4 +344,19 @@ describe("消息投递", () => {
     const result = await pending;
     assert.equal(result.status, "aborted");
   });
+});
+
+
+it("Browser Host details-only failures mark child steps failed and potentially mutated", async () => {
+  const { control } = createControl();
+  const info = control.spawn("root-id", { kind: "general", task: "check UI", name: "browser" });
+  await waitFor(() => control.list().find(agent => agent.id === info.id)?.status === "completed", "child complete");
+  const internals = control as unknown as { agents: Map<string, unknown>; handleSessionEvent(agent: unknown, event: AgentSessionEvent): void };
+  const managed = internals.agents.get(info.id)!;
+  internals.handleSessionEvent(managed, { type: "tool_execution_start", toolCallId: "browser-call", toolName: "browser_repl", args: { code: "await tab.url()" } } as AgentSessionEvent);
+  internals.handleSessionEvent(managed, { type: "tool_execution_end", toolCallId: "browser-call", toolName: "browser_repl", isError: false, result: { content: [{ type: "text", text: "Tab closed" }], details: { isError: true } } } as AgentSessionEvent);
+  const child = control.list().find(agent => agent.id === info.id)!;
+  assert.equal(child.steps.find(step => step.id === "browser-call")?.status, "error");
+  assert.equal(child.mutated, true);
+  control.dispose();
 });

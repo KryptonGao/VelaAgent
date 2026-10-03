@@ -6,6 +6,7 @@
 import { app, BrowserWindow } from "electron";
 import { readFileSync } from "node:fs";
 import { inferFixtureStatus, reporterPrefix } from "./protocol.mjs";
+import { runScriptFixture } from "./script-fixture-runner.mjs";
 
 const configPath = process.argv[2];
 if (!configPath) {
@@ -17,6 +18,14 @@ const fixtures = Array.isArray(config.fixtures) ? config.fixtures : [];
 const showWindow = process.env.VELA_TEST_CENTER_SHOW === "1";
 const consoleLimit = 64 * 1024;
 const loadTimeoutMs = 30_000;
+const scriptAbort = new AbortController();
+let activeScript = null;
+const stop = () => {
+  scriptAbort.abort();
+  if (activeScript) void activeScript.finally(() => app.exit(0));
+  else app.exit(0);
+};
+process.on("SIGTERM", stop); process.on("SIGINT", stop);
 
 let pendingWrites = 0;
 function emit(payload) {
@@ -73,6 +82,15 @@ async function runFixture(window, fixture) {
   const startedAt = Date.now();
   consoleChunks.set(fixture.id, []);
   emit({ type: "fixture:start", id: fixture.id });
+
+  if (fixture.script) {
+    activeScript = runScriptFixture({ nodePath: config.nodePath, cwd: config.cwd, script: fixture.script,
+      timeoutMs: fixture.timeoutMs, successText: fixture.successText, signal: scriptAbort.signal,
+      onOutput: (stream, chunk) => emit({ type: "fixture:output", id: fixture.id, stream, chunk }) });
+    const result = await activeScript; activeScript = null;
+    if (!scriptAbort.signal.aborted) emit({ type: "fixture:end", id: fixture.id, ...result });
+    return;
+  }
 
   let failure = null;
   try {
@@ -154,6 +172,7 @@ app
     });
 
     for (const fixture of fixtures) {
+      if (scriptAbort.signal.aborted) break;
       currentId = fixture.id;
       await runFixture(window, fixture);
       currentId = null;

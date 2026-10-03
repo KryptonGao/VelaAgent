@@ -1,7 +1,7 @@
 {
   "name": "@vela/desktop",
-  "version": "0.1.4",
-  "shortVersion": "0.1.4",
+  "version": "0.1.5",
+  "shortVersion": "0.1.5",
   "private": true,
   "main": "./out/main/index.mjs",
   "scripts": {
@@ -18,12 +18,15 @@
     "test:conversations": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --test test/conversation-search.test.ts test/conversation-activity.test.ts test/conversation-list.test.ts ../../packages/agent/test/conversation-rename.test.ts",
     "test:session-create": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --experimental-test-module-mocks --test test/session-create.test.ts",
     "test:image-viewer": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --test test/image-viewer.test.ts",
-    "test:browser": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --test test/browser.test.ts test/browser-security.test.ts test/conversation-links.test.ts",
+    "test:browser": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --test test/browser-host.test.ts test/browser-cdp.test.ts test/browser.test.ts test/browser-security.test.ts test/conversation-links.test.ts",
     "test:trace:preview": "node test/trace-preview-server.mjs",
     "test:center": "node test-center/server.mjs",
     "build": "electron-vite build",
     "dist:mac": "electron-vite build && electron-builder --mac --arm64",
-    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit"
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "test:browser-repl": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --experimental-test-module-mocks --test test/browser-repl-manager.test.ts test/browser-repl-worker.test.ts",
+    "test:browser:electron": "electron test/browser-electron-smoke.mjs",
+    "test:browser-use:electron": "node test/browser-use-electron-smoke.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "^0.87.1",

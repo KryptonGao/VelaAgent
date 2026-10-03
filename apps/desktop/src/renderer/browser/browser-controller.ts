@@ -1,3 +1,4 @@
+import type { BrowserTabState, BrowserUiCommand } from "@vela/shared";
 import { normalizeBrowserAddress, UI_BROWSER_BLANK_URL } from "../../browser-policy";
 import { BrowserStore } from "./browser-store";
 
@@ -16,7 +17,7 @@ export interface BrowserView {
   stop(): void;
 }
 
-/** A single manual browser tab; lifetime is independent of visibility. */
+/** Host-backed UI projection; the guest adapter is used only without preload. */
 export class BrowserController {
   readonly store = new BrowserStore();
   private view: BrowserView | null = null;
@@ -24,7 +25,23 @@ export class BrowserController {
   private pendingUrl: string | null = null;
   private navigation = 0;
 
+  constructor(private readonly host?: { tabId: string; command: (command: BrowserUiCommand) => void }) {}
+
+  project(tab: BrowserTabState): void {
+    const state = this.store.getSnapshot();
+    const { url, title, loading, ready, canGoBack, canGoForward, error } = tab;
+    this.store.update({ url, title, loading, ready, canGoBack, canGoForward, error,
+      ...(!state.editingAddress ? { address: url === UI_BROWSER_BLANK_URL ? "" : url } : {}) });
+  }
+
+  private send(type: "back" | "forward" | "reload" | "stop"): boolean {
+    if (!this.host) return false;
+    this.host.command({ type, tabId: this.host.tabId });
+    return true;
+  }
+
   attach(view: BrowserView): void {
+    if (this.host) return;
     if (this.view === view) return;
     this.detach();
     this.view = view;
@@ -62,6 +79,7 @@ export class BrowserController {
   }
 
   detach(): void {
+    if (this.host) return;
     this.navigation++;
     this.detachListeners?.();
     this.detachListeners = null;
@@ -80,17 +98,21 @@ export class BrowserController {
     const url = normalizeBrowserAddress(this.store.getSnapshot().address);
     if (!url) { this.store.update({ error: { code: "invalid-address" } }); return; }
     this.store.update({ address: url, editingAddress: false, error: null });
+    if (this.host) { this.host.command({ type: "goto", tabId: this.host.tabId, url }); return; }
     if (!this.view || !this.store.getSnapshot().ready) this.pendingUrl = url;
     else this.load(url);
   };
   back = (): void => {
+    if (this.send("back")) return;
     if (this.store.getSnapshot().ready && this.store.getSnapshot().canGoBack) this.run((view) => view.goBack());
   };
   forward = (): void => {
+    if (this.send("forward")) return;
     if (this.store.getSnapshot().ready && this.store.getSnapshot().canGoForward) this.run((view) => view.goForward());
   };
-  refresh = (): void => { if (this.store.getSnapshot().ready) this.run((view) => view.reload()); };
+  refresh = (): void => { if (this.send("reload")) return; if (this.store.getSnapshot().ready) this.run((view) => view.reload()); };
   stop = (): void => {
+    if (this.send("stop")) return;
     this.navigation++;
     this.run((view) => view.stop());
     this.store.update({ loading: false });

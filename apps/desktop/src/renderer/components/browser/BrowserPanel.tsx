@@ -1,22 +1,12 @@
-import { useCallback, useSyncExternalStore } from "react";
-import { UI_BROWSER_BLANK_URL, UI_BROWSER_PARTITION } from "../../../browser-policy";
-import type { BrowserController, BrowserView } from "../../browser/browser-controller";
+import { useSyncExternalStore } from "react";
+import { UI_BROWSER_BLANK_URL } from "../../../browser-policy";
+import type { BrowserController } from "../../browser/browser-controller";
 import { tr } from "../../locale";
 import { ArrowLeftIcon, ArrowRightIcon, CloseIcon, GlobeIcon, RefreshIcon } from "../icons";
 
 /** Presentation and DOM binding only. Guest events/navigation live in BrowserController. */
-export function BrowserPanel({ controller }: { controller: BrowserController }) {
+export function BrowserPanel({ controller, tabId, operating, onAbort }: { controller: BrowserController; tabId: string; operating?: boolean; onAbort?: () => void }) {
   const state = useSyncExternalStore(controller.store.subscribe, controller.store.getSnapshot);
-  const bindView = useCallback((element: HTMLElement | null) => {
-    if (element) {
-      // Electron uses presence attributes; React does not serialize this boolean attribute.
-      // Main-process setWindowOpenHandler denies windows and routes safe links in-place.
-      element.setAttribute("allowpopups", "");
-      controller.attach(element as unknown as BrowserView);
-      // Set src last so Electron creates the guest with these attributes already present.
-      if (!element.hasAttribute("src")) element.setAttribute("src", UI_BROWSER_BLANK_URL);
-    } else controller.detach();
-  }, [controller]);
   const error = state.error?.code === "invalid-address"
     ? tr("请输入有效的 HTTP 或 HTTPS 网址", "Enter a valid HTTP or HTTPS address")
     : state.error?.code === "renderer-gone"
@@ -59,13 +49,14 @@ export function BrowserPanel({ controller }: { controller: BrowserController }) 
           : state.url === UI_BROWSER_BLANK_URL ? tr("手动浏览", "Manual browsing") : tr("已加载", "Loaded")}
       </span>
     </div>
+    {operating && <div className="browser-operating" role="status">
+      <span>{tr("Agent 正在操作此对话的浏览器", "Agent is using this conversation’s browser")}</span>
+      <button type="button" onClick={onAbort}>{tr("停止", "Stop")}</button>
+    </div>}
     {error && <div className="browser-error" role="alert">
       {error}{state.error?.detail && <span>{state.error.detail}</span>}
     </div>}
-    <div className="browser-viewport">
-      <webview ref={bindView} className="browser-webview"
-        partition={UI_BROWSER_PARTITION} webpreferences="contextIsolation=yes,sandbox=yes,nodeIntegration=no"
-        aria-label={tr("网页内容", "Web content")} />
+    <div className="browser-viewport" data-browser-viewport={tabId}>
       {state.url === UI_BROWSER_BLANK_URL && !state.loading && !state.error && <div className="browser-empty">
         <span aria-hidden="true"><GlobeIcon size={28} /></span>
         <h2>{tr("打开网页", "Open a web page")}</h2>

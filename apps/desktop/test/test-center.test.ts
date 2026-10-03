@@ -56,7 +56,18 @@ describe("测试中心 · 发现", () => {
       assert.ok(existsSync(join(desktopDir, fixture.page.split("?")[0])), `预览页不存在 ${fixture.page}`);
       assert.ok(fixture.resultSelector.startsWith("#"), fixture.resultSelector);
       assert.ok(fixture.timeoutMs > 0);
+      if (fixture.script) assert.ok(existsSync(join(desktopDir, fixture.script)), `检查脚本不存在 ${fixture.script}`);
     }
+  });
+
+  it("Agent 鼠标界面和真实 Electron 检查出现在 UI 与 browser 功能分组", () => {
+    const {tasks,groups,features}=discoverTasks();
+    for (const id of ["ui:browser-agent-cursor", "ui:browser-electron"]) {
+      assert.equal(tasks.find(task=>task.id===id)?.kind,"ui");
+      assert.ok(groups.find(group=>group.id==="ui")?.taskIds.includes(id));
+      assert.ok(features.find(feature=>feature.id==="browser")?.taskIds.includes(id));
+    }
+    assert.equal(browserFixtures.find(fixture=>fixture.id==="ui:browser-electron")?.script,"test/browser-test-center-smoke.mjs");
   });
 
   it("按引用源码区分桌面测试分层", () => {

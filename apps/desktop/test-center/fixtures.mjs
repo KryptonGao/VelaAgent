@@ -5,6 +5,24 @@
  */
 export const browserFixtures = [
   {
+    id: "ui:browser-agent-cursor",
+    title: "Agent 鼠标 · 界面与动效",
+    feature: "browser",
+    page: "test/browser-agent-cursor-preview.html?checks=1",
+    resultSelector: "#browser-agent-cursor-results",
+    timeoutMs: 30_000,
+  },
+  {
+    id: "ui:browser-electron",
+    title: "Agent 鼠标 · Electron 网页操作",
+    feature: "browser",
+    page: "test/browser-agent-cursor-preview.html",
+    resultSelector: "#browser-agent-cursor-results",
+    script: "test/browser-test-center-smoke.mjs",
+    successText: "Browser Electron smoke:",
+    timeoutMs: 120_000,
+  },
+  {
     id: "ui:motion",
     title: "动效 · Batch 1",
     page: "test/motion-preview.html?checks=1",

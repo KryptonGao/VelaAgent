@@ -39,6 +39,7 @@ export type WorkbenchTab =
 interface WorkbenchPanelProps {
   tabs: WorkbenchTab[];
   collapsed?: boolean;
+  browserOperating?: boolean;
   onCollapse?: () => void;
   activeTabId: string | null;
   contextOpen: boolean;
@@ -135,6 +136,7 @@ function WorkbenchPanelContent({
   getAgentMessages,
   messageStore,
   conversationId,
+  browserOperating,
   toolDisplay,
   ensureAgentMessages,
   onOpenAgent,
@@ -329,7 +331,7 @@ function WorkbenchPanelContent({
       }
       onCloseTab(tab);
     };
-    if (tabs.length === 1) onLastTabClose(tab, completeClose);
+    if (tabs.length === 1 && tab.kind !== "browser") onLastTabClose(tab, completeClose);
     else completeClose();
     requestAnimationFrame(() => {
       if (next) tabButtons.current.get(next.id)?.focus();
@@ -448,7 +450,8 @@ function WorkbenchPanelContent({
         {browserTabs.map((tab) => (
           <WorkbenchTabPanel key={tab.id} id={tabPanelId(tab)} role="tabpanel"
             aria-labelledby={tabButtonId(tab)} hidden={activeTabId !== tab.id}>
-            <BrowserPanel controller={tab.controller} />
+            <BrowserPanel controller={tab.controller} tabId={tab.id} operating={browserOperating}
+              onAbort={() => { if (conversationId) void window.vela?.abort(conversationId); }} />
           </WorkbenchTabPanel>
         ))}
         {fileTabs.length > 0 && preview ? (

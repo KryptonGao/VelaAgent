@@ -1,3 +1,4 @@
+import { toolResultIsError } from "./tool-activity";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
   defineTool,
@@ -30,12 +31,13 @@ export const maxAgentsPerTree = 16;
 /** 同一时刻允许并发运行的子代理回合计。 */
 export const maxConcurrentAgents = 4;
 
-const mutatingToolNames = new Set(["bash", "edit", "write"]);
+const mutatingToolNames = new Set(["bash", "edit", "write", "browser_repl"]);
 
 /** 子代理继承父上下文的策略：不继承、全量、或最近 N 轮。 */
 export type ContextFork = "none" | "all" | number;
 
 export interface AgentSessionRequest {
+  agentId: string;
   /** 恢复子会话时沿用已有消息，不再 fork 父上下文。 */
   sessionFile?: string | null;
   parentId: string;
@@ -550,6 +552,7 @@ export class AgentControl {
     const parentSession = await this.ensureSession(parent);
     if (agent.disposed) throw new Error("子代理已结束。");
     const session = await this.options.host.createChildSession({
+      agentId: agent.info.id,
       parentId: parent.info.id,
       parentPath: parent.info.path,
       parentSession,
@@ -594,7 +597,7 @@ export class AgentControl {
         id: event.toolCallId,
         name: event.toolName,
         summary: current?.summary ?? event.toolName,
-        status: event.isError ? "error" : "done",
+        status: toolResultIsError(event.toolName, event.result, event.isError) ? "error" : "done",
       });
       if (mutatingToolNames.has(event.toolName)) agent.info.mutated = true;
       agent.info.updatedAt = Date.now();

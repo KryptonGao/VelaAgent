@@ -1,4 +1,4 @@
-/** User browsing has its own cookies/storage and never shares the app or Agent session. */
+/** Manual and Agent pages share site cookies/storage in an isolated browser partition. */
 export const UI_BROWSER_PARTITION = "persist:vela-ui-browser";
 export const UI_BROWSER_BLANK_URL = "about:blank";
 

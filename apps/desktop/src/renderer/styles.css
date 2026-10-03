@@ -8515,3 +8515,22 @@ button.turn-changes-path:hover { color: var(--accent-blue); }
 .turn-review-view .diff-split-full { display: block; padding: 5px 12px; background: var(--bg-surface-subtle); font-family: var(--font-sans); font-size: 11px; font-style: normal; }
 .turn-review-view .diff-line.add { box-shadow: inset 3px 0 var(--diff-add-fg); }
 .turn-review-view .diff-line.del { box-shadow: inset 3px 0 var(--diff-del-fg); }
+
+.browser-view-host { position: absolute; width: 0; height: 0; pointer-events: none; }
+.browser-guest-frame { z-index: 20; background: var(--bg-primary); }
+.browser-agent-overlay { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 1; }
+.browser-agent-pointer { position: absolute; left: 0; top: 0; width: 0; height: 0; color: var(--accent-blue); transition: transform 320ms cubic-bezier(.22, 1, .36, 1); will-change: transform; }
+.browser-agent-arrow { display: block; transform: translate(-1.5px, -1.5px); filter: drop-shadow(0 1px 2px rgb(0 0 0 / 35%)); }
+.browser-agent-feedback { position: absolute; left: -12px; top: -12px; width: 24px; height: 24px; border: 2px solid currentColor; border-radius: 50%; background: color-mix(in srgb, var(--accent-blue) 15%, transparent); animation: browser-agent-click 650ms ease-out both; }
+.is-type .browser-agent-feedback, .is-press .browser-agent-feedback, .is-select .browser-agent-feedback { animation: browser-agent-input 850ms ease-out both; }
+.is-scroll .browser-agent-feedback { width: 14px; height: 30px; left: -7px; top: -15px; border-radius: 9px; animation: browser-agent-scroll 700ms ease-out both; }
+@keyframes browser-agent-click { from { transform: scale(.5); opacity: .9; } to { transform: scale(2.2); opacity: 0; } }
+@keyframes browser-agent-input { 0%, 100% { transform: scale(.8); opacity: 0; } 35% { transform: scale(1.2); opacity: .8; } }
+@keyframes browser-agent-scroll { from { transform: translateY(-8px); opacity: .8; } to { transform: translateY(8px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .browser-agent-pointer { transition: none; }
+  .browser-agent-feedback, .is-type .browser-agent-feedback, .is-press .browser-agent-feedback, .is-select .browser-agent-feedback, .is-scroll .browser-agent-feedback { animation: none; opacity: .45; }
+}
+
+.browser-operating { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 14px; font-size: 12px; color: var(--text-secondary); }
+.browser-operating button { color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; background: var(--bg-hover); }

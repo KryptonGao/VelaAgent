@@ -1,3 +1,4 @@
+import { BrowserIpc, type BrowserWindowState } from "../../../../packages/shared/src/browser";
 import {
   IpcChannel,
   type AgentSettings,
@@ -129,6 +130,14 @@ import {
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from "electron";
 
 const api: VelaApi = {
+  browser: {
+    command: (command) => ipcRenderer.invoke(BrowserIpc.command, command),
+    subscribe: (listener) => {
+      const handler = (_event: IpcRendererEvent, state: BrowserWindowState) => listener(state);
+      ipcRenderer.on(BrowserIpc.state, handler);
+      return () => { ipcRenderer.removeListener(BrowserIpc.state, handler); };
+    },
+  },
   platform: process.platform,
   uiStorage: {
     getItem: (key) => storageRequest(IpcChannel.appUiStorageGet, key).value,

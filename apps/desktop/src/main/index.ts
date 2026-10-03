@@ -24,6 +24,10 @@ import { TerminalHost } from "./terminal-host";
 import { prepareVelaHome, resolveVelaHome } from "./vela-home";
 import { UiStorage } from "./ui-storage";
 import { registerUiBrowserSecurity } from "./browser-security";
+import { BrowserHost } from "./browser-host";
+import { BrowserCdp } from "./browser-cdp";
+import { BrowserReplManager } from "./browser-repl";
+import { BrowserIpc, type BrowserUiCommand } from "../../../../packages/shared/src/browser";
 import { UI_BROWSER_PARTITION } from "../browser-policy";
 import appIconPath from "../../resources/icon.png?asset";
 
@@ -37,6 +41,8 @@ const rootDir = dirname(fileURLToPath(import.meta.url));
 const preloadPath = join(rootDir, "../preload/index.js");
 
 let host: SessionHost | null = null;
+let browserHost: BrowserHost | null = null;
+let browserRepl: BrowserReplManager | null = null;
 let project: ProjectHost | null = null;
 let terminals: TerminalHost | null = null;
 
@@ -75,7 +81,9 @@ function createWindow(): BrowserWindow {
     },
   });
 
-  registerUiBrowserSecurity(win.webContents);
+  browserHost?.registerWindow(win.id, win.webContents);
+  registerUiBrowserSecurity(win.webContents, (guest) => browserHost?.registerGuest(win.id, guest));
+  win.once("closed", () => { browserRepl?.closeWindow(win.id); browserHost?.closeWindow(win.id); });
 
   win.once("ready-to-show", () => {
     win.show();
@@ -180,7 +188,21 @@ async function start(): Promise<void> {
   const sandbox = new SandboxPermissionManager(join(home, "vela-settings.json"));
   await sandbox.init();
 
+  browserHost = new BrowserHost((guest) => new BrowserCdp(guest), browserSession);
+  browserRepl = new BrowserReplManager(browserHost, join(rootDir, "browser-repl-worker.mjs"));
+  browserHost.subscribe((windowId, state) => {
+    const window = BrowserWindow.fromId(windowId);
+    if (window && !window.webContents.isDestroyed()) window.webContents.send(BrowserIpc.state, state);
+  });
+  ipcMain.handle(BrowserIpc.command, (event, command: BrowserUiCommand) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || !browserHost) throw new Error("Browser window is unavailable");
+    return browserHost.command(window.id, event.sender, event.senderFrame === event.sender.mainFrame, command);
+  });
+
   const runtime = new AgentRuntime({
+    browserRepl,
+    browserReplPermission: { request: (input) => sandbox.request({ ...input, workspace: workspaceManager.getState().current ?? input.cwd }) },
     cwd: fallbackCwd,
     agentDir: home,
     toolFactory: (cwd) =>
@@ -248,6 +270,10 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  browserRepl?.dispose();
+  browserRepl = null;
+  browserHost?.dispose();
+  browserHost = null;
   host?.dispose();
   host = null;
   project?.dispose();

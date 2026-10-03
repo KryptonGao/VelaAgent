@@ -27,7 +27,7 @@ const maxPromptLength = 100_000;
 const maxImageCount = 10;
 const maxImageBytes = 10 * 1024 * 1024;
 const maxImageBase64Length = 4 * Math.ceil(maxImageBytes / 3);
-const mutatingToolNames = new Set(["bash", "edit", "write"]);
+const mutatingToolNames = new Set(["bash", "edit", "write", "browser_repl"]);
 
 function toolMutatedWorkspace(toolName: string, mutated: boolean | undefined): boolean {
   if (mutatingToolNames.has(toolName)) return true;

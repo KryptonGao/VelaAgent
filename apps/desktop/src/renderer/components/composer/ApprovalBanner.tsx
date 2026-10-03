@@ -4,6 +4,7 @@ import { ShieldIcon } from "../icons";
 import { tr } from "../../locale";
 
 const kindLabels: Record<SandboxApprovalRequest["kind"], [string, string]> = {
+  browser_repl: ["运行 JavaScript", "Run JavaScript"],
   bash: ["运行命令", "Run command"],
   edit: ["修改文件", "Edit file"],
   write: ["写入文件", "Write file"],
@@ -41,7 +42,7 @@ export function ApprovalBanner({
   onReply: (id: string, allowed: boolean) => void;
 }) {
   const summary =
-    approval.kind === "bash"
+    (approval.kind === "bash" || approval.kind === "browser_repl")
       ? approval.command ?? tr("(未提供命令)", "(No command provided)")
       : approval.path ?? tr("(未提供路径)", "(No path provided)");
   const [kindZh, kindEn] = kindLabels[approval.kind];

@@ -159,3 +159,53 @@ describe("SandboxPermissionManager", () => {
     assert.equal(calls, 1);
   });
 });
+
+
+describe("Browser REPL permissions", () => {
+  const input = { kind: "browser_repl" as const, command: "await tab.goto('https://example.com')", cwd: "/repo", insideWorkspace: true };
+  it("ask always asks for JavaScript, even within workspace; cancellation resolves denial", async () => {
+    const { manager, events } = await createManager("ask");
+    const controller = new AbortController();
+    const pending = manager.request({ ...input, signal: controller.signal });
+    assert.ok(pendingRequest(events));
+    const event = events[0];
+    assert.equal(event?.type === "request" ? event.request.command : null, input.command);
+    controller.abort();
+    assert.equal(await pending, false);
+  });
+  it("full bypasses approval, smart assesses JavaScript separately from bash", async () => {
+    const full = await createManager("full");
+    assert.equal(await full.manager.request(input), true);
+    assert.deepEqual(full.events, []);
+    const calls: SandboxRiskInput[] = [];
+    const smart = await createManager("smart", async (action) => { calls.push(action); return "safe"; });
+    await smart.manager.request(input);
+    await smart.manager.request(input);
+    await smart.manager.request({ ...input, command: "await tab.reload()" });
+    await smart.manager.request({ ...input, kind: "bash" });
+    assert.equal(calls.length, 4);
+    assert.equal(calls[0]?.command, input.command);
+    assert.equal(calls[0]?.kind, "browser_repl");
+    assert.deepEqual(smart.events, []);
+  });
+  it("smart risky JavaScript requires approval", async () => {
+    const { manager, events } = await createManager("smart", async () => "risky");
+    const pending = manager.request(input);
+    await tick();
+    const id = pendingRequest(events); assert.ok(id);
+    manager.reply(id, false);
+    assert.equal(await pending, false);
+  });
+});
+
+
+it("stop cancels a pending smart evaluation promptly without opening approval", async () => {
+  let finish!: (verdict: "safe") => void;
+  const { manager, events } = await createManager("smart", () => new Promise(resolve => { finish = resolve; }));
+  const controller = new AbortController();
+  const pending = manager.request({ kind: "browser_repl", command: "1", signal: controller.signal });
+  controller.abort();
+  assert.equal(await pending, false);
+  assert.deepEqual(events, []);
+  finish("safe");
+});

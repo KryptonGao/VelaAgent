@@ -2359,7 +2359,7 @@ export interface PrCreateResult {
  */
 export type SandboxMode = "ask" | "smart" | "full";
 
-export type SandboxApprovalKind = "bash" | "edit" | "write" | "mkdir";
+export type SandboxApprovalKind = "bash" | "edit" | "write" | "mkdir" | "browser_repl";
 
 /** 交给模型判断的一次操作。workspace 为工作区边界,insideWorkspace 表明是否越界。 */
 export interface SandboxRiskInput {
@@ -2463,6 +2463,7 @@ export interface OpenTarget {
 }
 
 export interface VelaApi {
+  browser?: import("./browser").BrowserPanelApi;
   platform: string;
   /** Present in the desktop app; browser-only previews use localStorage. */
   uiStorage?: {
@@ -2695,3 +2696,5 @@ export interface VelaApi {
   /** file 为渲染层的 DOM File 对象(shared 包无 DOM lib,类型放宽为 unknown) */
   pathForFile(file: unknown): string;
 }
+
+export * from "./browser";

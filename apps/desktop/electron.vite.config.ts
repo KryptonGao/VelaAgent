@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
@@ -18,10 +19,18 @@ const workspaceAlias = {
 
 export default defineConfig({
   main: {
+    plugins: [{
+      name: "vela-builtin-browser-skill",
+      generateBundle() {
+        this.emitFile({ type: "asset", fileName: "skills/browser-use/SKILL.md",
+          source: readFileSync(resolve(root, "../../packages/agent/skills/browser-use/SKILL.md"), "utf8") });
+      },
+    }],
     resolve: { alias: workspaceAlias },
     build: {
       rollupOptions: {
-        output: { format: "es" },
+        input: { index: resolve(root, "src/main/index.ts"), "browser-repl-worker": resolve(root, "src/main/browser-repl-worker.ts") },
+        output: { format: "es", entryFileNames: "[name].mjs" },
       },
       externalizeDeps: {
         exclude: ["@vela/shared", "@vela/agent", "@vela/tools", "@vela/workspace"],

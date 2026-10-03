@@ -87,11 +87,14 @@ export class SandboxPermissionManager {
     cwd?: string | null;
     workspace?: string | null;
     insideWorkspace?: boolean;
+    signal?: AbortSignal;
   }): Promise<boolean> {
+    if (input.signal?.aborted) return false;
     if (this.mode === "full") return true;
-    if (this.mode === "ask" && input.kind !== "bash" && input.insideWorkspace === true) return true;
+    if (this.mode === "ask" && input.kind !== "bash" && input.kind !== "browser_repl" && input.insideWorkspace === true) return true;
     if (this.mode === "smart" && this.riskEvaluator) {
-      const verdict = await this.evaluateRisk(input);
+      const verdict = await withApprovalAbort(this.evaluateRisk(input), input.signal);
+      if (input.signal?.aborted) return false;
       if (verdict === "safe") return true;
     }
     const id = randomUUID();
@@ -107,11 +110,14 @@ export class SandboxPermissionManager {
       const finish = (allowed: boolean): void => {
         if (!this.pending.delete(id)) return;
         clearTimeout(timer);
+        input.signal?.removeEventListener("abort", abort);
         this.emit({ type: "resolved", id, allowed });
         resolve(allowed);
       };
+      const abort = (): void => finish(false);
       const timer = setTimeout(() => finish(false), approvalTimeoutMs);
       this.pending.set(id, finish);
+      input.signal?.addEventListener("abort", abort, { once: true });
       this.emit({ type: "request", request });
     });
   }
@@ -130,6 +136,15 @@ export class SandboxPermissionManager {
   }): Promise<SandboxRiskVerdict> {
     const evaluator = this.riskEvaluator;
     if (!evaluator) return "unknown";
+    // Persistent REPL bindings and page state can change the meaning of identical code.
+    if (input.kind === "browser_repl") {
+      try {
+        return await evaluator({ kind: input.kind, command: input.command ?? null, path: null,
+          cwd: input.cwd ?? null, workspace: input.workspace ?? null, insideWorkspace: false });
+      } catch {
+        return "unknown";
+      }
+    }
     const key = riskCacheKey(input);
     const cached = this.verdicts.get(key);
     if (cached) return cached;
@@ -183,10 +198,28 @@ function riskCacheKey(input: {
   cwd?: string | null;
   insideWorkspace?: boolean;
 }): string {
-  if (input.kind === "bash") return `bash\0${input.command ?? ""}\0${input.cwd ?? ""}`;
+  if (input.kind === "bash" || input.kind === "browser_repl") return `${input.kind}\0${input.command ?? ""}\0${input.cwd ?? ""}`;
   return `file\0${input.insideWorkspace === true ? "in" : "out"}\0${input.path ?? ""}`;
 }
 
 function isSandboxMode(value: unknown): value is SandboxMode {
   return value === "ask" || value === "smart" || value === "full";
+}
+
+
+/** Stop should not wait for a slow model risk evaluation before cancelling the tool. */
+async function withApprovalAbort(evaluation: Promise<SandboxRiskVerdict>, signal?: AbortSignal): Promise<SandboxRiskVerdict> {
+  if (!signal) return evaluation;
+  if (signal.aborted) return "unknown";
+  return new Promise((resolve, reject) => {
+    const abort = (): void => { signal.removeEventListener("abort", abort); resolve("unknown"); };
+    signal.addEventListener("abort", abort, { once: true });
+    evaluation.then(verdict => {
+      signal.removeEventListener("abort", abort);
+      resolve(verdict);
+    }, error => {
+      signal.removeEventListener("abort", abort);
+      reject(error);
+    });
+  });
 }
