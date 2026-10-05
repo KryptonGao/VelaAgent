@@ -17,3 +17,4 @@ export { PullRequestService } from "./pull-request-service";
 export { SandboxPermissionManager } from "./sandbox-permission-manager";
 export { createSandboxedToolDefinitions, type SandboxToolFactoryInput } from "./sandbox-tools";
 export { ExecutionEnvironmentManager } from "./environment-manager";
+export { createWorktree, removeWorktree } from './git-worktree';

@@ -12,6 +12,28 @@ const conversations: ConversationSummary[] = [
 ];
 
 describe("sidebar conversation search", () => {
+  it("keeps chats without a workspace searchable by title and out of workspace groups", () => {
+    const unassigned: ConversationSummary = { ...conversations[0]!, id: "unassigned", title: "Hello", cwd: "/Applications/Vela.app/Contents", hasWorkspace: false, updatedAt: 10, messageCount: 1 };
+    const actualWorkspace = { ...unassigned, id: "actual-workspace", cwd: "/projects/Contents", hasWorkspace: true, updatedAt: 8 };
+    const items = [...conversations, unassigned, actualWorkspace,
+      { ...unassigned, id: "older-unassigned", updatedAt: 6 },
+      { ...unassigned, id: "draft-unassigned", messageCount: 0 },
+      { ...unassigned, id: "archived-unassigned", archivedAt: 11 }];
+    const original = structuredClone(items);
+    const recent = searchActiveConversations(items, "", "新对话").filter(item => item.hasWorkspace === false);
+    assert.deepEqual(recent.map(item => item.id), ["unassigned", "older-unassigned"]);
+    const groups = groupActiveConversations(items, "", "新对话");
+    assert.equal(groups[0]!.cwd, actualWorkspace.cwd);
+    assert.equal(groups[0]!.name, "Contents");
+    assert.ok(groups.every(group => group.conversations.every(item => item.hasWorkspace !== false)));
+    assert.deepEqual([...groups.flatMap(group => group.conversations), ...recent].map(item => item.id).sort(),
+      searchActiveConversations(items, "", "新对话").map(item => item.id).sort());
+    assert.deepEqual(searchActiveConversations(items, "Contents", "新对话").map(item => item.id), ["actual-workspace"]);
+    assert.deepEqual(searchActiveConversations(items, "Hello", "新对话").map(item => item.id), ["unassigned", "actual-workspace", "older-unassigned"]);
+    assert.deepEqual(groupActiveConversations([unassigned], "", "新对话"), []);
+    assert.deepEqual(items, original);
+  });
+
   it("lists a new chat only after its first message is sent, including image-only messages", () => {
     const draft: ConversationSummary = { id: "draft", title: "新对话", cwd: "/new/workspace", createdAt: 10,
       updatedAt: 10, archivedAt: null, status: "ready", messageCount: 0 };

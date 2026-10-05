@@ -59,6 +59,9 @@ function resolveShell(): string {
 function runLoginShell(shell: string): Promise<string> {
   return new Promise((resolve) => {
     const child = spawn(shell, ["-ilc", 'printf "%s" "$PATH"'], {
+      // 登录 shell 会操作控制终端；独立会话避免 Vela 提前退出时破坏启动它的终端。
+      detached: true,
+      env: { ...process.env, SHELL_SESSIONS_DISABLE: "1" },
       stdio: ["ignore", "pipe", "ignore"],
     });
     let stdout = "";

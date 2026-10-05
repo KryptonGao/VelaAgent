@@ -1,4 +1,10 @@
 import type { SandboxMode, ThinkingLevel, ThinkingSummaryModel } from "./index";
+import type { TaskRecipe, RecipeValue, RecipeMode } from './task-recipes';
+
+export interface ScheduledRecipeBinding {
+  recipeSnapshot: TaskRecipe; versionPolicy: 'fixed' | 'latest'; values: Record<string, RecipeValue>;
+  additionalInstructions: string; mode: RecipeMode;
+}
 
 export type TaskSchedule =
   | { kind: "once"; at: string }
@@ -16,6 +22,7 @@ export interface ScheduledTaskInput {
   model?: ThinkingSummaryModel | null;
   thinkingLevel?: ThinkingLevel | null;
   missedPolicy?: "run-once" | "skip";
+  recipeBinding?: ScheduledRecipeBinding | null;
 }
 export interface ScheduledTask extends ScheduledTaskInput {
   id: string;

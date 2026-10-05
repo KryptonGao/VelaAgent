@@ -1,5 +1,5 @@
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync, openSync, fsyncSync, closeSync } from "node:fs";
 
 /**
  * 新建一个立即落盘的持久会话。
@@ -12,8 +12,8 @@ import { existsSync, writeFileSync } from "node:fs";
  * 空对话当次就有文件可恢复,manager 进入已落盘状态,用户消息也会即时追加,
  * 而不是依赖 Pi 的首条消息触发创建。
  */
-export function createPersistedSession(cwd: string, sessionDir: string): SessionManager {
-  const manager = SessionManager.create(cwd, sessionDir);
+export function createPersistedSession(cwd: string, sessionDir: string, reservedId?: string): SessionManager {
+  const manager = SessionManager.create(cwd, sessionDir, reservedId ? { id: reservedId } : undefined);
   const file = manager.getSessionFile();
   const header = manager.getHeader();
   if (!file || !header) return manager;
@@ -21,7 +21,12 @@ export function createPersistedSession(cwd: string, sessionDir: string): Session
     writeFileSync(file, `${JSON.stringify(header)}\n`, { flag: "wx" });
   } catch {
     // 并发创建或磁盘不可写:文件已存在就按已有内容打开,否则退回 Pi 的懒创建。
+    if (reservedId) throw new Error("无法持久化配方对话");
     if (!existsSync(file)) return manager;
+  }
+  if (reservedId) {
+    const descriptor = openSync(file, "r");
+    try { fsyncSync(descriptor); } finally { closeSync(descriptor); }
   }
   return SessionManager.open(file, sessionDir, cwd);
 }

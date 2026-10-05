@@ -25,7 +25,7 @@ export function searchActiveConversations(
   const keywords = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
   return conversations.filter(conversation => {
     if (!isListedConversation(conversation)) return false;
-    const searchable = `${conversation.title || untitledLabel}\n${conversation.cwd}`.toLocaleLowerCase();
+    const searchable = `${conversation.title || untitledLabel}\n${conversation.hasWorkspace === false ? "" : conversation.cwd}`.toLocaleLowerCase();
     return keywords.every(keyword => searchable.includes(keyword));
   }).sort((a, b) => b.updatedAt - a.updatedAt);
 }
@@ -37,6 +37,7 @@ export function groupActiveConversations(
 ): ConversationGroup[] {
   const byWorkspace = new Map<string, ConversationSummary[]>();
   for (const conversation of searchActiveConversations(conversations, query, untitledLabel)) {
+    if (conversation.hasWorkspace === false) continue;
     const list = byWorkspace.get(conversation.cwd) ?? [];
     list.push(conversation);
     byWorkspace.set(conversation.cwd, list);

@@ -14,6 +14,15 @@ const zh = {
     permissions: "执行权限",
     workspace: "工作区",
     appearance: "外观与快捷键",
+    development: "开发工具",
+  },
+  development: {
+    title: "同步正式版会话",
+    hint: "复制正式版的新会话，包含消息、计划和子代理历史。已有会话会跳过。",
+    sync: "同步正式版会话",
+    syncing: "正在同步会话…",
+    result: (imported: number, existing: number, unavailable: number) => `已同步 ${imported} 个会话，跳过 ${existing} 个已有会话${unavailable ? `，${unavailable} 个会话的历史文件不可用` : ""}。`,
+    retry: "同步失败，请重试。",
   },
   mcp: {
     title: "MCP 服务器", hint: "连接外部工具。状态与当前对话及工作区同步。",
@@ -313,6 +322,15 @@ const en: typeof zh = {
     permissions: "Execution permissions",
     workspace: "Workspace",
     appearance: "Appearance & shortcuts",
+    development: "Developer tools",
+  },
+  development: {
+    title: "Sync production conversations",
+    hint: "Copy new production conversations, including messages, plans and subagent history. Existing conversations are skipped.",
+    sync: "Sync production conversations",
+    syncing: "Syncing conversations…",
+    result: (imported: number, existing: number, unavailable: number) => `Synced ${imported} conversations; skipped ${existing} existing conversations${unavailable ? `; history files unavailable for ${unavailable} conversations` : ""}.`,
+    retry: "Sync failed. Please try again.",
   },
   mcp: {
     title: "MCP servers", hint: "Connect external tools. Status follows the current conversation and workspace.",

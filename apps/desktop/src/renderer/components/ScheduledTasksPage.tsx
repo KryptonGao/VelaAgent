@@ -82,6 +82,7 @@ export function ScheduledTasksPage({ workspace, workspaces, onOpenConversation, 
         <div className="scheduled-task-title"><h3>{task.title}</h3><span>{statusText(task.status)}{running ? ` · ${statusText("running")}` : ""}</span></div>
         <p>{scheduleText(task.schedule)}</p><p className="scheduled-task-path" title={task.workspace}>{task.workspace}</p>
         <p className="scheduled-task-prompt">{task.prompt}</p>
+        {task.recipeBinding && <details><summary>{tr('配方绑定', 'Recipe binding')}: {task.recipeBinding.recipeSnapshot.name} · r{task.recipeBinding.recipeSnapshot.revision} · {task.recipeBinding.versionPolicy === 'fixed' ? tr('固定版本', 'Pinned version') : tr('跟随新版', 'Follow latest')}</summary><p>{task.recipeBinding.mode} · {JSON.stringify(task.recipeBinding.values)}</p><pre className="scheduled-task-prompt">{task.recipeBinding.recipeSnapshot.objectiveTemplate}{'\n\n'}{task.recipeBinding.recipeSnapshot.workflowTemplate}{'\n\n'}{task.recipeBinding.recipeSnapshot.deliverableTemplate}{'\n\n'}{task.recipeBinding.additionalInstructions}</pre></details>}
         <p>{tr("下次执行", "Next run")}: {dateText(task.nextRunAt)}</p>
         {runs[0] && <p>{tr("最近执行", "Latest run")}: {statusText(runs[0].status)} · {dateText(runs[0].startedAt)}</p>}
         <div className="scheduled-task-actions">
@@ -129,6 +130,7 @@ function TaskForm({ task, workspaces, workspace, pending, catalog, catalogError,
   const initialAt = new Date(task?.schedule.kind === "once" ? task.schedule.at : Date.now() + 3600_000);
   const [at, setAt] = useState(new Date(initialAt.getTime() - initialAt.getTimezoneOffset() * 60000).toISOString().slice(0, 16));
   const [policy, setPolicy] = useState(task?.missedPolicy ?? "run-once");
+  const [recipePolicy, setRecipePolicy] = useState(task?.recipeBinding?.versionPolicy ?? 'fixed');
   const [error, setError] = useState<string | null>(null);
   return <form className="scheduled-task-form" aria-labelledby={`${id}-heading`} onSubmit={event => {
     event.preventDefault(); setError(null);
@@ -141,13 +143,15 @@ function TaskForm({ task, workspaces, workspace, pending, catalog, catalogError,
       if (thinkingLevel && !levels.includes(thinkingLevel)) throw new Error(tr("所选模型不支持此推理强度，请重新选择。", "Choose a reasoning effort supported by the selected model."));
       const [provider, modelId] = model ? JSON.parse(model) as [string, string] : [];
       void onSave({ title, prompt, workspace: cwd, schedule, missedPolicy: policy, sandboxMode: sandboxMode || null,
-        model: provider && modelId ? { provider, id: modelId } : null, thinkingLevel: thinkingLevel || null });
+        model: provider && modelId ? { provider, id: modelId } : null, thinkingLevel: thinkingLevel || null,
+        ...(task?.recipeBinding ? { recipeBinding: { ...task.recipeBinding, versionPolicy: recipePolicy } } : {}) });
     } catch (caught) { setError(cleanErrorMessage(caught)); }
   }}>
     <h3 id={`${id}-heading`}>{task ? tr("编辑任务", "Edit task") : tr("创建任务", "Create task")}</h3>
     <fieldset disabled={pending}>
       <label>{tr("名称", "Name")}<input required maxLength={200} value={title} onChange={event => setTitle(event.target.value)} /></label>
-      <label>{tr("执行内容（Prompt）", "Prompt")}<textarea required maxLength={100000} rows={3} value={prompt} onChange={event => setPrompt(event.target.value)} /></label>
+      <label>{tr("执行内容（Prompt）", "Prompt")}<textarea readOnly={!!task?.recipeBinding} required maxLength={100000} rows={3} value={prompt} onChange={event => setPrompt(event.target.value)} /></label>
+      {task?.recipeBinding && <><label>{tr('配方版本策略', 'Recipe version policy')}<select value={recipePolicy} onChange={e => setRecipePolicy(e.target.value as 'fixed' | 'latest')}><option value="fixed">{tr('固定绑定快照', 'Pin bound snapshot')}</option><option value="latest">{tr('每次跟随新版', 'Follow latest at each run')}</option></select></label><p className="scheduled-tasks-note">{tr('配方参数和正文来自绑定快照；修改参数请在任务配方中重新绑定。', 'Parameters and text come from the bound snapshot. Create a new binding in Task Recipes to change parameters.')}</p></>}
       <label>{tr("工作区", "Workspace")}<select required value={cwd} onChange={event => setCwd(event.target.value)}>{workspaces.map(path => <option key={path} value={path}>{path}</option>)}</select></label>
       <div className="scheduled-task-execution">
         <label>{tr("执行权限", "Execution permissions")}<select value={sandboxMode} onChange={event => setSandboxMode(event.target.value as SandboxMode | "")}>

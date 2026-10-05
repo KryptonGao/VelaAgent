@@ -38,6 +38,8 @@ import { nextStreamFollow, releasesStreamFollow, shouldResumeFollowForMessages }
 import { summarizeTurnChanges, type TurnChanges, type TurnReviewRequest } from "./turn-changes";
 import { chatLaneDefaultMaxWidth, planChatLane } from "../chat-lane";
 import { ConversationViewTabs, type ConversationViewKey } from "./ConversationViewTabs";
+import { RecipeChatCard } from "./RecipeChatContext";
+import { ChatActionsMenu } from "./ChatActionsMenu";
 import { UserMessageFrame } from "./UserMessageFrame";
 import { ImageViewer, type ImageViewerRequest } from "./ImageViewer";
 import { isEnglish, localizeError, tr } from "../locale";
@@ -220,8 +222,12 @@ export function ChatView({
   // 换会话时收起全屏查看器:里面是上一条对话的图片。
   useEffect(() => { setImageView(null); }, [state?.activeConversationId]);
   const viewKey = state?.activeConversationId ?? "empty";
-  const view = views[viewKey] ?? "chat";
+  const hasWorkspace = state?.conversations?.find(conversation => conversation.id === state.activeConversationId)?.hasWorkspace
+    ?? Boolean(project.workspace?.current);
+  const savedView = views[viewKey] ?? "chat";
+  const view = savedView === "versionControl" && !hasWorkspace ? "chat" : savedView;
   const setView = (next: ConversationViewKey) => {
+    if (next === "versionControl" && !hasWorkspace) return;
     if (next === "versionControl") setVcMounted(true);
     setViews(current => ({ ...current, [viewKey]: next }));
   };
@@ -479,7 +485,7 @@ export function ChatView({
   return (
     <QuestionContext.Provider value={question}>
     <ThinkingSummaryContext.Provider value={thinkingSummaries ?? null}>
-    <main className="main-chat-view" tabIndex={-1}>
+    <main className="main-chat-view" data-tool-display={toolDisplay} tabIndex={-1}>
       <header className="main-chat-header">
         <div className="chat-title-group">
           {leftCollapsed ? (
@@ -544,6 +550,7 @@ export function ChatView({
               <PlusIcon size={15} />
             </button>
           ) : null}
+          <ChatActionsMenu key={state?.activeConversationId ?? "empty"} messages={messages} streaming={Boolean(streaming)} />
           <button
             className={`view-icon-btn${rightCollapsed ? "" : " active"}`}
             type="button"
@@ -557,10 +564,10 @@ export function ChatView({
         </div>
       </header>
 
-      <ConversationViewTabs view={view} onChange={setView} />
+      <ConversationViewTabs view={view} showVersionControl={hasWorkspace} onChange={setView} />
       {view === "trace" ? <TraceView key={viewKey} state={state} onConversation={() => setView("chat")} onAbort={onAbort} pendingInteraction={pendingInteraction} /> : null}
       {view === "usage" ? <UsageView key={viewKey} conversationId={state?.activeConversationId ?? null} providers={models.catalog?.providers ?? []} /> : null}
-      {vcMounted ? <VersionControlView
+      {hasWorkspace && vcMounted ? <VersionControlView
         project={project}
         session={session ?? null}
         hidden={view !== "versionControl"}
@@ -588,6 +595,7 @@ export function ChatView({
           </div>
         ) : null}
 
+        <RecipeChatCard />
         {messages.length === 0 ? (
           <EmptyState
             workspace={project.workspace?.current ?? null}
@@ -712,6 +720,7 @@ export function ChatView({
 
       </ConversationLinkContext.Provider>
       <Composer
+        sandboxMode={session?.sandboxMode}
         ref={dockRef}
         disabled={session?.status !== "ready" && session?.status !== "streaming"}
         streaming={Boolean(streaming)}

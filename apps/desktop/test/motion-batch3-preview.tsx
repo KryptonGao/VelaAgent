@@ -40,6 +40,7 @@ const agent = { id: "agent-1", parentId: "root", path: "/root/frontend", name: "
   task: "UI animation", steps: [], mutated: false, finalText: null, error: null, createdAt: 1, updatedAt: 1 } as AgentInfo;
 const message = (id: string, text: string): UiMessage => ({ id, role: "assistant", text, thinking: "", tools: [] });
 const skills = Array.from({ length: 30 }, (_, i) => ({ name: `skill-${i}`, description: `Skill ${i} description`, location: `/fixture/skill-${i}`, origin: "user" })) as any[];
+const skillItems = skills.map(skill => ({ type: "skill" as const, skill }));
 const node = (i: number): TraceNode => ({ id: `trace-${i}`, sequence: i, kind: i === 0 ? "system" : "assistant", turn: 1, step: i,
   requestId: null, toolCallId: null, toolName: null, status: "Completed", summary: `执行事件 ${i}`, startedAt: i * 100, completedAt: i * 100 + 50,
   executionStartedAt: null, durationMs: 50, version: i + 1, historical: false });
@@ -98,7 +99,7 @@ function Fixture() {
       <div className="fixture-card"><h3>文件树与菜单</h3>
         <FileTree nodes={buildFileTree(["src/components/Button.tsx", "src/components/Input.tsx", "README.md"])} expanded={expanded} activePath={path}
           onToggleDir={(dir) => setExpanded((current) => { const next = new Set(current); if (!next.delete(dir)) next.add(dir); return next; })} onOpenFile={setPath} />
-        <SkillMenu skills={skills} error={null} query="" activeIndex={activeSkill} onActiveIndex={setActiveSkill} onSelect={noop} />
+        <SkillMenu items={skillItems} loadingSkills={false} loadingRecipes={false} error={null} recipeError={null} query="" activeIndex={activeSkill} onActiveIndex={setActiveSkill} onSelect={noop} />
       </div>
       <div className="fixture-card"><h3>起始卡片、总结与按压反馈</h3>
         <StartView gitAvailable onAction={noop} />

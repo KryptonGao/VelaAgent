@@ -1,5 +1,8 @@
 export * from "./mcp";
 export * from "./scheduled-tasks";
+export * from "./task-recipes";
+export * from "./recipe-validation";
+export * from "./recipe-workflow";
 export * from "./plugin";
 import type { PluginApi } from "./plugin";
 import type { McpApi } from "./mcp";
@@ -143,6 +146,8 @@ export const IpcChannel = {
   appSetLocale: "app:set-locale",
   appUiStorageGet: "app:ui-storage-get",
   appUiStorageSet: "app:ui-storage-set",
+  appIsDevelopment: "app:is-development",
+  appSyncProductionConversations: "app:sync-production-conversations",
   workspaceFileRead: "workspace:file-read",
   workspaceFileList: "workspace:file-list",
   workspaceSearch: "workspace:code-search",
@@ -532,6 +537,8 @@ export interface RuntimeInstruction {
 }
 
 export interface SessionSnapshot {
+  /** Conversation-scoped execution policy captured by a task recipe. */
+  sandboxMode?: SandboxMode;
   id: string | null;
   title: string;
   status: SessionStatus;
@@ -566,6 +573,8 @@ export interface ConversationSummary {
   /** 0 表示尚未发送消息，不加入侧边栏；旧数据缺省时仍显示。 */
   messageCount?: number;
   cwd: string;
+  /** 会话实际的工作区归属；执行目录与默认目录相同也可以关联工作区。 */
+  hasWorkspace?: boolean;
   createdAt: number;
   updatedAt: number;
   /** 非空表示已归档(不显示在侧边栏),值为归档时间。 */
@@ -2400,6 +2409,7 @@ export type SandboxRiskVerdict = "safe" | "risky" | "unknown";
 export type SandboxRiskEvaluator = (input: SandboxRiskInput) => Promise<SandboxRiskVerdict>;
 
 export interface SandboxApprovalRequest {
+  conversationId?: string;
   mcp?: SandboxMcpContext;
   id: string;
   kind: SandboxApprovalKind;
@@ -2486,7 +2496,16 @@ export interface OpenTarget {
   icon: string | null;
 }
 
+export interface ConversationSyncResult {
+  imported: number;
+  existing: number;
+  unavailable: number;
+}
+
 export interface VelaApi extends McpApi, PluginApi {
+  /** 仅开发版提供。 */
+  development?: { syncProductionConversations(): Promise<ConversationSyncResult> };
+  taskRecipes?: import("./task-recipes").TaskRecipesApi;
   scheduledTasks?: import("./scheduled-tasks").ScheduledTasksApi;
   browser?: import("./browser").BrowserPanelApi;
   platform: string;

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { describe, it, type TestContext } from "node:test";
 import { AgentRuntime } from "../src/runtime.ts";
 import { ConversationStore, type StoredConversation } from "../src/conversation-store.ts";
+import type { SessionManager } from "@earendil-works/pi-coding-agent";
 
 async function fixture(t: TestContext) {
   const root = await mkdtemp(join(tmpdir(), "vela-conversation-persist-"));
@@ -22,6 +23,83 @@ function stored(id = "chat-a"): StoredConversation {
 }
 
 describe("conversation persistence", () => {
+  it("keeps workspace association distinct for the same cwd through updates, switching and restart", async t => {
+    const { root, file } = await fixture(t);
+    const notifications: Array<[string, boolean]> = [];
+    const runtime = new AgentRuntime({ cwd: root, agentDir: root, onActiveCwd: (cwd, assigned) => notifications.push([cwd, assigned]) });
+    t.after(() => runtime.dispose());
+    await runtime.createConversation(root, { hasWorkspace: false });
+    const standaloneId = runtime.activeConversationId!;
+    runtime.addUsage(standaloneId, 1, 0);
+    await runtime.createConversation(root, { hasWorkspace: true });
+    const selectedId = runtime.activeConversationId!;
+    runtime.addUsage(selectedId, 1, 0);
+    await runtime.renameConversation(selectedId, "Hello");
+    assert.equal(runtime.listConversations().find(chat => chat.id === selectedId)?.hasWorkspace, true);
+    assert.equal(runtime.listConversations().find(chat => chat.id === standaloneId)?.hasWorkspace, false);
+    await runtime.switchWorkspace(root, false);
+    assert.equal(runtime.activeConversationId, standaloneId);
+    assert.deepEqual(notifications.at(-1), [root, false]);
+    await runtime.switchWorkspace(root, true);
+    assert.equal(runtime.activeConversationId, selectedId);
+    assert.deepEqual(notifications.at(-1), [root, true]);
+    await runtime.dispose();
+    const disk = JSON.parse(await readFile(file, "utf8")).conversations as StoredConversation[];
+    assert.equal(disk.find(chat => chat.id === standaloneId)?.hasWorkspace, false);
+    assert.equal(disk.find(chat => chat.id === selectedId)?.hasWorkspace, true);
+    const restored = new AgentRuntime({ cwd: root, agentDir: root, isWorkspaceCwd: () => false });
+    t.after(() => restored.dispose());
+    await restored.switchWorkspace(root, true);
+    assert.equal(restored.activeConversationId, selectedId);
+    assert.equal(restored.listConversations().find(chat => chat.id === selectedId)?.hasWorkspace, true);
+    await restored.switchWorkspace(root, false);
+    assert.equal(restored.activeConversationId, standaloneId);
+    assert.equal(restored.listConversations().find(chat => chat.id === standaloneId)?.hasWorkspace, false);
+  });
+
+  it("inherits unassigned workspace association when branching a conversation", async t => {
+    const { root } = await fixture(t);
+    const runtime = new AgentRuntime({ cwd: root, agentDir: root });
+    t.after(() => runtime.dispose());
+    await runtime.createConversation(root, { hasWorkspace: false });
+    const sourceId = runtime.activeConversationId!;
+    const manager = (runtime as unknown as { conversations: Map<string, { sessionManager: SessionManager }> }).conversations.get(sourceId)!.sessionManager;
+    manager.appendMessage({ role: "user", content: "hello", timestamp: Date.now() });
+    manager.appendMessage({ role: "assistant", content: [{ type: "text", text: "Hello" }], timestamp: Date.now(), stopReason: "stop" } as never);
+    runtime.addUsage(sourceId, 1, 0);
+    await runtime.branchConversation(sourceId, 0);
+    assert.notEqual(runtime.activeConversationId, sourceId);
+    assert.equal(runtime.listConversations().find(chat => chat.id === runtime.activeConversationId)?.hasWorkspace, false);
+  });
+
+  it("migrates legacy workspace association once and preserves explicit saved values", async t => {
+    const { root, file } = await fixture(t);
+    const standalone = join(root, "Contents");
+    await mkdir(standalone);
+    const runtime = new AgentRuntime({ cwd: root, agentDir: root });
+    t.after(() => runtime.dispose());
+    await runtime.createConversation(root);
+    const selectedId = runtime.activeConversationId!;
+    await runtime.createConversation(standalone, { hasWorkspace: false });
+    const standaloneId = runtime.activeConversationId!;
+    await runtime.createConversation(root, { hasWorkspace: false });
+    const explicitId = runtime.activeConversationId!;
+    await runtime.dispose();
+    const payload = JSON.parse(await readFile(file, "utf8"));
+    for (const chat of payload.conversations) if (chat.id !== explicitId) delete chat.hasWorkspace;
+    await writeFile(file, JSON.stringify(payload));
+    const restored = new AgentRuntime({ cwd: root, agentDir: root, isWorkspaceCwd: cwd => cwd === root });
+    t.after(() => restored.dispose());
+    await restored.switchConversation(selectedId);
+    assert.equal(restored.listConversations().find(chat => chat.id === selectedId)?.hasWorkspace, true);
+    assert.equal(restored.listConversations().find(chat => chat.id === standaloneId)?.hasWorkspace, false);
+    assert.equal(restored.listConversations().find(chat => chat.id === explicitId)?.hasWorkspace, false);
+    const disk = JSON.parse(await readFile(file, "utf8")).conversations as StoredConversation[];
+    assert.equal(disk.find(chat => chat.id === selectedId)?.hasWorkspace, true);
+    assert.equal(disk.find(chat => chat.id === standaloneId)?.hasWorkspace, false);
+    assert.equal(disk.find(chat => chat.id === explicitId)?.hasWorkspace, false);
+  });
+
   it("finishes a debounced write before shutdown can skip it", async t => {
     const { file } = await fixture(t);
     const store = new ConversationStore(file);

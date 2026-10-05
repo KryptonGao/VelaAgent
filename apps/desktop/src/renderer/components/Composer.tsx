@@ -6,9 +6,10 @@ import type {
   RuntimeInstruction,
   RuntimeInstructionMode,
   SkillSummary,
+  TaskRecipe,
   ThinkingLevel,
 } from "@vela/shared";
-import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { useModels } from "../hooks/useModels";
 import type { ProjectApi } from "../hooks/useProject";
 import type { SendButtonIcon } from "../hooks/usePreferences";
@@ -17,6 +18,7 @@ import { MotionList } from "./BatchMotion";
 import { useReducedMotion } from "../hooks/useMotionPresence";
 import { PopoverPresence } from "./MotionPresence";
 import { ModelControls } from "./ModelControls";
+import { RecipeStageDock, useRecipeRun } from "./RecipeChatContext";
 import { ApprovalSlot } from "./composer/ApprovalBanner";
 import { AttachMenu } from "./composer/AttachMenu";
 import { BranchChip } from "./composer/BranchChip";
@@ -26,11 +28,14 @@ import { ModeChip } from "./composer/ModeChip";
 import { SandboxPill } from "./composer/SandboxPill";
 import { SkillMenu, SkillToken } from "./composer/SkillMenu";
 import { WorkspaceChip } from "./composer/WorkspaceChip";
-import { applySkillPick, composeSkillPrompt, filterSkills, slashTokenAt } from "./composer/skill-picker";
+import { applySkillPick, composeSkillPrompt, slashTokenAt } from "./composer/skill-picker";
 import { modKeyLabel } from "../platform";
-import { localizeError, tr } from "../locale";
+import { slashMenuItems, type SlashMenuItem } from "./composer/slash-picker";
+import { RecipeActionsContext } from "./recipe-actions-context";
+import { localizeError, tr, useAppLocale } from "../locale";
 
 export interface ComposerProps {
+  sandboxMode?: import("@vela/shared").SandboxMode;
   disabled: boolean;
   streaming: boolean;
   /** 用于把快捷键提示里的修饰键适配成当前平台。 */
@@ -63,6 +68,7 @@ export interface ComposerProps {
 }
 
 export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Composer({
+  sandboxMode,
   disabled,
   streaming,
   platform,
@@ -87,6 +93,12 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
   onAbort,
   onMode,
 }, ref) {
+  const recipeActions = useContext(RecipeActionsContext);
+  const locale = useAppLocale();
+  const [recipes, setRecipes] = useState<TaskRecipe[] | null>(null);
+  const [recipesError, setRecipesError] = useState<string | null>(null);
+  const recipeRun = useRecipeRun();
+  const recipeActive = !!recipeRun?.stages && ["starting", "running", "waiting_for_user"].includes(recipeRun.status);
   const [value, setValue] = useState("");
   const [skill, setSkill] = useState<SkillSummary | null>(null);
   const [skills, setSkills] = useState<SkillSummary[] | null>(null);
@@ -106,7 +118,8 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
   const workspacePath = project.workspace?.current ?? null;
   const slashKey = slash ? `${slash.start}:${slash.query}` : "";
   const menuOpen = Boolean(slash) && dismissedKey !== slashKey && (!disabled || streaming);
-  const filtered = useMemo(() => (skills === null ? [] : filterSkills(skills, slash?.query ?? "")), [skills, slash?.query]);
+  const recipesEnabled = !!recipeActions?.useRecipe && !streaming && !recipeActive;
+  const filtered = useMemo(() => slashMenuItems(skills ?? [], recipesEnabled ? recipes ?? [] : [], slash?.query ?? ""), [skills, recipes, recipesEnabled, slash?.query]);
   const safeIndex = filtered.length === 0 ? 0 : Math.min(activeIndex, filtered.length - 1);
   const prompt = composeSkillPrompt(skill?.name ?? null, value);
 
@@ -179,6 +192,22 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
       active = false;
     };
   }, [workspacePath, menuOpen]);
+
+  useEffect(() => {
+    if (!menuOpen || !recipesEnabled) return;
+    const api = window.vela?.taskRecipes;
+    if (!api) { setRecipes([]); return; }
+    let active = true, request = 0;
+    const update = async () => {
+      const current = ++request;
+      try { const state = await api.list(locale); if (active && current === request) { setRecipes(state.recipes); setRecipesError(state.error); } }
+      catch (e) { if (active && current === request) { setRecipes([]); setRecipesError(e instanceof Error ? e.message : tr('无法读取配方', 'Could not load recipes')); } }
+    };
+    setRecipes(null); setRecipesError(null); void update();
+    const unsubscribe = api.subscribe(() => { void update(); });
+    window.addEventListener('focus', update);
+    return () => { active = false; unsubscribe(); window.removeEventListener('focus', update); };
+  }, [menuOpen, recipesEnabled, workspacePath, locale]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -258,9 +287,17 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
     setDismissedKey(null);
   }
 
+  function selectSlashItem(item: SlashMenuItem): void {
+    if (item.type === 'skill') { selectSkill(item.skill); return; }
+    if (!slash || !recipesEnabled) return;
+    const next = applySkillPick(value, slash);
+    setValue(next.text); setSlash(null); setDismissedKey(null);
+    recipeActions?.useRecipe?.(item.recipe);
+  }
+
   async function submit(steerIntent = false): Promise<void> {
     const text = composeSkillPrompt(skill?.name ?? null, value);
-    if (!text || disabled || !modelReady) return;
+    if (!text || disabled || recipeActive || !modelReady) return;
     const images = attachments
       .map((entry) => entry.image)
       .filter((image): image is ImageAttachment => image !== null);
@@ -309,6 +346,7 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
         onDrop={(event) => void handleDrop(event)}
       >
         <ApprovalSlot approval={project.approval} onReply={project.replyApproval} />
+        <RecipeStageDock run={recipeRun} />
 
         {showSetupControls || showError ? (
           <div className="composer-status-bar">
@@ -330,12 +368,15 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
         <PopoverPresence present={menuOpen}>
           <div className="skill-menu-anchor" ref={menuRef}>
             <SkillMenu
-              skills={skills === null ? null : filtered}
+              items={filtered}
+              loadingSkills={skills === null && !skillsError}
+              loadingRecipes={recipesEnabled && recipes === null && !recipesError}
+              recipeError={recipesEnabled ? recipesError : null}
               error={skillsError}
               query={slash?.query ?? ""}
               activeIndex={safeIndex}
               onActiveIndex={setActiveIndex}
-              onSelect={selectSkill}
+              onSelect={selectSlashItem}
             />
           </div>
         </PopoverPresence>
@@ -408,7 +449,7 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
             aria-label={tr("输入消息", "Message")}
             rows={1}
             value={value}
-            disabled={disabled && !streaming}
+            disabled={recipeActive || disabled && !streaming}
             aria-autocomplete="list"
             aria-expanded={menuOpen}
             aria-controls={menuOpen ? "skill-menu" : undefined}
@@ -442,7 +483,7 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
               if (menuOpen && filtered.length > 0 && !event.shiftKey && (event.key === "Enter" || event.key === "Tab")) {
                 event.preventDefault();
                 const picked = filtered[safeIndex];
-                if (picked) selectSkill(picked);
+                if (picked) selectSlashItem(picked);
                 return;
               }
               if (!menuOpen && event.key === "Backspace" && skill) {
@@ -453,7 +494,7 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
                   return;
                 }
               }
-              if (menuOpen && skills === null && event.key === "Enter" && !event.shiftKey) {
+              if (menuOpen && (skills === null || recipesEnabled && recipes === null) && event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
                 return;
               }
@@ -468,8 +509,8 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
         <div className="dock-controls-row">
           <div className="dock-controls-left">
             <AttachMenu onAttachments={addAttachments} disabled={disabled} />
-            <ModeChip mode={mode} disabled={disabled || streaming} onChange={onMode} />
-            <SandboxPill project={project} />
+            <ModeChip mode={mode} disabled={disabled || streaming || recipeActive} onChange={onMode} />
+            <SandboxPill project={project} conversationMode={sandboxMode} />
           </div>
           <div className="dock-controls-right">
             <ModelControls
@@ -478,7 +519,7 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
               modelId={modelId}
               thinkingLevel={thinkingLevel}
               thinkingLevels={thinkingLevels}
-              disabled={streaming}
+              disabled={streaming || recipeActive}
               catalog={models.catalog}
               catalogError={models.catalogError}
               actionError={models.actionError}
@@ -495,7 +536,7 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
               onDismissLogin={models.dismissLogin}
             />
             <ComposerActions sendButtonIcon={sendButtonIcon} streaming={streaming} sendHint={sendHint} steerHint={steerHint}
-              canQueue={Boolean(prompt)} disabled={disabled || !modelReady || !prompt}
+              canQueue={Boolean(prompt)} disabled={disabled || recipeActive || !modelReady || !prompt}
               onSteer={() => void submit(true)} onAbort={onAbort} />
           </div>
         </div>

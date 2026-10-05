@@ -105,6 +105,7 @@ export class SandboxPermissionManager {
     const id = randomUUID();
     const request = {
       id,
+      ...(input.conversationId ? { conversationId: input.conversationId } : {}),
       kind: input.kind,
       command: input.command ?? null,
       path: input.path ?? null,

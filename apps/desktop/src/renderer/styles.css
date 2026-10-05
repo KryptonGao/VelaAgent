@@ -1008,6 +1008,13 @@ code,
   margin-left: 8px;
 }
 
+.session-groups:has(.session-group) + .sidebar-recent-chats {
+  margin-top: 14px;
+}
+.recent-chat-list {
+  margin-left: 0;
+}
+
 .subchat-row {
   display: flex;
   align-items: stretch;
@@ -1313,6 +1320,26 @@ code,
   flex: none;
   min-width: 0;
 }
+.chat-actions-anchor { position: relative; }
+.dock-popover.chat-actions-menu {
+  top: calc(100% + 8px);
+  bottom: auto;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+.chat-actions-menu button {
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+}
+.chat-actions-menu button:hover, .chat-actions-menu button:focus-visible { background: var(--bg-sidebar-hover); }
+.chat-actions-menu button:focus-visible, .chat-actions-anchor > button:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+.chat-actions-menu button[aria-disabled="true"] { color: var(--text-muted); cursor: default; }
 .chat-project-context {
   display: inline-flex;
   align-items: center;
@@ -2271,6 +2298,30 @@ code,
 .tool-card-list.is-compact { gap: 1px; }
 .tool-card-list.is-compact .tool-card-main,
 .tool-card-list.is-compact .tool-card-name.grow { flex: 0 1 auto; }
+/* 箭头保留占位,只在对应文字悬停或键盘聚焦时显示,避免文字跳动。 */
+.tool-compact-chevron,
+.tool-card-list.is-compact .tool-chevron,
+.main-chat-view[data-tool-display="compact"] .thinking-block .time-spent-trigger-arrow,
+.main-chat-view[data-tool-display="compact"] .thinking-prose-toggle svg {
+  opacity: 0;
+}
+.tool-compact-summary:has(:is(.tool-compact-label, .tool-compact-sample):hover) > .tool-compact-chevron,
+.tool-compact-summary:focus-visible > .tool-compact-chevron,
+.tool-compact-line:has(:is(.tool-compact-action, .tool-compact-name, .tool-compact-dir, .tool-compact-cmd, .agent-compact-name):hover) .tool-compact-chevron,
+button.tool-compact-line:focus-visible > .tool-compact-chevron,
+.tool-compact-line:has(> button:focus-visible) .tool-compact-chevron,
+.tool-compact-chevron:hover,
+.tool-compact-detail-toggle:is(:hover, :focus-visible) .tool-compact-chevron,
+.tool-card-list.is-compact .tool-card-head:has(:is(.tool-kind-label, .tool-card-main, .tool-mcp-source):hover) .tool-chevron,
+.tool-card-list.is-compact .tool-card-head:focus-visible .tool-chevron,
+.tool-card-list.is-compact .tool-chevron:hover,
+.main-chat-view[data-tool-display="compact"] .thinking-header:has(:is(.time-spent-trigger > span, .thinking-summary-preview):hover) .time-spent-trigger-arrow,
+.main-chat-view[data-tool-display="compact"] .thinking-header:has(:focus-visible) .time-spent-trigger-arrow,
+.main-chat-view[data-tool-display="compact"] .thinking-block .time-spent-trigger-arrow:hover,
+.main-chat-view[data-tool-display="compact"] .thinking-prose-summary:hover .thinking-prose-toggle svg,
+.main-chat-view[data-tool-display="compact"] .thinking-prose-toggle:focus-visible svg {
+  opacity: 1;
+}
 .tool-compact-summary {
   display: flex;
   align-items: center;

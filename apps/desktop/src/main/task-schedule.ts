@@ -1,5 +1,5 @@
 import { CronExpressionParser } from "cron-parser";
-import { thinkingLevels, type ScheduledTaskInput, type TaskSchedule } from "@vela/shared";
+import { thinkingLevels, parseRecipeInput, validateRecipeValues, type ScheduledRecipeBinding, type TaskRecipe, type ScheduledTaskInput, type TaskSchedule } from "@vela/shared";
 import { isAbsolute } from "node:path";
 
 export function parseTaskInput(raw: unknown): ScheduledTaskInput {
@@ -17,7 +17,23 @@ export function parseTaskInput(raw: unknown): ScheduledTaskInput {
     typeof input.model.id !== "string" || !input.model.id.trim() || input.model.id.length > 500)) throw new Error("模型不正确");
   const schedule = parseSchedule(input.schedule);
   return { title: input.title.trim(), prompt: input.prompt.trim(), workspace: input.workspace, schedule, sandboxMode: input.sandboxMode ?? null,
-    model: input.model ? { provider: input.model.provider, id: input.model.id } : null, thinkingLevel: input.thinkingLevel ?? null, missedPolicy: input.missedPolicy ?? "run-once" };
+    model: input.model ? { provider: input.model.provider, id: input.model.id } : null, thinkingLevel: input.thinkingLevel ?? null, missedPolicy: input.missedPolicy ?? "run-once",
+    ...(input.recipeBinding != null ? { recipeBinding: parseScheduledRecipeBinding(input.recipeBinding) } : { recipeBinding: null }) };
+}
+
+export function parseScheduledRecipeBinding(raw: unknown): ScheduledRecipeBinding {
+  const binding = raw as ScheduledRecipeBinding; const snapshot = binding?.recipeSnapshot;
+  const input = parseRecipeInput(snapshot);
+  const versionPolicy = binding.versionPolicy ?? 'fixed';
+  if (!snapshot || typeof snapshot.id !== 'string' || !snapshot.id || snapshot.id.length > 200 || !['user', 'builtin', 'project', 'team'].includes(snapshot.origin) || !Number.isSafeInteger(snapshot.revision) || snapshot.revision < 1 || !Number.isFinite(snapshot.createdAt) || !Number.isFinite(snapshot.updatedAt) ||
+    !['fixed', 'latest'].includes(versionPolicy) || !['agent', 'plan'].includes(binding.mode) || typeof binding.additionalInstructions !== 'string' || binding.additionalInstructions.length > 10000 || Object.keys(validateRecipeValues(input, binding.values)).length) throw new Error('配方定时绑定不正确');
+  if (snapshot.origin === 'project' && (typeof snapshot.projectWorkspace !== 'string' || !isAbsolute(snapshot.projectWorkspace))) throw new Error('项目配方绑定不正确');
+  if (snapshot.origin === 'team' && (typeof snapshot.teamWorkspace !== 'string' || !isAbsolute(snapshot.teamWorkspace) || !snapshot.id.startsWith('team.'))) throw new Error('团队配方绑定不正确');
+  const recipeSnapshot: TaskRecipe = { ...input, id: snapshot.id, origin: snapshot.origin, revision: snapshot.revision, createdAt: snapshot.createdAt, updatedAt: snapshot.updatedAt,
+    ...(snapshot.origin === 'builtin' ? { builtinKind: snapshot.builtinKind, builtinVersion: snapshot.builtinVersion, locale: snapshot.locale } : {}),
+    ...(snapshot.origin === 'project' ? { projectWorkspace: snapshot.projectWorkspace } : {}),
+    ...(snapshot.origin === 'team' ? { teamWorkspace: snapshot.teamWorkspace } : {}) };
+  return { recipeSnapshot, versionPolicy, values: structuredClone(binding.values), additionalInstructions: binding.additionalInstructions, mode: binding.mode };
 }
 
 export function parseSchedule(raw: unknown): TaskSchedule {

@@ -40,6 +40,8 @@ export interface SessionHostHooks {
   onAgentMutation?: () => void;
   /** 新建对话时应使用的工作区目录。 */
   currentCwd: () => string;
+  /** 当前明确选择的工作区；null 表示未选择，执行目录仍可有效。 */
+  currentWorkspace?: () => string | null;
 }
 
 export class SessionHost {
@@ -124,12 +126,13 @@ export class SessionHost {
       let cwd = this.hooks.currentCwd();
       if (rawCwd !== undefined) {
         if (typeof rawCwd !== "string" ||
-          !this.runtime.listConversations().some(conversation => conversation.cwd === rawCwd)) {
+          !this.runtime.listConversations().some(conversation => conversation.cwd === rawCwd && conversation.hasWorkspace !== false)) {
           throw new Error("工作区不存在");
         }
         cwd = rawCwd;
       }
-      await this.runtime.createConversation(cwd);
+      const hasWorkspace = rawCwd !== undefined || !this.hooks.currentWorkspace || this.hooks.currentWorkspace() !== null;
+      await this.runtime.createConversation(cwd, { hasWorkspace });
       return this.currentState();
     });
     ipcMain.handle(IpcChannel.sessionSwitch, async (_event, rawId: unknown) => {
@@ -249,6 +252,7 @@ export class SessionHost {
   }
 
   private onRuntimeEvent(event: RuntimeEvent): void {
+    if (event.type === "prompt_end") return;
     if (event.type === "tool_start") this.runtime.addUsage(event.conversationId, 0, 1);
 
     if (event.type === "status") {

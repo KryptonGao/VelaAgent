@@ -160,6 +160,7 @@ export function useSession(notify: NotifySound = noSound) {
           notifyRef.current("complete");
         }
         if (status === "streaming" && previous !== "streaming") {
+          setErrors((current) => current[conversationId] ? { ...current, [conversationId]: "" } : current);
           const startedAt = timing.turnStartedAt ?? Date.now();
           turnStartedAtRef.current[conversationId] = startedAt;
           completionBlockedRef.current[conversationId] = false;

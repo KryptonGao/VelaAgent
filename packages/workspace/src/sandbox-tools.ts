@@ -34,13 +34,13 @@ export function createSandboxedToolDefinitions(input: SandboxToolFactoryInput): 
 
   const bashOperations: BashOperations = {
     exec: async (command, cwd, options) => {
-      const allowed = await input.permission.request({ sandboxMode: input.sandboxMode, conversationId: input.conversationId, kind: "bash", command, cwd, workspace: boundary });
+      const allowed = await input.permission.request({ sandboxMode: input.sandboxMode, conversationId: input.conversationId, kind: "bash", command, cwd, workspace: boundary, signal: options.signal });
       if (!allowed) throw new Error(`用户拒绝了命令执行:${command}`);
       return createLocalBashOperations().exec(command, cwd, options);
     },
   };
 
-  const guardFileWrite = async (kind: "edit" | "write", path: string): Promise<void> => {
+  const guardFileWrite = async (kind: "edit" | "write", path: string, signal?: AbortSignal): Promise<void> => {
     const allowed = await input.permission.request({
       sandboxMode: input.sandboxMode,
       conversationId: input.conversationId,
@@ -48,6 +48,7 @@ export function createSandboxedToolDefinitions(input: SandboxToolFactoryInput): 
       path,
       workspace: boundary,
       insideWorkspace: isPathInside(path, boundary),
+      signal,
     });
     if (!allowed) throw new Error(`用户拒绝了文件修改:${path}`);
   };
@@ -82,14 +83,14 @@ function withPermissionGuard(
   tool: ToolDefinition,
   kind: "edit" | "write",
   cwd: string,
-  guard: (kind: "edit" | "write", path: string) => Promise<void>,
+  guard: (kind: "edit" | "write", path: string, signal?: AbortSignal) => Promise<void>,
 ): ToolDefinition {
   return {
     ...tool,
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const path = stringParam(params, "path");
       if (!path) throw new Error("缺少文件路径");
-      await guard(kind, resolveToolPath(path, ctx.cwd || cwd));
+      await guard(kind, resolveToolPath(path, ctx.cwd || cwd), signal);
       return tool.execute(toolCallId, params, signal, onUpdate, ctx);
     },
   };

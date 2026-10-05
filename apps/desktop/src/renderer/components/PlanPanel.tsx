@@ -25,6 +25,7 @@ import { Markdown } from "./Markdown";
 import { ContentSwap } from "./BatchMotion";
 import { PopoverPresence } from "./MotionPresence";
 import { CheckIcon, ChevronDownIcon, CopyIcon, PlanIcon } from "./icons";
+import { RecipeActionsContext } from './recipe-actions-context';
 
 const planStatusLabels: Record<ProposedPlanStatus, [string, string]> = {
   draft: ["草稿", "Draft"],
@@ -212,6 +213,7 @@ export function PlanDocumentPane({
   visible?: boolean;
 }) {
   const doc = usePlanDocument();
+  const recipeActions = useContext(RecipeActionsContext);
   const resolved = resolveOpenPlanRevision(doc, doc.plans, doc.draft);
   const latest = resolvePlanRevision(doc.plans, doc.draft, null);
   const latestItem = doc.plans.find((plan) => plan.id === latest?.id) ?? null;
@@ -273,6 +275,7 @@ export function PlanDocumentPane({
           </span>
         </div>
         <div className="plan-pane-actions">
+          {recipeActions?.conversationId && <button type="button" className="plan-action-secondary" disabled={resolved.streaming} onClick={() => recipeActions.fromMessage({ text: resolved.markdown, conversationId: recipeActions.conversationId!, planId: resolved.id })}>{tr('创建配方', 'Create recipe')}</button>}
           <button
             className="icon-btn-ghost"
             type="button"

@@ -8,6 +8,7 @@ import {
   WorkspaceFileService,
   WorkspaceManager,
   createSandboxedToolDefinitions,
+  createWorktree, removeWorktree,
 } from "@vela/workspace";
 import { app, BrowserWindow, ipcMain, nativeImage, nativeTheme, session, shell } from "electron";
 import type { BrowserWindowConstructorOptions } from "electron";
@@ -20,12 +21,16 @@ import { registerOpenTargetIpc } from "./open-targets";
 import { ProjectHost } from "./project-host";
 import { SessionHost } from "./session-host";
 import { ScheduledTaskScheduler } from "./scheduled-task-service";
+import { TaskRecipeService } from "./task-recipe-service";
+import { TaskRecipeHost } from "./task-recipe-host";
+import { executeScheduledRecipe } from './task-recipe-schedule';
 import { ScheduledTaskHost } from "./scheduled-task-host";
 import { McpHost } from "./mcp-host";
 import { SecureCredentialStore } from "./plugin-credentials";
 import { ensureLoginShellPath } from "./shell-path";
 import { TerminalHost } from "./terminal-host";
-import { prepareVelaHome, resolveVelaHome } from "./vela-home";
+import { configureVelaProfile, prepareVelaHome } from "./vela-home";
+import { registerDevelopmentIpc } from "./development-host";
 import { UiStorage } from "./ui-storage";
 import { registerUiBrowserSecurity } from "./browser-security";
 import { BrowserHost } from "./browser-host";
@@ -35,8 +40,8 @@ import { BrowserIpc, type BrowserUiCommand } from "../../../../packages/shared/s
 import { UI_BROWSER_PARTITION } from "../browser-policy";
 import appIconPath from "../../resources/icon.png?asset";
 
-app.setName("Vela");
-// Only one Main Process may claim the persisted task queue.
+const home = configureVelaProfile(app);
+// Only one Main Process per profile may claim its persisted task queue.
 const primaryInstance = app.requestSingleInstanceLock();
 if (!primaryInstance) app.quit();
 app.on("second-instance", () => {
@@ -46,7 +51,7 @@ app.on("second-instance", () => {
 
 // 与 Electron 启动并行解析登录 shell 的 PATH,避免 GUI 进程只拿到 launchd
 // 的最小 PATH 而找不到 Homebrew 里的 gh、pnpm、node。start() 里再 await。
-const loginShellPathReady = ensureLoginShellPath();
+const loginShellPathReady = primaryInstance ? ensureLoginShellPath() : Promise.resolve(null);
 
 const rootDir = dirname(fileURLToPath(import.meta.url));
 const preloadPath = join(rootDir, "../preload/index.js");
@@ -54,6 +59,8 @@ const preloadPath = join(rootDir, "../preload/index.js");
 let mcpHost: McpHost | null = null;
 let scheduledTaskHost: ScheduledTaskHost | null = null;
 let taskScheduler: ScheduledTaskScheduler | null = null;
+let taskRecipeHost: TaskRecipeHost | null = null;
+let taskRecipes: TaskRecipeService | null = null;
 let host: SessionHost | null = null;
 let browserHost: BrowserHost | null = null;
 let browserRepl: BrowserReplManager | null = null;
@@ -166,7 +173,6 @@ async function start(): Promise<void> {
   browserSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   browserSession.setPermissionCheckHandler(() => false);
   const fallbackCwd = resolve(app.getAppPath(), "../..");
-  const home = resolveVelaHome();
   await prepareVelaHome(home, app.getPath("userData"));
 
   const uiStorage = new UiStorage(join(home, "ui-state.json"));
@@ -189,6 +195,8 @@ async function start(): Promise<void> {
   });
 
   const workspaceManager = new WorkspaceManager(join(home, "workspaces.json"));
+  // 先恢复工作区记录，供旧会话迁移工作区归属时使用。
+  const workspace = await workspaceManager.init(process.env.VELA_CWD?.trim() || null);
   const envManager = new ExecutionEnvironmentManager(fallbackCwd, join(home, "worktrees"));
   const git = new GitService({ worktreeRoot: join(home, "worktrees") });
   const operations = new GitOperationLog(join(home, "git-operations.json"));
@@ -215,7 +223,7 @@ async function start(): Promise<void> {
   });
 
   const scheduler = new ScheduledTaskScheduler(join(home, "scheduled-tasks.json"),
-    (task, onCreated) => runtime.runScheduledTask(task.workspace, task.prompt, onCreated, task));
+    (task, onCreated, run) => task.recipeBinding ? executeScheduledRecipe(recipes, task, onCreated, run) : runtime.runScheduledTask(task.workspace, task.prompt, onCreated, task));
   scheduler.init();
   taskScheduler = scheduler;
   const runtime = new AgentRuntime({
@@ -226,6 +234,7 @@ async function start(): Promise<void> {
     mcpPermission: { request: (input) => sandbox.request({ ...input, workspace: input.cwd }) },
     browserReplPermission: { request: (input) => sandbox.request({ ...input, workspace: input.cwd }) },
     cwd: fallbackCwd,
+    isWorkspaceCwd: (cwd) => cwd !== fallbackCwd || workspaceManager.getState().recents.some(recent => recent.path === cwd),
     agentDir: home,
     toolFactory: (cwd, context) =>
       createSandboxedToolDefinitions({
@@ -234,9 +243,47 @@ async function start(): Promise<void> {
         permission: sandbox,
         ...context,
       }),
+    onRecipeStop: id => taskRecipes?.stopConversation(id),
     // 激活会话变化时让工作区跟随,保证输入区与仓库卡片显示的目录即会话目录。
-    onActiveCwd: (cwd) => void project?.syncConversationWorkspace(cwd),
+    onActiveCwd: (cwd, hasWorkspace) => void project?.syncConversationWorkspace(cwd, hasWorkspace),
   });
+  const recipeWorkspaces = () => [...new Set([...workspaceManager.getState().recents.map(r => r.path),
+    ...runtime.listConversations().filter(c => c.hasWorkspace !== false).map(c => c.cwd)])];
+  const recipes = new TaskRecipeService(join(home, "task-recipes.json"), {
+    resolveExecution: draft => runtime.resolveRecipeExecution(draft, draft.sandboxModeOverride ?? sandbox.getMode()),
+    create: run => runtime.createRecipeConversation(run), submit: (run, stage) => runtime.submitRecipe(run, stage),
+    beginWorkflow: run => runtime.beginRecipeWorkflow(run), finishWorkflow: run => runtime.finishRecipeWorkflow(run),
+    skills: workspace => runtime.listSkills(workspace),
+    worktreePath: branch => join(home, 'worktrees', branch.replace('/', '-')),
+    createWorktree: async run => {
+      const worktree = run.worktree!;
+      const result = await createWorktree(worktree.sourceWorkspace, { branch: worktree.branch, newBranch: true, startPoint: worktree.startSha, path: worktree.path }, join(home, 'worktrees'));
+      if (!result.ok || result.path !== worktree.path) throw new Error(result.message || 'worktree 创建失败');
+    },
+    removeWorktree: async run => {
+      const result = await removeWorktree(run.worktree!.sourceWorkspace, { path: run.worktree!.path, force: false }, null);
+      if (!result.ok) throw new Error(result.message);
+    },
+    trustedSnapshot: recipe => scheduler.list().tasks.some(task => JSON.stringify(task.recipeBinding?.recipeSnapshot) === JSON.stringify(recipe)),
+    workspaces: recipeWorkspaces, runningWorkspaces: () => runtime.listConversations().filter(c => c.status === "streaming" || runtime.getAgents(c.id).some(a => a.kind !== "root" && a.status === "running")).map(c => c.cwd),
+  });
+  recipes.init(); taskRecipes = recipes;
+  if (!recipes.list().error) {
+    try { await runtime.reconcileRecipeConversations(recipes.list().runs); }
+    catch (error) { console.error("[vela] recipe conversation reconciliation failed", error); }
+  }
+  runtime.subscribeQuestions(event => {
+    if (event.type === "request") recipes.waiting(event.request.conversationId, event.request.id, true);
+    else {
+      // The service owns the ID→conversation map; a resolved ID need not select a chat.
+      recipes.waiting("", event.id, false);
+    }
+  });
+  sandbox.subscribe(event => {
+    if (event.type === "request" && event.request.conversationId) recipes.waiting(event.request.conversationId, event.request.id, true);
+    else if (event.type === "resolved") recipes.waiting("", event.id, false);
+  });
+  taskRecipeHost = new TaskRecipeHost(recipes, recipeWorkspaces, runtime); taskRecipeHost.register();
   // 「帮我批准」模式下由当前对话选择的模型判断操作风险。
   sandbox.setRiskEvaluator((input) => runtime.evaluateSandboxRisk(input));
 
@@ -253,10 +300,12 @@ async function start(): Promise<void> {
   });
   project.register();
   host = new SessionHost(runtime, {
+    currentWorkspace: () => workspaceManager.getState().current,
     onAgentMutation: () => project?.notifyAgentMutation(),
     currentCwd: () => workspaceManager.getState().current ?? fallbackCwd,
   });
   host.register();
+  registerDevelopmentIpc(runtime, { isPackaged: app.isPackaged, home });
   scheduledTaskHost = new ScheduledTaskHost(scheduler);
   scheduledTaskHost.register();
   mcpHost = new McpHost(runtime, () => workspaceManager.getState().current ?? fallbackCwd);
@@ -267,10 +316,9 @@ async function start(): Promise<void> {
   createWindow();
 
   // 初始工作区:显式环境变量 > 上次使用的工作区 > 无。
-  const workspace = await workspaceManager.init(process.env.VELA_CWD?.trim() || null);
   await envManager.setWorkspace(workspace.current);
   await git.attach(workspace.current);
-  const snapshot = await runtime.switchWorkspace(workspace.current ?? fallbackCwd);
+  const snapshot = await runtime.switchWorkspace(workspace.current ?? fallbackCwd, workspace.current !== null);
   scheduler.start();
   const detail = snapshot.error ?? snapshot.model ?? "未选择模型";
   console.log(`[vela] session ${snapshot.status}: ${detail} (${workspace.current ?? fallbackCwd})`);
@@ -305,6 +353,8 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   if (shutdownStarted) return;
   shutdownStarted = true;
+  try { taskRecipes?.stop(); } catch (error) { console.error("[vela] recipe shutdown write failed", error); }
+  taskRecipeHost?.dispose(); taskRecipeHost = null;
   scheduledTaskHost?.dispose();
   scheduledTaskHost = null;
   mcpHost?.dispose();
@@ -319,5 +369,5 @@ app.on("before-quit", (event) => {
   project = null;
   terminals?.dispose();
   terminals = null;
-  void Promise.allSettled([Promise.resolve(closing), taskScheduler?.drain()]).finally(() => { shutdownComplete = true; app.quit(); });
+  void Promise.allSettled([Promise.resolve(closing), taskScheduler?.drain(), taskRecipes?.drain()]).finally(() => { shutdownComplete = true; app.quit(); });
 });

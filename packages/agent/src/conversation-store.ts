@@ -1,4 +1,4 @@
-import type { ConversationGoal, ExecutionPlan, ExecutionPlanItem, InteractionMode, ProposedPlanItem } from "@vela/shared";
+import type { ConversationGoal, ExecutionPlan, ExecutionPlanItem, InteractionMode, ProposedPlanItem, RecipeExecution } from "@vela/shared";
 import { normalizeStoredGoal } from "./goal-validation";
 import { normalizeStoredAgents, type StoredAgent } from "./agent-history";
 import { latestPlan, migrateLegacyPlan, sortPlans, type LegacyPlanRecord } from "./plan";
@@ -10,6 +10,8 @@ export interface StoredConversation {
   /** 与 Pi 会话 id 一致,重启后据此找回会话文件。 */
   id: string;
   cwd: string;
+  /** 会话创建时是否关联了工作区，与执行目录是否为默认目录无关。 */
+  hasWorkspace?: boolean;
   title: string;
   /** 旧索引缺省为 false；手动名称不再被自动标题覆盖。 */
   titleManuallySet?: boolean;
@@ -33,6 +35,8 @@ export interface StoredConversation {
   archivedAt: number | null;
   /** 旧会话没有此字段；启动时可从主会话结果迁移。 */
   agents?: StoredAgent[];
+  recipeExecution?: RecipeExecution;
+  recipeRunId?: string;
 }
 
 interface StorePayload {
@@ -94,6 +98,27 @@ export class ConversationStore {
     this.schedule();
   }
 
+  /** 导入独立的历史快照；已有对话与正在运行的状态保持原样。 */
+  importMissing(entries: unknown[]): number {
+    this.flushSync(true);
+    const added: string[] = [];
+    for (const raw of entries) {
+      const entry = normalize(raw);
+      if (!entry || this.conversations.has(entry.id)) continue;
+      this.conversations.set(entry.id, entry);
+      added.push(entry.id);
+    }
+    if (!added.length) return 0;
+    this.dirty = true;
+    try { this.flushSync(true); }
+    catch (error) {
+      for (const id of added) this.conversations.delete(id);
+      this.dirty = false;
+      throw error;
+    }
+    return added.length;
+  }
+
   private schedule(): void {
     this.dirty = true;
     if (this.timer) return;
@@ -104,7 +129,7 @@ export class ConversationStore {
   }
 
   /** 进程退出前的同步落盘(before-quit 里没有异步余量)。 */
-  flushSync(): void {
+  flushSync(strict = false): void {
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
@@ -134,6 +159,7 @@ export class ConversationStore {
       this.dirty = false;
     } catch (error) {
       // 保留 dirty，使退出或下次变更时仍会重试。
+      if (strict) throw error;
       console.error("[vela] Failed to save conversations", error);
     }
   }
@@ -190,6 +216,7 @@ function normalize(entry: unknown): StoredConversation | null {
   return {
     id: record.id,
     cwd: record.cwd,
+    hasWorkspace: typeof record.hasWorkspace === "boolean" ? record.hasWorkspace : undefined,
     title: typeof record.title === "string" ? record.title : "新对话",
     titleManuallySet: record.titleManuallySet === true,
     createdAt: numberOr(record.createdAt, Date.now()),
@@ -206,6 +233,9 @@ function normalize(entry: unknown): StoredConversation | null {
     goal: normalizeStoredGoal(record.goal),
     archivedAt: numberOr(record.archivedAt, 0) > 0 ? (record.archivedAt as number) : null,
     agents: normalizeStoredAgents(record.agents),
+    ...(typeof record.recipeRunId === "string" && record.recipeExecution && typeof record.recipeExecution === "object" &&
+      ["ask", "smart", "full"].includes((record.recipeExecution as RecipeExecution).sandboxMode)
+      ? { recipeRunId: record.recipeRunId, recipeExecution: record.recipeExecution as RecipeExecution } : {}),
   };
 }
 

@@ -6,7 +6,7 @@ import { tr, useAppLocale } from "../locale";
 import type { SidebarResize } from "../hooks/useSidebarResize";
 import { MotionList } from "./BatchMotion";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
-import { groupActiveConversations, workspaceName } from "./conversation-search";
+import { groupActiveConversations, searchActiveConversations, workspaceName } from "./conversation-search";
 import {
   activityDay,
   activityReason,
@@ -20,6 +20,8 @@ import { ConversationSearchDialog } from "./ConversationSearchDialog";
 import { ClockIcon } from "./icons";
 
 interface SidebarProps {
+  onOpenRecipes: () => void;
+  recipesOpen: boolean;
   onOpenScheduledTasks: () => void;
   scheduledTasksOpen: boolean;
   collapsed: boolean;
@@ -39,6 +41,8 @@ interface SidebarProps {
 }
 
 export function Sidebar({
+  onOpenRecipes,
+  recipesOpen,
   onOpenScheduledTasks,
   scheduledTasksOpen,
   collapsed,
@@ -104,6 +108,10 @@ export function Sidebar({
   const untitledLabel = tr("新对话", "New chat");
   const groups = useMemo(
     () => groupActiveConversations(allConversations, "", untitledLabel),
+    [allConversations, untitledLabel],
+  );
+  const recentConversations = useMemo(
+    () => searchActiveConversations(allConversations, "", untitledLabel).filter(conversation => conversation.hasWorkspace === false),
     [allConversations, untitledLabel],
   );
   const activityOptions = useMemo(() => ({ priorityConversations, waitingConversationIds }), [priorityConversations, waitingConversationIds]);
@@ -199,6 +207,9 @@ export function Sidebar({
             <span>{tr("新对话", "New chat")}</span>
           </span>
         </button>
+        <button className="quick-action-item" type="button" aria-current={recipesOpen ? "page" : undefined} onClick={onOpenRecipes}>
+          <span className="quick-action-item-left"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></svg><span>{tr("任务配方", "Task Recipes")}</span></span>
+        </button>
       </div>
 
       <div ref={scrollAreaRef} className="sidebar-scroll-area">
@@ -254,7 +265,15 @@ export function Sidebar({
               </div>
             );
           }}</MotionList>
-          {groups.length === 0 ? (
+          {recentConversations.length > 0 ? (
+            <section className="sidebar-recent-chats" aria-label={tr("最近", "Recent")}>
+              <div className="sidebar-section-title">{tr("最近", "Recent")}</div>
+              <MotionList className="subchat-list recent-chat-list" items={recentConversations} keyOf={conversation => conversation.id}>
+                {renderConversation}
+              </MotionList>
+            </section>
+          ) : null}
+          {groups.length === 0 && recentConversations.length === 0 ? (
             <div className="sidebar-empty-hint" role="status">{tr("还没有会话", "No chats yet")}</div>
           ) : null}
         </>}
@@ -317,6 +336,7 @@ function ConversationRow({ conversation, active, activity, reason, priority, loc
   const title = conversation.title || tr("新对话", "New chat");
   const statusLabel = activityReasonLabel(reason, conversation);
   const priorityLabel = priority ? tr("取消优先关注", "Remove priority") : tr("设为优先关注", "Mark as priority");
+  const workspaceLabel = conversation.hasWorkspace === false ? "" : workspaceName(conversation.cwd);
   const updatedAt = new Date(conversation.updatedAt);
   const timeLabel = updatedAt.toLocaleString(locale, {
     ...(conversation.updatedAt < today ? { month: "2-digit", day: "2-digit" } as const : {}),
@@ -324,13 +344,13 @@ function ConversationRow({ conversation, active, activity, reason, priority, loc
   });
   return <div className={`subchat-row${activity ? " activity-row" : ""}${onRename ? " has-rename" : ""}`}>
     <button className={`subchat-item${active ? " active" : ""}`} type="button"
-      title={activity ? `${title}\n${conversation.cwd}\n${statusLabel} · ${updatedAt.toLocaleString(locale)}` : title}
-      aria-label={activity ? `${title}, ${workspaceName(conversation.cwd)}, ${statusLabel}` : title}
+      title={activity ? [title, workspaceLabel ? conversation.cwd : "", `${statusLabel} · ${updatedAt.toLocaleString(locale)}`].filter(Boolean).join("\n") : title}
+      aria-label={activity ? [title, workspaceLabel, statusLabel].filter(Boolean).join(", ") : title}
       aria-current={active ? "page" : undefined} onClick={() => onSelect(conversation.id)}>
       {activity ? <span className="activity-row-content">
         <span className="activity-row-heading">
           <span className="subchat-title">{title}</span>
-          <span className="activity-workspace">{workspaceName(conversation.cwd)}</span>
+          {workspaceLabel ? <span className="activity-workspace">{workspaceLabel}</span> : null}
         </span>
         <span className="activity-row-detail">
           <span className={`activity-status activity-status-${reason}`}>

@@ -4,6 +4,8 @@ import {
   type AgentSettings,
   type AuthMethodType,
   type ConversationSummary,
+  type ConversationSyncResult,
+  type VelaApi,
   type CustomModelApi,
   type CustomModelInput,
   type ExecutionEnvironmentKind,
@@ -34,7 +36,7 @@ import { SettingsUsageView } from "./usage/SettingsUsageView";
 import type { ConversationLinkTarget } from "../browser/conversation-link-policy";
 import { notificationSoundKinds, type NotifySound } from "../notification-sounds";
 
-type SettingsSection = "agent" | "archived" | "models" | "integrations" | "mcp" | "usage" | "permissions" | "workspace" | "appearance";
+type SettingsSection = "agent" | "archived" | "models" | "integrations" | "mcp" | "usage" | "permissions" | "workspace" | "appearance" | "development";
 type ModelsApi = ReturnType<typeof useModels>;
 
 interface SettingsViewProps {
@@ -66,6 +68,8 @@ export function SettingsView({
   const copy = settingsCopy(locale);
   const [section, setSection] = useState<SettingsSection>("agent");
   const mod = modKeyLabel(platform);
+  const development = window.vela?.development;
+  const visibleSections = development ? [...sections, "development" as const] : sections;
 
   return (
     <main className="settings-view">
@@ -77,7 +81,7 @@ export function SettingsView({
       </header>
       <div className="settings-body">
         <nav className="settings-nav" aria-label={copy.title}>
-          {sections.map((id) => (
+          {visibleSections.map((id) => (
             <button
               key={id}
               type="button"
@@ -116,6 +120,9 @@ export function SettingsView({
           <div hidden={section !== "appearance"}>
             <AppearanceSection copy={copy} preferences={preferences} catalog={models.catalog} mod={mod} onPreviewSound={onPreviewSound} />
           </div>
+          {development ? <div hidden={section !== "development"}>
+            <DevelopmentSection copy={copy} development={development} />
+          </div> : null}
         </div>
       </div>
       <SheetPresence present={models.login.active}>
@@ -128,6 +135,39 @@ export function SettingsView({
       </SheetPresence>
     </main>
   );
+}
+
+function DevelopmentSection({ copy, development }: {
+  copy: SettingsCopy;
+  development: NonNullable<VelaApi["development"]>;
+}) {
+  const text = copy.development;
+  const [syncing, setSyncing] = useState(false);
+  const [result, setResult] = useState<ConversationSyncResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  async function sync(): Promise<void> {
+    if (syncing) return;
+    setSyncing(true); setResult(null); setError(null);
+    try { setResult(await development.syncProductionConversations()); }
+    catch (error) {
+      const message = error instanceof Error
+        ? error.message.replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/i, "")
+        : text.retry;
+      setError(localizeError(message));
+    }
+    finally { setSyncing(false); }
+  }
+  return <section className="settings-section" aria-busy={syncing}>
+    <SettingsBlock title={text.title} hint={text.hint}>
+      <div className="settings-actions">
+        <button className="primary-btn" type="button" disabled={syncing} onClick={() => void sync()}>
+          {syncing ? text.syncing : text.sync}
+        </button>
+      </div>
+      {result ? <p className="settings-saved" role="status">{text.result(result.imported, result.existing, result.unavailable)}</p> : null}
+      {error ? <p className="settings-error" role="alert">{error}</p> : null}
+    </SettingsBlock>
+  </section>;
 }
 
 function AgentSection({

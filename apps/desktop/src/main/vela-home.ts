@@ -1,15 +1,41 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
 
 const agentFiles = ["auth.json", "models.json", "selection.json"] as const;
 
-/** Vela 自己的资料目录。macOS 上即 `/Users/<用户名>/.vela`。 */
-export function resolveVelaHome(): string {
+/** 安装版使用 ~/.vela，源码开发版使用 ~/.vela-dev。 */
+export function resolveVelaHome(isPackaged = true): string {
   const override = process.env.VELA_USER_DATA?.trim();
   if (override) return resolve(override);
-  return join(homedir(), ".vela");
+  return join(homedir(), isPackaged ? ".vela" : ".vela-dev");
+}
+
+interface ProfileApp {
+  isPackaged: boolean;
+  setName(name: string): void;
+  getPath(name: "appData"): string;
+  setPath(name: "userData" | "sessionData", path: string): void;
+}
+
+/** 必须在申请单实例锁和 ready 事件之前隔离 Electron 的锁、缓存和浏览器资料。 */
+export function configureVelaProfile(app: ProfileApp): string {
+  app.setName(app.isPackaged ? "Vela" : "Vela Dev");
+  const home = resolveVelaHome(app.isPackaged);
+  const override = process.env.VELA_USER_DATA?.trim();
+  if (override || !app.isPackaged) {
+    // 显式指定默认资料目录时也必须复用默认锁，不能给同一任务队列开第二把锁。
+    const userData = home === join(homedir(), ".vela")
+      ? join(app.getPath("appData"), "Vela")
+      : home === join(homedir(), ".vela-dev")
+        ? join(app.getPath("appData"), "Vela Dev")
+        : join(home, "electron-data");
+    mkdirSync(userData, { recursive: true });
+    app.setPath("userData", userData);
+    app.setPath("sessionData", userData);
+  }
+  return home;
 }
 
 /**

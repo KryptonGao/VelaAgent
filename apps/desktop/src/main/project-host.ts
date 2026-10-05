@@ -1109,7 +1109,11 @@ export class ProjectHost {
    * 让工作区选择跟随激活会话,保证输入区的工作区/环境/仓库卡片
    * 与会话目录(Context 面板)一致。会话目录不存在时保持原工作区。
    */
-  async syncConversationWorkspace(cwd: string): Promise<void> {
+  async syncConversationWorkspace(cwd: string, hasWorkspace = true): Promise<void> {
+    if (!hasWorkspace) {
+      if (this.options.workspaceManager.getState().current !== null) await this.options.workspaceManager.close();
+      return;
+    }
     if (!cwd || cwd === this.options.workspaceManager.getState().current) return;
     if (!(await isDirectory(cwd))) return;
     try {
@@ -1164,7 +1168,13 @@ export class ProjectHost {
       environment,
     } satisfies WorkspaceEvent);
     await this.options.git.attach(workspace.current);
-    await this.options.runtime.switchWorkspace(workspace.current ?? this.options.fallbackCwd);
+    const cwd = workspace.current ?? this.options.fallbackCwd;
+    const hasWorkspace = workspace.current !== null;
+    const active = this.options.runtime.listConversations().find(conversation => conversation.id === this.options.runtime.activeConversationId);
+    // 工作区事件也可能来自切换会话后的同步，保留用户已经选中的会话。
+    if (active?.cwd !== cwd || active.hasWorkspace !== hasWorkspace) {
+      await this.options.runtime.switchWorkspace(cwd, hasWorkspace);
+    }
   }
 
   /** 文件预览的路径边界与解析根:仓库根优先,相对路径先按工作区解析。 */

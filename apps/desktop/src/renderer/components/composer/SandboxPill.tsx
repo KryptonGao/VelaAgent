@@ -28,10 +28,10 @@ function modeDescription(mode: SandboxMode): string {
   return tr(chinese, english);
 }
 
-export function SandboxPill({ project }: { project: ProjectApi }) {
+export function SandboxPill({ project, conversationMode }: { project: ProjectApi; conversationMode?: SandboxMode }) {
   const [open, setOpen] = useState(false);
   const ref = useDismissable<HTMLDivElement>(open, () => setOpen(false));
-  const mode = project.sandboxMode;
+  const mode = conversationMode ?? project.sandboxMode;
 
   return (
     <div className="composer-chip-anchor" ref={ref}>
@@ -54,6 +54,7 @@ export function SandboxPill({ project }: { project: ProjectApi }) {
               type="button"
               key={candidate}
               className={`sandbox-option${candidate === mode ? " active" : ""}`}
+              disabled={Boolean(conversationMode)}
               onClick={() => {
                 void project.setSandboxMode(candidate);
                 setOpen(false);
@@ -69,7 +70,7 @@ export function SandboxPill({ project }: { project: ProjectApi }) {
               {candidate === mode ? <CheckIcon /> : null}
             </button>
           ))}
-          <div className="composer-popover-footnote">{tr("执行权限会影响 Agent 能自动完成的操作。「帮我批准」由当前对话选择的模型判断风险。", "Permissions control which actions the agent can complete automatically. Smart approval uses the model selected for the current conversation to check risk.")}</div>
+          <div className="composer-popover-footnote">{conversationMode ? tr("此对话使用配方启动时的权限快照；应用默认权限不受影响。", "This chat uses the permission snapshot from its recipe launch. App defaults are unchanged.") : tr("执行权限会影响 Agent 能自动完成的操作。「帮我批准」由当前对话选择的模型判断风险。", "Permissions control which actions the agent can complete automatically. Smart approval uses the model selected for the current conversation to check risk.")}</div>
         </div>
       </PopoverPresence>
     </div>

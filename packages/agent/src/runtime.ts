@@ -7,7 +7,8 @@ import type { BuiltInPlugin, PluginCatalog, PluginTarget, PluginStatusEvent } fr
 import { redactMcpDisplay, mcpConfiguredSecrets } from "./mcp-redaction";
 import { McpSessionBridge, isMcpTool, type McpPermission } from "./mcp-session";
 import { createScheduledTaskTools, scheduledTaskInstructions, scheduledTaskToolNames } from "./scheduled-task-tools";
-import type { ScheduledTaskInput, SandboxExecutionContext, SandboxMode, ScheduledTaskService } from "@vela/shared";
+import { RecipeGenerator, parseRecipeGenerateInput } from './recipe-generator';
+import type { RecipeExecution, RecipeRun, RecipeStageSubmission, RecipeSubmitResult, RecipeStageEvidence, RecipeUseDraft, ScheduledTaskInput, SandboxExecutionContext, SandboxMode, ScheduledTaskService } from "@vela/shared";
 import type { McpCatalog, McpCatalogInput, McpServerInput, McpServerTarget, McpEnabledInput, McpProjectTrustInput, McpToolReadOnlyInput, McpStatusEvent } from "@vela/shared";
 import { browserToolNames, browserUseInstructions, createBrowserTools, type BrowserReplService, type BrowserReplPermission } from "./browser-use";
 import { TurnCheckpoints, type TurnCheckpoint } from "./turn-checkpoints";
@@ -61,7 +62,7 @@ import {
 } from "@vela/shared";
 import { defaultToolNames } from "@vela/tools";
 import { getCurrentTools, clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -152,9 +153,12 @@ import {
   spawnAgentToolName,
 } from "./subagent";
 
+const recipePromptToken = Symbol("recipe-stage-prompt");
+
 export type RuntimeEvent =
   | TraceUpdate
   | { type: "status"; conversationId: string }
+  | { type: "prompt_end"; conversationId: string; status: "responded" | "stopped" | "failed"; error?: string; planPending: boolean }
   | { type: "text_delta"; conversationId: string; delta: string }
   | { type: "thinking_delta"; conversationId: string; delta: string }
   | { type: "assistant_start"; conversationId: string }
@@ -183,8 +187,11 @@ export interface AgentRuntimeOptions {
   builtInPlugins?: readonly BuiltInPlugin[];
   /** 按会话 cwd 构造沙箱化的 bash/edit/write 工具,以同名覆盖 Pi 内置实现。 */
   toolFactory?: (cwd: string, context?: SandboxExecutionContext) => ToolDefinition[];
-  /** 激活对话的 cwd 变化时回调(用于让工作区等界面状态跟随会话)。 */
-  onActiveCwd?: (cwd: string) => void;
+  /** 仅用于迁移旧会话缺失的工作区归属。 */
+  isWorkspaceCwd?: (cwd: string) => boolean;
+  /** 激活对话的执行目录或工作区归属变化时通知宿主。 */
+  onActiveCwd?: (cwd: string, hasWorkspace: boolean) => void;
+  onRecipeStop?: (conversationId: string) => void;
 }
 
 interface RewindMetadata {
@@ -208,7 +215,12 @@ interface PendingInstruction {
 }
 
 interface Conversation {
+  hasWorkspace: boolean;
   scheduledSandboxMode?: SandboxMode | null;
+  recipeExecution?: RecipeExecution;
+  recipeRunId?: string;
+  recipeWorkflowActive?: boolean;
+  recipeStageSideEffect?: RecipeStageSubmission["sideEffect"];
   id: string;
   session: AgentSession | null;
   /** 新对话在登记时创建;恢复的对话在激活时通过 sessionFile 打开。 */
@@ -286,9 +298,11 @@ export class AgentRuntime {
   private readonly questions = new QuestionManager();
   private readonly thinkingSummaries = new ThinkingSummaryGenerator();
   private readonly textAssist = new TextAssistService();
+  private readonly recipeGenerator = new RecipeGenerator();
   private readonly initializePromise: Promise<void>;
   private readonly store: ConversationStore;
   private currentCwd: string;
+  private currentHasWorkspace: boolean | undefined;
   /** 被停用的 Skill 名称；启动会话时据此过滤，null 表示还没读取。 */
   private disabledSkills: Set<string> | null = null;
   /** 每次停用、启用或删除 Skill 时递增，用于让已打开的会话在下次发言前刷新 Skill。 */
@@ -361,12 +375,29 @@ export class AgentRuntime {
         status: entry.snapshot.status,
         messageCount: this.store.get(entry.id)?.messageCount ?? 0,
         cwd: entry.snapshot.cwd,
+        hasWorkspace: entry.hasWorkspace,
         createdAt: entry.createdAt,
         updatedAt: entry.updatedAt,
         archivedAt: entry.archivedAt,
         ...(entry.snapshot.turnStartedAt !== undefined ? { turnStartedAt: entry.snapshot.turnStartedAt } : {}),
         ...(entry.snapshot.turnCompletedAt !== undefined ? { turnCompletedAt: entry.snapshot.turnCompletedAt } : {}),
       }));
+  }
+
+  /** 在会话操作队列内导入历史，不切换当前会话或重建已有会话。 */
+  async importConversations(load: (knownIds: ReadonlySet<string>) => Promise<unknown[]>): Promise<number> {
+    return this.exclusive(async () => {
+      await this.ready();
+      if (this.disposed) throw new Error("应用正在退出，请重新启动后同步");
+      this.store.flushSync(true);
+      const entries = await load(new Set(this.store.list().map(entry => entry.id)));
+      if (this.disposed) throw new Error("应用正在退出，请重新启动后同步");
+      const count = this.store.importMissing(entries);
+      this.restoreConversations();
+      const active = this.activeConversation();
+      if (active) this.emitStatus(active);
+      return count;
+    });
   }
 
   subscribe(listener: (event: RuntimeEvent) => void): () => void {
@@ -397,14 +428,127 @@ export class AgentRuntime {
   }
 
   /** 新建一个绑定 cwd 的对话并激活它。 */
-  async createConversation(cwd: string): Promise<SessionSnapshot> {
+  async createConversation(cwd: string, options: { hasWorkspace?: boolean } = {}): Promise<SessionSnapshot> {
     return this.exclusive(async () => {
       await this.ready();
       // 新对话可能沿用「上次使用」,所以先把当前对话正在用的选择记下来。
       await this.rememberActiveSelection();
-      const entry = this.addEntry(cwd);
+      const entry = this.addEntry(cwd, options);
       return this.startInternal(entry);
     });
+  }
+
+  /** Reconcile orphan session headers after a failed index/binding write, without running them. */
+  async reconcileRecipeConversations(runs: readonly RecipeRun[]): Promise<void> {
+    await this.exclusive(async () => {
+      await this.ready();
+      for (const run of runs) {
+        if (run.conversationBound || this.conversations.has(run.conversationId)) continue;
+        let files: string[];
+        try { files = readdirSync(this.sessionDir()); } catch { continue; }
+        const file = files.find(file => file.endsWith(`_${run.conversationId}.jsonl`));
+        if (!file) continue;
+        const manager = SessionManager.open(join(this.sessionDir(), file), this.sessionDir(), run.workspace);
+        if (manager.getSessionId() !== run.conversationId) continue;
+        this.addEntry(run.workspace, { sessionManager: manager, activate: false, reservedId: run.conversationId,
+          hasWorkspace: true, mode: run.mode, title: `${run.recipeSnapshot.name} · ${run.resolvedContext.name}`,
+          recipeRunId: run.id, recipeExecution: run.resolvedExecution });
+      }
+    });
+  }
+
+  /** Resolve new-chat defaults without mutating active chat or application settings. */
+  async resolveRecipeExecution(draft: Pick<RecipeUseDraft, "modelOverride" | "thinkingLevelOverride">, sandboxMode: SandboxMode): Promise<RecipeExecution> {
+    const directory = await this.readyDirectory();
+    const defaults = this.conversationSelection(directory);
+    const model = draft.modelOverride ? directory.requireAvailable(draft.modelOverride.provider, draft.modelOverride.id) : defaults.model;
+    if (!model) throw new Error("模型不可用，请选择已配置的模型");
+    const thinkingLevel = draft.thinkingLevelOverride ?? defaults.thinkingLevel;
+    if (!levelsFor(model).includes(thinkingLevel)) throw new Error("所选模型不支持此思考强度，请重新选择");
+    return { model: { provider: model.provider, id: model.id }, thinkingLevel, sandboxMode };
+  }
+
+  /** Reserved ID comes from a durable RecipeRun claim. No message is submitted here. */
+  async createRecipeConversation(run: RecipeRun): Promise<void> {
+    await this.exclusive(async () => {
+      await this.ready();
+      if (this.conversations.has(run.conversationId)) {
+        const existing = this.conversations.get(run.conversationId)!;
+        if (existing.recipeRunId !== run.id) throw new Error("预留对话 ID 已被占用");
+        return;
+      }
+      const directory = await this.readyDirectory();
+      const model = directory.requireAvailable(run.resolvedExecution.model.provider, run.resolvedExecution.model.id);
+      const entry = this.addEntry(run.workspace, { reservedId: run.conversationId, activate: false, hasWorkspace: true,
+        title: `${run.recipeSnapshot.name} · ${run.resolvedContext.name}`, mode: run.mode,
+        recipeRunId: run.id, recipeExecution: run.resolvedExecution });
+      await this.startInternal(entry, { model, thinkingLevel: run.resolvedExecution.thinkingLevel });
+      if (!entry.session || entry.snapshot.status === "error") throw new Error(entry.snapshot.error ?? "无法创建配方对话");
+      this.store.flushSync(true);
+      if (run.trigger !== 'scheduled') {
+        this.activeId = entry.id;
+        this.notifyActiveCwd(entry.snapshot.cwd, true);
+      }
+      this.emitStatus(entry);
+    });
+  }
+
+  async beginRecipeWorkflow(run: RecipeRun): Promise<void> {
+    const entry = this.conversations.get(run.conversationId);
+    if (!entry || entry.recipeRunId !== run.id) throw new Error("配方对话绑定不可用");
+    if (!entry.session) await this.startInternal(entry);
+    this.requireIdle(entry.id, true);
+    if (entry.snapshot.mode !== run.mode || entry.session?.model?.provider !== run.resolvedExecution.model.provider || entry.session?.model?.id !== run.resolvedExecution.model.id || entry.session?.thinkingLevel !== run.resolvedExecution.thinkingLevel) throw new Error("聊天的模式或模型已变化，请检查后新建配方任务");
+    if (entry.control?.list().some(agent => agent.kind !== "root" && agent.status === "running")) throw new Error("聊天仍有运行中的子任务");
+    entry.recipeWorkflowActive = true;
+  }
+  finishRecipeWorkflow(run: RecipeRun): void {
+    const entry = this.conversations.get(run.conversationId);
+    if (!entry || entry.recipeRunId !== run.id) return;
+    entry.recipeWorkflowActive = false; entry.recipeStageSideEffect = undefined;
+    if (!this.disposed) this.applyActiveTools(entry);
+  }
+
+  /** The prompt result and evidence belong only to this invocation, never to later turns. */
+  async submitRecipe(run: RecipeRun, stage?: RecipeStageSubmission): Promise<RecipeSubmitResult> {
+    const entry = this.conversations.get(run.conversationId);
+    if (!entry?.session || entry.recipeRunId !== run.id) throw new Error("配方对话绑定不可用");
+    if (stage) {
+      if (!entry.recipeWorkflowActive || run.mode !== "agent" || !run.recipeSnapshot.stages?.some(s => s.id === stage.id && s.sideEffect === stage.sideEffect)) throw new Error("阶段执行绑定不可用");
+      entry.recipeStageSideEffect = stage.sideEffect;
+      this.applyActiveTools(entry);
+    }
+    const previousRetryEnabled = entry.session.settingsManager.getRetrySettings().enabled;
+    const previousCompactionEnabled = entry.session.settingsManager.getCompactionEnabled();
+    if (stage) { entry.session.settingsManager.setRetryEnabled(false); entry.session.settingsManager.setCompactionEnabled(false); }
+    let failure: string | undefined; let result: RecipeSubmitResult | undefined;
+    const evidence: RecipeStageEvidence[] = [];
+    const leaf = entry.sessionManager?.getLeafId();
+    const unsubscribe = this.subscribe(event => {
+      if (event.conversationId !== entry.id) return;
+      if (event.type === "error") failure = event.message;
+      if (stage && event.type === "tool_end" && evidence.length < 9999) evidence.push({ type: "tool", id: event.toolCallId, label: `${event.toolName} · ${event.isError ? 'error' : 'completed'}`.slice(0, 300) });
+      if (event.type === "prompt_end") result = { status: event.status === "stopped" ? "stopped" : failure ? "failed" : event.status, error: failure ?? event.error, planPending: event.planPending };
+    });
+    try {
+      const text = stage?.prompt ?? run.expandedPrompt;
+      this.emit({ type: "user_message", conversationId: entry.id, text });
+      await this.prompt(entry.id, text, undefined, undefined, recipePromptToken);
+      if (this.disposed) throw new Error("应用退出导致任务中断");
+      if (!result) {
+        if (entry.stopRequested) result = { status: "stopped" };
+        else if (failure) result = { status: "failed", error: failure };
+        else throw new Error("无法确认回合结果，请检查聊天");
+      }
+      if (stage) {
+        const branch = entry.sessionManager?.getBranch() ?? [];
+        const start = leaf ? branch.findIndex(item => item.id === leaf) + 1 : 0;
+        const response = branch.slice(start).findLast(item => item.type === "message" && item.message.role === "assistant" && isVisibleTranscriptMessage(item.message as AgentMessage));
+        if (response) evidence.push({ type: "response", id: response.id, label: '阶段回复 / Stage response' });
+        return { ...result, evidence, retrySafe: result.status === "failed" && stage.sideEffect === "read_only" };
+      }
+      return result;
+    } finally { unsubscribe(); entry.recipeStageSideEffect = undefined; if (stage) { entry.session.settingsManager.setRetryEnabled(previousRetryEnabled); entry.session.settingsManager.setCompactionEnabled(previousCompactionEnabled); } if (entry.session && !this.disposed) this.applyActiveTools(entry); }
   }
 
   /** Scheduler entry point: create a persisted background chat without changing the selected workspace. */
@@ -465,6 +609,7 @@ export class AgentRuntime {
       const branchedSources = transcriptSourcesFromProjection(branched.buildSessionProjection());
       await this.rememberActiveSelection();
       const entry = this.addEntry(source.snapshot.cwd, {
+        hasWorkspace: source.hasWorkspace,
         sessionManager: branched,
         title: branchTitle(source.snapshot.title),
         mode: source.snapshot.mode,
@@ -491,7 +636,7 @@ export class AgentRuntime {
       if (!entry) throw new Error("对话不存在或已结束");
       if (!entry.session) await this.startInternal(entry);
       this.activeId = entry.id;
-      this.notifyActiveCwd(entry.snapshot.cwd);
+      this.notifyActiveCwd(entry.snapshot.cwd, entry.hasWorkspace);
       this.emitStatus(entry);
       return this.getSnapshot();
     });
@@ -526,7 +671,7 @@ export class AgentRuntime {
           if (!fallback.session) await this.startInternal(fallback);
           this.activeId = fallback.id;
           this.touchEntry(fallback);
-          this.notifyActiveCwd(fallback.snapshot.cwd);
+          this.notifyActiveCwd(fallback.snapshot.cwd, fallback.hasWorkspace);
           this.emitStatus(fallback);
         }
       }
@@ -638,15 +783,17 @@ export class AgentRuntime {
     text: string,
     images?: ImageAttachment[],
     deliverAs?: RuntimeInstructionMode,
+    recipeToken?: symbol,
   ): Promise<void> {
     const entry = this.conversations.get(conversationId);
     if (!entry?.session) throw new Error("对话不存在或已结束");
+    if (entry.recipeWorkflowActive && recipeToken !== recipePromptToken) throw new Error("配方阶段正在执行或等待审批，请使用阶段操作，或先停止任务");
     const running = entry.driving || entry.session.isStreaming;
     if (deliverAs && running) {
       await this.appendInstruction(entry, text, images, deliverAs);
       return;
     }
-    this.requireIdle(conversationId);
+    this.requireIdle(conversationId, recipeToken === recipePromptToken);
     this.addUsage(conversationId, 1, 0);
     if (!entry.titleManuallySet && !entry.titleGenerationStarted && entry.snapshot.title === "新对话") {
       entry.titleGenerationStarted = true;
@@ -786,6 +933,7 @@ export class AgentRuntime {
     const entry = this.conversations.get(conversationId);
     if (!entry) throw new Error("对话不存在或已结束");
     if (entry.driving || entry.session?.isStreaming) throw new Error("回复进行中，不能切换模式");
+    if (entry.recipeWorkflowActive) throw new Error("配方阶段执行期间不能切换模式");
     if (entry.snapshot.mode === mode) return;
     if (entry.snapshot.mode === "goal") this.pauseGoal(entry, null);
     this.patchEntry(entry, { mode });
@@ -852,6 +1000,7 @@ export class AgentRuntime {
     const entry = conversationId ? this.conversations.get(conversationId) : this.activeConversation();
     if (!entry) return;
     entry.stopRequested = true;
+    try { this.options.onRecipeStop?.(entry.id); } catch (error) { console.error("[vela] recipe stop notification failed", error); }
     // 停止一并撤销还没投递的排队/调整指令,避免下一次发言时意外继续。
     entry.pendingInstructions = [];
     this.syncPendingInstructions(entry);
@@ -872,23 +1021,22 @@ export class AgentRuntime {
    * 工作区变化:优先切回该工作区最近使用的对话(上下文保留),
    * 没有才新建一个;其他工作区的对话留在列表里。
    */
-  async switchWorkspace(cwd: string): Promise<SessionSnapshot> {
+  async switchWorkspace(cwd: string, hasWorkspace = true): Promise<SessionSnapshot> {
     return this.exclusive(async () => {
       await this.ready();
       const existing = [...this.conversations.values()]
-        .filter((entry) => entry.snapshot.cwd === cwd && entry.archivedAt === null)
+        .filter((entry) => entry.snapshot.cwd === cwd && entry.hasWorkspace === hasWorkspace && entry.archivedAt === null)
         .sort((a, b) => b.updatedAt - a.updatedAt);
       if (existing.length > 0) {
         const entry = existing[0];
         if (!entry.session) await this.startInternal(entry);
         this.activeId = entry.id;
-        this.notifyActiveCwd(cwd);
+        this.notifyActiveCwd(cwd, entry.hasWorkspace);
         this.emitStatus(entry);
         return this.getSnapshot();
       }
-      this.currentCwd = cwd;
       await this.rememberActiveSelection();
-      const entry = this.addEntry(cwd);
+      const entry = this.addEntry(cwd, { hasWorkspace });
       return this.startInternal(entry);
     });
   }
@@ -962,9 +1110,11 @@ export class AgentRuntime {
       if (!isThinkingLevel(level)) throw new Error("不支持这个思考强度");
       const directory = await this.readyDirectory();
       const active = this.activeConversation();
+      if (active?.recipeWorkflowActive) throw new Error("配方执行期间不能更换思考强度");
       const model = active?.session?.model ?? directory.modelForSelection();
       const next = model ? clampToModel(model, level) : level;
       active?.session?.setThinkingLevel(next);
+      if (active?.recipeExecution) active.recipeExecution = { ...active.recipeExecution, thinkingLevel: next };
       if (active) this.syncFromSession(active);
       if (model) await directory.rememberLastUsed(model.provider, model.id, next);
       return this.getSnapshot();
@@ -1190,6 +1340,23 @@ export class AgentRuntime {
     return this.decorateMcpTranscript(entry.id, session, transcriptFromProjection(manager.buildSessionProjection(), entry.plans, readTurnTimings(manager.getBranch())));
   }
 
+  getRecipeEvidence(run: RecipeRun, evidence: RecipeStageEvidence): { label: string; text: string } {
+    const entry = this.conversations.get(run.conversationId);
+    if (!entry || entry.recipeRunId !== run.id) throw new Error("关联聊天已删除或绑定不可用");
+    const manager = entry.sessionManager ?? (entry.sessionFile ? SessionManager.open(entry.sessionFile, this.sessionDir(), entry.snapshot.cwd) : null);
+    if (!manager) throw new Error("聊天证据不可读取");
+    if (evidence.type === "response") {
+      const message = manager.getBranch().find(item => item.id === evidence.id);
+      if (message?.type !== "message" || message.message.role !== "assistant") throw new Error("关联回复不在当前聊天历史中");
+      const visible = transcriptFromMessages([message.message as AgentMessage])[0];
+      return this.redactMcpForConversation(entry.id, { label: evidence.label, text: visible?.text ?? "" });
+    }
+    const messages = this.decorateMcpTranscript(entry.id, entry.session, transcriptFromProjection(manager.buildSessionProjection(), entry.plans));
+    const tool = messages.flatMap(m => m.tools).find(t => t.id === evidence.id);
+    if (!tool) throw new Error("关联工具记录不在当前聊天历史中");
+    return this.redactMcpForConversation(entry.id, { label: evidence.label, text: JSON.stringify(tool.activity, null, 2) });
+  }
+
   /** 使用指定总结模型或捕获对话当前模型；独立调用，不修改会话消息和模型选择。 */
   async summarizeThinking(input: ThinkingSummaryInput): Promise<string> {
     const entry = this.conversations.get(input.conversationId);
@@ -1216,6 +1383,14 @@ export class AgentRuntime {
     if (!model || !directory.isAvailable(model)) throw new Error("先选择一个已登录或已配置密钥的模型");
     return this.textAssist.generate(directory.runtime, model, request, entry?.id ?? null);
   }
+
+  async generateRecipe(raw: unknown) {
+    const input = parseRecipeGenerateInput(raw);
+    const directory = await this.readyDirectory();
+    const model = directory.requireAvailable(input.model.provider, input.model.id);
+    return this.recipeGenerator.generate(directory.runtime, model, input);
+  }
+  cancelRecipeGeneration(id: string): void { this.recipeGenerator.cancel(id); }
 
   cancelTextAssist(requestId: unknown): void {
     if (typeof requestId === "string" && requestId.length > 0 && requestId.length <= 100) {
@@ -1501,6 +1676,8 @@ export class AgentRuntime {
   }
 
   private mcpActiveTools(session: AgentSession, native: string[]): string[] {
+    const entry = [...this.conversations.values()].find(e => e.session === session);
+    if (entry?.recipeStageSideEffect === "read_only") return ["read", "bash", "ask_user_question"];
     const registered = session.getAllTools();
     const active = new Set([...session.getActiveToolNames(), ...getCurrentTools(session.sessionManager.buildSessionContext().messages).map(tool => tool.name)]);
     const extra = registered.filter(tool => isMcpTool(tool.name) && tool.name !== "tool_search" && tool.exposure !== "hidden"
@@ -1612,6 +1789,7 @@ export class AgentRuntime {
     void Promise.resolve().then(() => this.options.browserRepl?.dispose?.()).catch(() => {});
     this.thinkingSummaries.dispose();
     this.textAssist.dispose();
+    this.recipeGenerator.dispose();
     for (const trace of this.traces.values()) trace.dispose();
     this.directory?.cancelLogin();
     this.questions.cancelAll();
@@ -1632,16 +1810,36 @@ export class AgentRuntime {
 
   private async initialize(): Promise<void> {
     await this.store.load();
+    this.restoreConversations();
+    this.store.flushSync();
+    const directory = await ModelDirectory.open(this.options.agentDir);
+    directory.subscribeAuth((event) => {
+      for (const listener of this.authListeners) listener(event);
+    });
+    this.directory = directory;
+    directory.refreshCatalogFromNetwork();
+    const active = this.activeConversation();
+    if (active) this.syncFromSession(active);
+  }
+
+  private restoreConversations(): void {
     // 会话文件仍在磁盘上的对话才恢复。新对话在创建时就写入了文件
     // (见 createPersistedSession),所以没有文件的记录只会是历史遗留或已被外部清理的会话。
     for (const stored of this.store.list()) {
+      if (this.conversations.has(stored.id)) continue;
       if (!stored.sessionFile || !existsSync(stored.sessionFile)) continue;
+      const hasWorkspace = stored.hasWorkspace ?? this.options.isWorkspaceCwd?.(stored.cwd) ?? true;
+      if (stored.hasWorkspace === undefined) this.store.update(stored.id, { hasWorkspace });
       const activeExecution = activeExecutionPlan(stored.executionPlans, stored.activeExecutionPlanId);
       const storedAgents = stored.agents?.length ? stored.agents : recoverLegacyAgents(
         SessionManager.open(stored.sessionFile, this.sessionDir(), stored.cwd).buildSessionProjection().messages,
         stored.id,
       );
       this.conversations.set(stored.id, {
+        hasWorkspace,
+        recipeRunId: stored.recipeRunId,
+        recipeExecution: stored.recipeExecution,
+        scheduledSandboxMode: stored.recipeExecution?.sandboxMode,
         id: stored.id,
         session: null,
         sessionManager: null,
@@ -1651,6 +1849,7 @@ export class AgentRuntime {
           id: stored.id,
           title: stored.title,
           mode: stored.mode,
+          ...(stored.recipeExecution ? { sandboxMode: stored.recipeExecution.sandboxMode } : {}),
           proposedPlan: cloneProposedPlan(latestPlan(stored.plans)),
           planRevisions: stored.plans.map((plan) => ({ ...plan })),
           executionPlan: cloneExecutionPlan(activeExecution),
@@ -1683,14 +1882,6 @@ export class AgentRuntime {
         agentMutationsSeen: new Set(storedAgents.filter((agent) => agent.mutated).map((agent) => agent.id)),
       });
     }
-    const directory = await ModelDirectory.open(this.options.agentDir);
-    directory.subscribeAuth((event) => {
-      for (const listener of this.authListeners) listener(event);
-    });
-    this.directory = directory;
-    directory.refreshCatalogFromNetwork();
-    const active = this.activeConversation();
-    if (active) this.syncFromSession(active);
   }
 
   private async ready(): Promise<void> {
@@ -1745,20 +1936,29 @@ export class AgentRuntime {
   private addEntry(
     cwd: string,
     options: {
+      hasWorkspace?: boolean;
       activate?: boolean;
       sessionManager?: SessionManager;
       title?: string;
       mode?: InteractionMode;
       instructions?: string;
+      reservedId?: string;
+      recipeRunId?: string;
+      recipeExecution?: RecipeExecution;
     } = {},
   ): Conversation {
     // 会话文件必须随新对话一起落到磁盘:Pi 默认要等首条回复才创建 JSONL,
     // 空对话会在强制退出后的重启中被当作已清理会话丢掉。
-    const sessionManager = options.sessionManager ?? createPersistedSession(cwd, this.sessionDir());
+    const sessionManager = options.sessionManager ?? createPersistedSession(cwd, this.sessionDir(), options.reservedId);
     const snapshot = this.createSnapshot("starting", cwd);
     if (options.title) snapshot.title = options.title;
     if (options.mode) snapshot.mode = options.mode;
+    if (options.recipeExecution) snapshot.sandboxMode = options.recipeExecution.sandboxMode;
     const entry: Conversation = {
+      hasWorkspace: options.hasWorkspace ?? true,
+      recipeRunId: options.recipeRunId,
+      recipeExecution: options.recipeExecution,
+      scheduledSandboxMode: options.recipeExecution?.sandboxMode,
       id: sessionManager.getSessionId(),
       session: null,
       sessionManager,
@@ -1793,8 +1993,8 @@ export class AgentRuntime {
     if (options.activate !== false) this.activeId = entry.id;
     this.persistEntry(entry);
     // 新对话是用户明确创建的状态,不等防抖窗口,立刻同步落盘。
-    this.store.flushSync();
-    if (options.activate !== false) this.notifyActiveCwd(cwd);
+    this.store.flushSync(Boolean(options.reservedId));
+    if (options.activate !== false) this.notifyActiveCwd(cwd, entry.hasWorkspace);
     this.emitStatus(entry);
     return entry;
   }
@@ -1812,7 +2012,12 @@ export class AgentRuntime {
     this.patchEntry(entry, { status: "starting", error: null });
     try {
       const directory = await this.readyDirectory();
-      const { model: chosen, thinkingLevel } = selection ?? this.conversationSelection(directory);
+      const recipeModel = entry.recipeExecution ? directory.runtime.getModel(entry.recipeExecution.model.provider, entry.recipeExecution.model.id) : undefined;
+      const { model: chosen, thinkingLevel } = selection ?? (entry.recipeExecution ? {
+        // History remains readable when its original model/account is unavailable.
+        model: recipeModel && directory.isAvailable(recipeModel) ? recipeModel : undefined,
+        thinkingLevel: entry.recipeExecution.thinkingLevel,
+      } : this.conversationSelection(directory));
       const cwd = entry.snapshot.cwd;
       // 新对话:登记时已建或此处新建;恢复的对话:按文件打开以接续历史。
       const sessionManager = entry.sessionManager
@@ -1836,7 +2041,11 @@ export class AgentRuntime {
             hasExecutionPlan: entry.snapshot.executionPlan !== null,
           }), {
             availableTools: (mode, plan) => this.nativeToolNames(mode, plan),
-            authorizeCall: call => isMcpTool(call.toolName) || (this.options.scheduledTasks && call.toolName === "list_scheduled_tasks") ? { allowed: true } : defaultToolPolicy.authorizeCall(call),
+            authorizeCall: call => {
+              if (entry.recipeStageSideEffect && (agentToolNames as readonly string[]).includes(call.toolName)) return { allowed: false, reason: "结构化阶段不能启动或控制独立子任务；阶段证据限当前会话" };
+              if (entry.recipeStageSideEffect === "read_only") return defaultToolPolicy.authorizeCall({ ...call, mode: "plan" });
+              return isMcpTool(call.toolName) || (this.options.scheduledTasks && call.toolName === "list_scheduled_tasks") ? { allowed: true } : defaultToolPolicy.authorizeCall(call);
+            },
           }),
         }, ...(this.options.scheduledTasks ? [{ name: "vela-scheduled-tasks-clock", hidden: true,
           factory: ((pi) => { pi.on("before_agent_start", event => {
@@ -1971,11 +2180,13 @@ export class AgentRuntime {
     const entry = this.activeConversation();
     const session = entry?.session;
     if (!entry || !session) return;
+    if (entry.recipeWorkflowActive) throw new Error("配方执行期间不能更换模型或思考强度");
     const current = session.model;
     if (!current || current.provider !== model.provider || current.id !== model.id) {
       await session.setModel(model);
     }
     session.setThinkingLevel(thinkingLevel);
+    if (entry.recipeExecution) entry.recipeExecution = { ...entry.recipeExecution, model: { provider: model.provider, id: model.id }, thinkingLevel };
     this.syncFromSession(entry);
   }
 
@@ -2223,15 +2434,15 @@ export class AgentRuntime {
     const directory = this.directory;
     const session = entry.session;
     const active = session?.model;
-    const intended = active ?? directory?.modelForSelection();
+    const intended = active ?? (entry.recipeExecution ? directory?.runtime.getModel(entry.recipeExecution.model.provider, entry.recipeExecution.model.id) : directory?.modelForSelection());
     const thinkingLevel = active && session
       ? session.thinkingLevel
-      : directory?.selection.thinkingLevel ?? "medium";
+      : entry.recipeExecution?.thinkingLevel ?? directory?.selection.thinkingLevel ?? "medium";
     entry.snapshot = {
       ...entry.snapshot,
-      model: intended ? modelLabel(intended) : null,
-      modelProvider: intended?.provider ?? null,
-      modelId: intended?.id ?? null,
+      model: intended ? modelLabel(intended) : entry.recipeExecution ? `${entry.recipeExecution.model.provider}/${entry.recipeExecution.model.id}` : null,
+      modelProvider: intended?.provider ?? entry.recipeExecution?.model.provider ?? null,
+      modelId: intended?.id ?? entry.recipeExecution?.model.id ?? null,
       modelReady: Boolean(active && directory?.isAvailable(active)),
       thinkingLevel: isThinkingLevel(thinkingLevel) ? thinkingLevel : "medium",
       thinkingLevels: intended ? levelsFor(intended) : ["off"],
@@ -2283,6 +2494,7 @@ export class AgentRuntime {
     this.store.put({
       id: entry.id,
       cwd: entry.snapshot.cwd,
+      hasWorkspace: entry.hasWorkspace,
       title: entry.snapshot.title,
       titleManuallySet: entry.titleManuallySet,
       createdAt: entry.createdAt,
@@ -2299,14 +2511,16 @@ export class AgentRuntime {
       goal: entry.snapshot.goal,
       archivedAt: entry.archivedAt,
       agents: entry.storedAgents,
+      ...(entry.recipeRunId ? { recipeRunId: entry.recipeRunId, recipeExecution: entry.recipeExecution } : {}),
     });
   }
 
   /** 激活对话的 cwd 变化时通知宿主(工作区/界面状态跟随会话)。 */
-  private notifyActiveCwd(cwd: string): void {
-    if (cwd === this.currentCwd) return;
+  private notifyActiveCwd(cwd: string, hasWorkspace: boolean): void {
+    if (cwd === this.currentCwd && hasWorkspace === this.currentHasWorkspace) return;
     this.currentCwd = cwd;
-    this.options.onActiveCwd?.(cwd);
+    this.currentHasWorkspace = hasWorkspace;
+    this.options.onActiveCwd?.(cwd, hasWorkspace);
   }
 
   private emitStatus(entry: Conversation): void {
@@ -2372,10 +2586,11 @@ export class AgentRuntime {
     };
   }
 
-  private requireIdle(conversationId: string): Conversation {
+  private requireIdle(conversationId: string, recipeInvocation = false): Conversation {
     const entry = this.conversations.get(conversationId);
     const session = entry?.session;
     if (!entry || !session) throw new Error("对话不存在或已结束");
+    if (entry.recipeWorkflowActive && !recipeInvocation) throw new Error("配方阶段正在执行或等待审批，请先停止任务");
     if (this.rewindingWorkspaces.has(entry.snapshot.cwd)) throw new Error("工作区正在回退消息，请稍后再发送");
     if (entry.driving || session.isStreaming) throw new Error("上一个回复还在进行中");
     if (!session.model || !this.directory?.isAvailable(session.model)) {
@@ -2441,6 +2656,8 @@ export class AgentRuntime {
         try { await this.finishLatestCheckpoint(entry); }
         catch (error) { this.failPrompt(entry, error instanceof Error ? error.message : "无法保存文件检查点"); }
       }
+      this.emit({ type: "prompt_end", conversationId: entry.id, status: entry.stopRequested ? "stopped" : entry.snapshot.error ? "failed" : "responded",
+        ...(entry.snapshot.error ? { error: entry.snapshot.error } : {}), planPending: entry.snapshot.mode === "plan" && entry.plans.length > 0 });
       entry.driving = false;
       await this.refreshPendingMcp();
       entry.control?.setRootStatus(entry.stopRequested ? "aborted" : "idle");
@@ -2668,6 +2885,8 @@ export class AgentRuntime {
     } finally {
       try { await this.finishLatestCheckpoint(entry); }
       catch (error) { this.failPrompt(entry, error instanceof Error ? error.message : "无法保存文件检查点"); }
+      this.emit({ type: "prompt_end", conversationId: entry.id, status: entry.stopRequested ? "stopped" : entry.snapshot.error ? "failed" : "responded",
+        ...(entry.snapshot.error ? { error: entry.snapshot.error } : {}), planPending: entry.snapshot.mode === "plan" && entry.plans.length > 0 });
       entry.driving = false;
       await this.refreshPendingMcp();
       entry.control?.setRootStatus(entry.stopRequested ? "aborted" : "idle");
@@ -2704,8 +2923,8 @@ export class AgentRuntime {
   }
 
   private applyActiveTools(entry: Conversation): void {
-    const tools = this.nativeToolNames(entry.snapshot.mode, entry.snapshot.executionPlan !== null);
-    if (this.options.browserRepl && entry.snapshot.mode !== "plan") tools.push(...browserToolNames);
+    const tools = entry.recipeStageSideEffect === "read_only" ? ["read", "bash", "ask_user_question"] : this.nativeToolNames(entry.snapshot.mode, entry.snapshot.executionPlan !== null).filter(name => !entry.recipeStageSideEffect || !(agentToolNames as readonly string[]).includes(name));
+    if (this.options.browserRepl && entry.snapshot.mode !== "plan" && !entry.recipeStageSideEffect) tools.push(...browserToolNames);
     const session = entry.session;
     const bridge = session ? this.mcpBridges.get(session) : undefined;
     bridge?.refresh();
@@ -2811,6 +3030,7 @@ export class AgentRuntime {
     await this.ready();
     await this.rememberActiveSelection();
     const entry = this.addEntry(source.snapshot.cwd, {
+      hasWorkspace: source.hasWorkspace,
       title: freshExecutionTitle(source.snapshot.title),
       mode: "agent",
       instructions: source.instructions,

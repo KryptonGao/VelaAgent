@@ -12,11 +12,12 @@ const TABS: ReadonlyArray<readonly [ConversationViewKey, string, string]> = [
 
 interface ConversationViewTabsProps {
   view: ConversationViewKey;
+  showVersionControl: boolean;
   onChange: (next: ConversationViewKey) => void;
 }
 
 /** 顶部会话视图选项卡:共享下划线跟随激活项滑动,悬停激活项时向两侧展开。 */
-export function ConversationViewTabs({ view, onChange }: ConversationViewTabsProps) {
+export function ConversationViewTabs({ view, showVersionControl, onChange }: ConversationViewTabsProps) {
   const tabs = useSlidingTabIndicator({ activeKey: view });
 
   return (
@@ -28,7 +29,7 @@ export function ConversationViewTabs({ view, onChange }: ConversationViewTabsPro
       onPointerMove={tabs.onPointerMove}
       onPointerLeave={tabs.onPointerLeave}
     >
-      {TABS.map(([key, chinese, english]) => (
+      {TABS.filter(([key]) => key !== "versionControl" || showVersionControl).map(([key, chinese, english]) => (
         <button
           key={key}
           type="button"

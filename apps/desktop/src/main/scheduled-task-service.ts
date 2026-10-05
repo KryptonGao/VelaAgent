@@ -5,7 +5,7 @@ import { dirname } from "node:path";
 import type { ScheduledTask, ScheduledTaskInput, ScheduledTaskPatch, ScheduledTaskRun, ScheduledTasksState } from "@vela/shared";
 import { nextTaskTime, parseTaskInput } from "./task-schedule";
 
-export type TaskExecutor = (task: ScheduledTask, linkConversation: (id: string) => void) => Promise<void>;
+export type TaskExecutor = (task: ScheduledTask, linkConversation: (id: string) => void, run: ScheduledTaskRun) => Promise<void>;
 
 /** Claims are atomically persisted before external effects. Interrupted claims are never replayed. */
 export class ScheduledTaskScheduler {
@@ -63,6 +63,7 @@ export class ScheduledTaskScheduler {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("修改参数不正确");
     if (raw.status !== undefined && raw.status !== "active" && raw.status !== "paused") throw new Error("任务状态不正确");
     const initial = this.task(id);
+    if (initial.recipeBinding && typeof raw.prompt === 'string' && raw.prompt.trim() !== initial.prompt && raw.recipeBinding !== null) throw new Error('此任务绑定配方；修改执行内容请重新绑定配方，或明确移除绑定');
     const input = parseTaskInput({ ...initial, ...raw });
     await this.assertWorkspace(input.workspace);
     // Re-read after filesystem await: another caller may have deleted or edited the task.
@@ -134,7 +135,7 @@ export class ScheduledTaskScheduler {
           if (this.stopped) throw new Error("调度器已停止");
           await this.assertWorkspace(task.workspace);
           if (this.stopped) throw new Error("调度器已停止");
-          await this.execute(task, id => this.patchRun(run.id, { conversationId: id }));
+          await this.execute(task, id => this.patchRun(run.id, { conversationId: id }), structuredClone(run));
         } catch (error) { failure = error instanceof Error ? error.message : String(error); }
         this.patchRun(run.id, { status: failure ? "failed" : "success", error: failure, finishedAt: this.now() });
       }).catch(error => { console.error("[vela] task record write failed", error); }).finally(() => { this.running.delete(task.id); });

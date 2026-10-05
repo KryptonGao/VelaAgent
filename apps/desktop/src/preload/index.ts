@@ -1,9 +1,11 @@
 import { BrowserIpc, type BrowserWindowState } from "../../../../packages/shared/src/browser";
 import {
   IpcChannel,
+  TaskRecipesIpc,
   ScheduledTasksIpc,
   type ScheduledTasksState,
   type AgentSettings,
+  type ConversationSyncResult,
   type McpStatusEvent,
   type PluginStatusEvent,
   type AppLocale,
@@ -134,6 +136,30 @@ import {
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from "electron";
 
 const api: VelaApi = {
+  taskRecipes: {
+    list: locale => ipcRenderer.invoke(TaskRecipesIpc.list, locale),
+    save: (input, id, revision, workspace) => ipcRenderer.invoke(TaskRecipesIpc.save, input, id, revision, workspace),
+    delete: (id, fingerprint) => ipcRenderer.invoke(TaskRecipesIpc.delete, id, fingerprint),
+    preview: draft => ipcRenderer.invoke(TaskRecipesIpc.preview, draft),
+    start: input => ipcRenderer.invoke(TaskRecipesIpc.start, input),
+    pickPath: (workspace, kind) => ipcRenderer.invoke(TaskRecipesIpc.pickPath, workspace, kind),
+    importFile: () => ipcRenderer.invoke(TaskRecipesIpc.importFile),
+    exportFile: recipe => ipcRenderer.invoke(TaskRecipesIpc.exportFile, recipe),
+    generate: input => ipcRenderer.invoke(TaskRecipesIpc.generate, input),
+    cancelGenerate: id => ipcRenderer.invoke(TaskRecipesIpc.cancelGenerate, id),
+    stageEvidence: (id, stageId, attempt, evidenceId) => ipcRenderer.invoke(TaskRecipesIpc.stageEvidence, id, stageId, attempt, evidenceId),
+    approveStage: (id, stageId, approved) => ipcRenderer.invoke(TaskRecipesIpc.approveStage, id, stageId, approved),
+    retryStage: (id, stageId, requestId) => ipcRenderer.invoke(TaskRecipesIpc.retryStage, id, stageId, requestId),
+    rateRun: (id, rating, note) => ipcRenderer.invoke(TaskRecipesIpc.rateRun, id, rating, note),
+    connectTeam: (workspace, permission) => ipcRenderer.invoke(TaskRecipesIpc.connectTeam, workspace, permission),
+    disconnectTeam: workspace => ipcRenderer.invoke(TaskRecipesIpc.disconnectTeam, workspace),
+    saveTeam: (input, workspace, id, revision, fingerprint) => ipcRenderer.invoke(TaskRecipesIpc.saveTeam, input, workspace, id, revision, fingerprint),
+    cleanupWorktree: id => ipcRenderer.invoke(TaskRecipesIpc.cleanupWorktree, id),
+    subscribe: listener => {
+      const handler = () => listener(); ipcRenderer.on(TaskRecipesIpc.state, handler);
+      return () => { ipcRenderer.removeListener(TaskRecipesIpc.state, handler); };
+    },
+  },
   scheduledTasks: {
     list: () => ipcRenderer.invoke(ScheduledTasksIpc.list),
     create: (input) => ipcRenderer.invoke(ScheduledTasksIpc.create, input),
@@ -178,6 +204,9 @@ const api: VelaApi = {
     },
   },
   platform: process.platform,
+  development: ipcRenderer.sendSync(IpcChannel.appIsDevelopment) ? {
+    syncProductionConversations: () => ipcRenderer.invoke(IpcChannel.appSyncProductionConversations) as Promise<ConversationSyncResult>,
+  } : undefined,
   uiStorage: {
     getItem: (key) => storageRequest(IpcChannel.appUiStorageGet, key).value,
     setItem: (key, value) => { storageRequest(IpcChannel.appUiStorageSet, key, value); },
