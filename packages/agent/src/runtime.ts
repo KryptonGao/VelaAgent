@@ -9,7 +9,7 @@ import { McpSessionBridge, isMcpTool, type McpPermission } from "./mcp-session";
 import { createScheduledTaskTools, scheduledTaskInstructions, scheduledTaskToolNames } from "./scheduled-task-tools";
 import { RecipeGenerator, parseRecipeGenerateInput } from './recipe-generator';
 import type { RecipeExecution, RecipeRun, RecipeStageSubmission, RecipeSubmitResult, RecipeStageEvidence, RecipeUseDraft, ScheduledTaskInput, SandboxExecutionContext, SandboxMode, ScheduledTaskService } from "@vela/shared";
-import type { McpCatalog, McpCatalogInput, McpServerInput, McpServerTarget, McpEnabledInput, McpProjectTrustInput, McpToolReadOnlyInput, McpStatusEvent } from "@vela/shared";
+import type { McpCatalog, McpCatalogInput, McpServerInput, McpServerTarget, McpEnabledInput, McpProjectTrustInput, McpToolReadOnlyInput, McpStatusEvent, MemoryLoadReport } from "@vela/shared";
 import { browserToolNames, browserUseInstructions, createBrowserTools, type BrowserReplService, type BrowserReplPermission } from "./browser-use";
 import { TurnCheckpoints, type TurnCheckpoint } from "./turn-checkpoints";
 import { TraceRecorder } from "./trace";
@@ -86,6 +86,10 @@ import {
   type GoalValidationEvidence,
 } from "./goal-validation";
 import { ModelDirectory } from "./model-directory";
+import { MemoryService } from "./memory";
+import { MemorySettings } from "./memory-settings";
+import { createMemoryContextExtension } from "./memory-context";
+import { createMemoryTools, memoryDisabledInstructions, memoryInstructions, memoryReadOnlyInstructions, memoryReadToolName, memoryToolNames, memoryUpdateToolName, type MemoryWritePermission } from "./memory-tools";
 import { openCodeSessionHeaders } from "./provider-headers";
 import {
   createModeExtension,
@@ -181,6 +185,8 @@ export interface AgentRuntimeOptions {
   /** Optional desktop host for persistent Browser Panel JavaScript contexts. */
   browserRepl?: BrowserReplService;
   browserReplPermission?: BrowserReplPermission;
+  /** 记忆写入的沙箱审批入口；复用现有 ask / smart / full 写权限判断。 */
+  memoryPermission?: MemoryWritePermission;
   mcpPermission?: McpPermission;
   mcpOpenUrl?: (url: string) => void;
   pluginCredentialStore?: CredentialStore;
@@ -217,6 +223,8 @@ interface PendingInstruction {
 interface Conversation {
   hasWorkspace: boolean;
   scheduledSandboxMode?: SandboxMode | null;
+  /** 定时任务后台会话：只读记忆，不提供 memory_update。 */
+  scheduledTaskConversation?: boolean;
   recipeExecution?: RecipeExecution;
   recipeRunId?: string;
   recipeWorkflowActive?: boolean;
@@ -320,15 +328,22 @@ export class AgentRuntime {
   private readonly mcpPending = new Set<AgentSession>();
   private readonly mcpReloading = new Map<AgentSession, Promise<void>>();
   private readonly sessionClosings = new Map<AgentSession, Promise<void>>();
+  /** 最近一次执行加载的记忆来源状态；根会话用 conversationId，子代理用 conversationId/agentId。 */
+  private readonly memoryLoads = new Map<string, MemoryLoadReport[]>();
   private mcpPoll: ReturnType<typeof setInterval> | null = null;
   private mcpPolling = false;
   private disposed = false;
   private gate: Promise<void> = Promise.resolve();
   private readonly rewindingWorkspaces = new Set<string>();
   private readonly overlappingCheckpointRuns = new Set<string>();
+  /** 记忆服务入口：模型工具与桌面管理入口共用同一个实例；第一版是文件存储，不维护数据库副本。 */
+  readonly memory: MemoryService;
+  private readonly memorySettings: MemorySettings;
 
   constructor(private readonly options: AgentRuntimeOptions) {
     this.currentCwd = options.cwd;
+    this.memory = new MemoryService({ agentDir: options.agentDir });
+    this.memorySettings = new MemorySettings(options.agentDir);
     this.plugins = new PluginRegistry(join(options.agentDir, "integrations.json"), options.builtInPlugins);
     this.oauthMcp = new OAuthMCPManager({ agentDir: options.agentDir, credentialStore: options.pluginCredentialStore,
       isPlugin: name => this.plugins.ownsServer(name), openUrl: options.mcpOpenUrl });
@@ -362,6 +377,7 @@ export class AgentRuntime {
       planRevisions: snapshot.planRevisions.map((plan) => ({ ...plan })),
       executionPlan: cloneExecutionPlan(snapshot.executionPlan),
       goal: cloneGoal(snapshot.goal),
+      memory: (snapshot.memory ?? []).map((source) => ({ ...source })),
       pendingInstructions: snapshot.pendingInstructions.map((instruction) => ({ ...instruction })),
     };
   }
@@ -557,6 +573,7 @@ export class AgentRuntime {
       await this.ready();
       const entry = this.addEntry(cwd, { activate: false, mode: "agent" });
       entry.scheduledSandboxMode = execution.sandboxMode;
+      entry.scheduledTaskConversation = true;
       onCreated(entry.id);
       try {
         const directory = await this.readyDirectory();
@@ -1653,7 +1670,7 @@ export class AgentRuntime {
       nativeTools: nativeTools ?? (() => {
         const entry = conversationId ? this.conversations.get(conversationId) : undefined;
         if (!entry) return [];
-        return [...this.nativeToolNames(entry.snapshot.mode, entry.snapshot.executionPlan !== null), ...(this.options.browserRepl && entry.snapshot.mode !== "plan" ? browserToolNames : [])];
+        return [...this.nativeToolNames(entry.snapshot.mode, entry.snapshot.executionPlan !== null, entry), ...(this.options.browserRepl && entry.snapshot.mode !== "plan" ? browserToolNames : [])];
       }),
       permission: this.options.mcpPermission ? { request: input => this.options.mcpPermission!.request({ ...input,
         conversationId: conversationId ?? undefined, sandboxMode: conversationId ? this.conversations.get(conversationId)?.scheduledSandboxMode : undefined }) } : undefined, openUrl: this.options.mcpOpenUrl, oauth: this.oauthMcp,
@@ -1661,7 +1678,7 @@ export class AgentRuntime {
         if (this.disposed || !bridge.session || !this.mcpBridges.has(bridge.session)) return;
         const entry = conversationId ? this.conversations.get(conversationId) : undefined;
         if (entry?.session === bridge.session) {
-          const native = this.nativeToolNames(entry.snapshot.mode, entry.snapshot.executionPlan !== null);
+          const native = this.nativeToolNames(entry.snapshot.mode, entry.snapshot.executionPlan !== null, entry);
           if (this.options.browserRepl && entry.snapshot.mode !== "plan") native.push(...browserToolNames);
           const tools = this.mcpActiveTools(bridge.session, native);
           bridge.session.setActiveToolsByName(tools);
@@ -1677,7 +1694,7 @@ export class AgentRuntime {
 
   private mcpActiveTools(session: AgentSession, native: string[]): string[] {
     const entry = [...this.conversations.values()].find(e => e.session === session);
-    if (entry?.recipeStageSideEffect === "read_only") return ["read", "bash", "ask_user_question"];
+    if (entry?.recipeStageSideEffect === "read_only") return ["read", "bash", "ask_user_question", ...this.memoryToolNamesFor(entry)];
     const registered = session.getAllTools();
     const active = new Set([...session.getActiveToolNames(), ...getCurrentTools(session.sessionManager.buildSessionContext().messages).map(tool => tool.name)]);
     const extra = registered.filter(tool => isMcpTool(tool.name) && tool.name !== "tool_search" && tool.exposure !== "hidden"
@@ -1803,6 +1820,7 @@ export class AgentRuntime {
     this.toolArgs.clear();
     this.toolGoalContexts.clear();
     this.agentToolArgs.clear();
+    this.memoryLoads.clear();
     this.activeId = null;
     this.store.flushSync();
     return Promise.allSettled(closing).then(() => undefined);
@@ -2024,7 +2042,7 @@ export class AgentRuntime {
         ?? (entry.sessionFile
           ? SessionManager.open(entry.sessionFile, this.sessionDir(), cwd)
           : createPersistedSession(cwd, this.sessionDir()));
-      const settingsManager = SettingsManager.inMemory({ defaultTools: [...defaultToolNames, ...modeToolNames, ...agentToolNames, ...(this.options.scheduledTasks ? scheduledTaskToolNames : []), ...(this.options.browserRepl ? browserToolNames : [])] });
+      const settingsManager = SettingsManager.inMemory({ defaultTools: [...defaultToolNames, ...modeToolNames, ...agentToolNames, ...memoryToolNames, ...(this.options.scheduledTasks ? scheduledTaskToolNames : []), ...(this.options.browserRepl ? browserToolNames : [])] });
       const instructions = entry.instructions.trim();
       await this.loadDisabledSkills();
       const mcp = this.createMcpBridge(cwd, entry.id, () => entry.snapshot.mode === "plan");
@@ -2040,14 +2058,16 @@ export class AgentRuntime {
             mode: entry.snapshot.mode,
             hasExecutionPlan: entry.snapshot.executionPlan !== null,
           }), {
-            availableTools: (mode, plan) => this.nativeToolNames(mode, plan),
+            availableTools: (mode, plan) => this.nativeToolNames(mode, plan, entry),
             authorizeCall: call => {
+              if ((memoryToolNames as readonly string[]).includes(call.toolName) && !this.memorySettings.enabled) return { allowed: false, reason: memoryDisabledInstructions };
               if (entry.recipeStageSideEffect && (agentToolNames as readonly string[]).includes(call.toolName)) return { allowed: false, reason: "结构化阶段不能启动或控制独立子任务；阶段证据限当前会话" };
+              if (call.toolName === memoryUpdateToolName && !this.canUpdateMemory(entry)) return { allowed: false, reason: "当前模式或执行环境不允许写入长期记忆（Plan、子代理、定时任务和配方执行只能读取）" };
               if (entry.recipeStageSideEffect === "read_only") return defaultToolPolicy.authorizeCall({ ...call, mode: "plan" });
               return isMcpTool(call.toolName) || (this.options.scheduledTasks && call.toolName === "list_scheduled_tasks") ? { allowed: true } : defaultToolPolicy.authorizeCall(call);
             },
           }),
-        }, ...(this.options.scheduledTasks ? [{ name: "vela-scheduled-tasks-clock", hidden: true,
+        }, { name: "vela-memory", hidden: true, factory: this.memoryExtension(entry, null) }, ...(this.options.scheduledTasks ? [{ name: "vela-scheduled-tasks-clock", hidden: true,
           factory: ((pi) => { pi.on("before_agent_start", event => {
             event.systemPromptOptions.appendSystemPrompt += `\n\n任务时间上下文：${new Date().toISOString()}；本机时区：${Intl.DateTimeFormat().resolvedOptions().timeZone}`;
           }); }) as ExtensionFactory,
@@ -2085,6 +2105,7 @@ export class AgentRuntime {
             ...(this.options.toolFactory?.(cwd, { conversationId: entry.id, sandboxMode: entry.scheduledSandboxMode }) ?? []),
             ...this.browserTools(entry, entry.id),
             ...(this.options.scheduledTasks ? createScheduledTaskTools(this.options.scheduledTasks, cwd, () => entry.snapshot.mode !== "plan") : []),
+            ...this.memoryTools(entry, entry.id, true),
             ...createModeTools({
               updateExecutionPlan: (items) => this.updateExecutionPlan(entry, items),
               updateGoal: (status, note) => this.updateGoal(entry, status, note),
@@ -2581,6 +2602,7 @@ export class AgentRuntime {
       planRevisions: [],
       executionPlan: null,
       goal: null,
+      memory: [],
       error: null,
       pendingInstructions: [],
     };
@@ -2771,7 +2793,7 @@ export class AgentRuntime {
       throw new Error("先选择一个已登录或已配置密钥的模型");
     }
     const cwd = entry.snapshot.cwd;
-    const childNativeTools = () => [...agentToolNamesFor(input.kind), ...(this.options.browserRepl && input.kind === "general" ? browserToolNames : [])];
+    const childNativeTools = () => [...agentToolNamesFor(input.kind), ...(this.memorySettings.enabled ? [memoryReadToolName] : []), ...(this.options.browserRepl && input.kind === "general" ? browserToolNames : [])];
     const settingsManager = SettingsManager.inMemory({ defaultTools: childNativeTools() });
     const instructions = entry.instructions.trim();
     const mcp = this.createMcpBridge(cwd, entry.id, () => input.kind === "explore" || entry.snapshot.mode === "plan", childNativeTools);
@@ -2785,6 +2807,7 @@ export class AgentRuntime {
       noExtensions: true,
       extensionFactories: [
         ...(input.kind === "explore" ? [{ name: "vela-explore", hidden: true, factory: createExploreGuardExtension() }] : []),
+        { name: "vela-memory", hidden: true, factory: this.memoryExtension(entry, input.agentId) },
         ...mcp.factories(),
       ],
       appendSystemPromptOverride: (base) => [
@@ -2820,7 +2843,7 @@ export class AgentRuntime {
       settingsManager,
       resourceLoader,
 
-      customTools: [...childSandboxTools, ...input.customTools, ...(input.kind === "general" ? this.browserTools(entry, input.agentId, input.kind) : [])],
+      customTools: [...childSandboxTools, ...input.customTools, ...this.memoryTools(entry, input.agentId, false), ...(input.kind === "general" ? this.browserTools(entry, input.agentId, input.kind) : [])],
     });
     mcp.attach(session);
     if (this.disposed) { await mcp.close(); session.dispose(); throw new Error("Vela runtime has closed"); }
@@ -2918,12 +2941,93 @@ export class AgentRuntime {
     });
   }
 
-  private nativeToolNames(mode: InteractionMode, plan: boolean): string[] {
-    return [...defaultToolPolicy.availableTools(mode, plan), ...(this.options.scheduledTasks ? (mode === "plan" ? ["list_scheduled_tasks"] : scheduledTaskToolNames) : [])];
+  /**
+   * 最近一次加载的记忆来源状态；不含正文，可供设置页或状态提示读取。
+   * agentId 为空表示根会话。
+   */
+  getMemoryStatus(conversationId: string, agentId?: string): MemoryLoadReport[] {
+    return (this.memoryLoads.get(agentId ? `${conversationId}/${agentId}` : conversationId) ?? []).map((source) => ({ ...source }));
+  }
+
+  getMemorySettings(): { enabled: boolean } {
+    return { enabled: this.memorySettings.enabled };
+  }
+
+  setMemoryEnabled(enabled: boolean): { enabled: boolean } {
+    this.memorySettings.setEnabled(enabled);
+    if (!enabled) this.memoryLoads.clear();
+    for (const entry of this.conversations.values()) {
+      if (!enabled) this.patchEntry(entry, { memory: [] });
+      this.applyActiveTools(entry);
+    }
+    return this.getMemorySettings();
+  }
+
+  /**
+   * 根会话和子代理共用同一套加载实现。
+   * 项目绑定始终取会话自己的工作区；子代理跟随所属根会话，
+   * 不会因为界面当前选中的工作区不同而读取别的项目。
+   */
+  private memoryExtension(entry: Conversation, agentId: string | null): ExtensionFactory {
+    const key = agentId ? `${entry.id}/${agentId}` : entry.id;
+    return createMemoryContextExtension({
+      service: this.memory,
+      enabled: () => this.memorySettings.enabled,
+      instructions: () => !this.memorySettings.enabled ? memoryDisabledInstructions
+        : agentId || !this.canUpdateMemory(entry) ? memoryReadOnlyInstructions : memoryInstructions,
+      workspace: () => ({ cwd: entry.snapshot.cwd, hasWorkspace: entry.hasWorkspace }),
+      onLoad: (sources) => {
+        this.memoryLoads.set(key, sources);
+        // 只在根会话上写快照；子代理的加载状态由 getMemoryStatus 按 agentId 提供。
+        if (!agentId) this.patchEntry(entry, { memory: sources });
+      },
+    });
+  }
+
+  private nativeToolNames(mode: InteractionMode, plan: boolean, entry?: Conversation): string[] {
+    const tools = [...defaultToolPolicy.availableTools(mode, plan), ...(this.options.scheduledTasks ? (mode === "plan" ? ["list_scheduled_tasks"] : scheduledTaskToolNames) : [])];
+    if (entry) tools.push(...this.memoryToolNamesFor(entry));
+    return tools;
+  }
+
+  /**
+   * 按权限矩阵决定激活哪些记忆工具：主代理的 Agent / Goal 模式读写都提供，
+   * Plan、子代理、定时任务和配方执行只提供 memory_read。工具始终注册（模式可切换），
+   * 这里只决定激活。
+   */
+  private memoryToolNamesFor(entry: Conversation): string[] {
+    if (!this.memorySettings.enabled) return [];
+    return this.canUpdateMemory(entry) ? [...memoryToolNames] : [memoryReadToolName];
+  }
+
+  /** 只有主代理在非 Plan 且非后台执行的环境里可以写入长期记忆。 */
+  private canUpdateMemory(entry: Conversation): boolean {
+    if (!this.memorySettings.enabled) return false;
+    if (entry.snapshot.mode === "plan" || entry.recipeExecution || entry.scheduledTaskConversation) return false;
+    return true;
+  }
+
+  /**
+   * 创建会话自己的记忆工具。update 为 false 的子代理只拿到 memory_read；
+   * 写入权限通过 options.memoryPermission 复用现有沙箱写权限。
+   */
+  private memoryTools(entry: Conversation, agentId: string, update: boolean): ToolDefinition[] {
+    return createMemoryTools({
+      service: this.memory,
+      enabled: () => this.memorySettings.enabled,
+      update,
+      workspace: () => ({ cwd: entry.snapshot.cwd, hasWorkspace: entry.hasWorkspace }),
+      allowUpdate: () => this.canUpdateMemory(entry),
+      conversationId: agentId,
+      sandboxMode: () => entry.scheduledSandboxMode,
+      permission: this.options.memoryPermission
+        ? { request: input => this.options.memoryPermission!.request({ ...input, conversationId: agentId, sandboxMode: entry.scheduledSandboxMode }) }
+        : undefined,
+    });
   }
 
   private applyActiveTools(entry: Conversation): void {
-    const tools = entry.recipeStageSideEffect === "read_only" ? ["read", "bash", "ask_user_question"] : this.nativeToolNames(entry.snapshot.mode, entry.snapshot.executionPlan !== null).filter(name => !entry.recipeStageSideEffect || !(agentToolNames as readonly string[]).includes(name));
+    const tools = entry.recipeStageSideEffect === "read_only" ? ["read", "bash", "ask_user_question", ...this.memoryToolNamesFor(entry)] : this.nativeToolNames(entry.snapshot.mode, entry.snapshot.executionPlan !== null, entry).filter(name => !entry.recipeStageSideEffect || !(agentToolNames as readonly string[]).includes(name));
     if (this.options.browserRepl && entry.snapshot.mode !== "plan" && !entry.recipeStageSideEffect) tools.push(...browserToolNames);
     const session = entry.session;
     const bridge = session ? this.mcpBridges.get(session) : undefined;

@@ -63,6 +63,47 @@ const planPrompt = planFreshPrompt("原始目标", {
   approvedAt: 1,
 });
 
+describe("MCP history identity", () => {
+  const name = "mcp__builtin_notion__notion_list_private_pages";
+  const call = { role: "assistant", content: [{ type: "toolCall", id: "notion-call", name, arguments: {} }], timestamp: 0 } as unknown as AgentMessage;
+  const body = JSON.stringify({ results: [{ title: "Projects", url: "https://app.notion.com/projects", type: "page" }] });
+  const result = (details?: unknown, isError = false) => ({
+    role: "toolResult", toolCallId: "notion-call", toolName: name, details, isError,
+    content: [{ type: "text", text: isError ? "Tool unavailable" : body }], timestamp: 0,
+  }) as unknown as AgentMessage;
+
+  it("restores original MCP names from saved results without a connected catalog", () => {
+    const [message] = transcriptFromProjection(projection([
+      entry("call", call), entry("result", result({ server: "builtin_notion", tool: "notion-list-private-pages" })),
+    ]));
+    assert.deepEqual(message!.tools[0]!.activity, { mcp: { server: "builtin_notion", tool: "notion-list-private-pages" }, body });
+    assert.equal(message!.tools[0]!.status, "done");
+  });
+
+  it("keeps MCP identity for calls and failed/legacy results without saved metadata", () => {
+    for (const [messages, expectedBody, status] of [
+      [[call], undefined, "done"],
+      [[call, result()], body, "done"],
+      [[call, result(undefined, true)], "Tool unavailable", "error"],
+      [[call, result({ server: 42, tool: "" })], body, "done"],
+    ] as const) {
+      const tool = transcriptFromMessages([...messages])[0]!.tools[0]!;
+      assert.deepEqual(tool.activity.mcp, { server: "builtin_notion", tool: "notion_list_private_pages" });
+      assert.equal(tool.activity.body, expectedBody);
+      assert.equal(tool.status, status);
+    }
+  });
+
+  it("does not promote ordinary tools based on result metadata", () => {
+    const [message] = transcriptFromMessages([
+      assistant("", "ordinary-call"),
+      { ...toolResult("ordinary-call"), details: { server: "builtin_notion", tool: "notion-search" } } as unknown as AgentMessage,
+    ]);
+    assert.equal(message!.tools[0]!.activity.mcp, undefined);
+    assert.equal(message!.tools[0]!.activity.body, "ok");
+  });
+});
+
 describe("transcript timestamps", () => {
   it("keeps the writing time of each message's source entry", () => {
     const messages = transcriptFromProjection(projection([

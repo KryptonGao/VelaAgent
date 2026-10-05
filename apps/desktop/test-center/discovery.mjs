@@ -14,6 +14,7 @@ export const nodeTestRoots = ["packages/agent/test", "packages/workspace/test", 
 /** test:* 脚本后缀到界面标签;未列出的用原始后缀。 */
 const featureTitles = {
   trace: "轨迹",
+  memory: "记忆",
   "thinking-summary": "思考总结",
   persistence: "持久化",
   "ui-storage": "界面存储",

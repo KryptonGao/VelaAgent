@@ -55,6 +55,7 @@
 - **审阅与工作面板：** 查看 Git 差异和暂存状态；右侧标签页承载文件预览、变更与集成终端，`⌘T` 新建标签页。
 - **模型与账号：** 管理模型提供方，登录账号、填写 API 密钥或添加自定义模型接口。
 - **MCP 服务器：** 连接本机或远程 MCP 工具，支持全局与项目配置、按需发现、项目信任和只读授权。详细说明见 [docs/mcp.md](./docs/mcp.md)。
+- **项目记忆与全局记忆：** 用两个 Markdown 文件保存跨项目的个人偏好和当前项目的约定、决策；每次执行前自动加载，用户可在设置中查看、编辑、清空或删除。详细说明见 [docs/memory.md](./docs/memory.md)。
 - **定时任务：** 在侧栏页面或对话里按一次、每日、每周或 Cron 时间安排任务，每次执行在绑定工作区的新对话中运行，可选择执行权限、模型与推理强度。详细说明见 [docs/scheduled-tasks.md](./docs/scheduled-tasks.md)。
 - **任务配方：** 保存参数化任务模板，填写参数并预览后在选定工作区的新对话中启动；支持 Agent / Plan、版本快照、使用记录、AI 整理、项目库与导入导出、Skill 依赖、定时绑定及独立 worktree，以及结构化阶段、条件分支、审批与受控重试、Git／目录团队共享和本机版本效果比较。详细说明与边界见 [docs/task-recipes.md](./docs/task-recipes.md)。
 - **集成：** 在设置中一键连接 Notion 等内置应用，无需填写 URL 或 Token；OAuth 在系统浏览器完成，凭据由系统安全存储加密。详细说明见 [docs/built-in-mcp-plugins.md](./docs/built-in-mcp-plugins.md)。
@@ -140,7 +141,7 @@ pnpm --filter @vela/desktop test:trace:preview  # 确定性 UI 测试页面（�
 
 主打功能截图的示例数据、预览地址与重拍步骤见 [截图说明](./assets/readme/README.md)。预览页面复用实际界面组件，不调用模型。
 
-安装依赖时，`postinstall` 会把 Electron 开发二进制改名为 `Vela.app`、修改其应用名并重新签名（`scripts/brand-electron-dev.mjs`，仅 macOS），这样菜单栏和 Dock 显示的就是 Vela 的名字和图标，而不是 Electron 的默认模板。应用图标 `apps/desktop/resources/icon.png` 由 `scripts/generate-app-icon.py` 从 `assets/icon/VelaAgentIcon.png` 生成（圆角与留白按 macOS 图标网格加工），更换原图后重跑该脚本即可。
+安装依赖时，`postinstall` 会把 Electron 开发二进制改名为 `Vela.app`、修改其应用名并重新签名（`scripts/brand-electron-dev.mjs`，仅 macOS），这样菜单栏和 Dock 显示的就是 Vela 的名字和图标，而不是 Electron 的默认模板。应用图标 `apps/desktop/resources/icon.png` 由 `scripts/generate-app-icon.py` 从 `assets/icon/VelaHarnessIcon.png` 生成（圆角与留白按 macOS 图标网格加工），更换原图后重跑该脚本即可。
 
 | 快捷键 | 操作 |
 | --- | --- |
@@ -159,7 +160,7 @@ pnpm --filter @vela/desktop test:trace:preview  # 确定性 UI 测试页面（�
 - `packages/workspace` — 工作区、worktree、Git、Pull Request 与权限审批。
 - `packages/shared` — 主进程与界面共享的类型和 IPC 定义。
 - `packages/tools` — Agent 内置工具目录。
-- `docs/` — 专题文档：Plan 模式的使用说明与实现架构。
+- `docs/` — 专题文档：Plan 模式、MCP、项目与全局记忆、定时任务、任务配方等能力的使用说明与实现细节。
 
 ## 技术细节
 

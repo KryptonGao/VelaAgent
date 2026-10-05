@@ -29,6 +29,7 @@ import { SheetPresence } from "./Presence";
 import { SkillMigrationDialog } from "./SkillMigrationDialog";
 import { TrashIcon } from "./icons";
 import { McpSettingsSection } from "./McpSettingsSection";
+import { MemorySettingsSection } from "./MemorySettingsSection";
 import { IntegrationsSection } from "./IntegrationsSection";
 import { settingsCopy, type SettingsCopy } from "./settings-copy";
 import { localizeError, tr } from "../locale";
@@ -36,7 +37,7 @@ import { SettingsUsageView } from "./usage/SettingsUsageView";
 import type { ConversationLinkTarget } from "../browser/conversation-link-policy";
 import { notificationSoundKinds, type NotifySound } from "../notification-sounds";
 
-type SettingsSection = "agent" | "archived" | "models" | "integrations" | "mcp" | "usage" | "permissions" | "workspace" | "appearance" | "development";
+type SettingsSection = "agent" | "archived" | "models" | "integrations" | "mcp" | "memory" | "usage" | "permissions" | "workspace" | "appearance" | "development";
 type ModelsApi = ReturnType<typeof useModels>;
 
 interface SettingsViewProps {
@@ -51,7 +52,7 @@ interface SettingsViewProps {
   onClose: () => void;
 }
 
-const sections: SettingsSection[] = ["agent", "archived", "models", "integrations", "mcp", "usage", "permissions", "workspace", "appearance"];
+const sections: SettingsSection[] = ["agent", "archived", "models", "integrations", "mcp", "memory", "usage", "permissions", "workspace", "appearance"];
 
 export function SettingsView({
   onPreviewSound,
@@ -96,6 +97,7 @@ export function SettingsView({
         <div className="settings-content">
           {section === "integrations" ? <IntegrationsSection locale={locale} workspacePath={project.environment?.path ?? project.workspace?.current ?? null} conversationId={conversationId} /> : null}
           {section === "mcp" ? <McpSettingsSection locale={locale} workspacePath={project.environment?.path ?? project.workspace?.current ?? null} conversationId={conversationId} /> : null}
+          {section === "memory" ? <MemorySettingsSection locale={locale} conversationId={conversationId} /> : null}
           {section === "usage" ? <SettingsUsageView conversations={conversations} providers={models.catalog?.providers ?? []} /> : null}
           <div hidden={section !== "agent"}>
             <AgentSection copy={copy} catalog={models.catalog} workspacePath={project.workspace?.current ?? null} />

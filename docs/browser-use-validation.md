@@ -68,5 +68,9 @@ The smoke fixtures exercise services directly without a live model provider.
 Runtime/tool-policy, permission modes, Goal invalidation and restored image/error
 history are covered by their automated tests. Accessibility names are a
 DOM-derived approximation; closed Shadow DOM, perspective iframe transforms,
-response bodies, popup authorization and upload/download orchestration retain
-the documented first-release limitations.
+response bodies and upload/download orchestration retain the documented
+first-release limitations. Popup authorization is now covered by
+`browser-auth-electron-smoke.mjs`, including cross-origin opener callbacks,
+POST bodies and popup cleanup. Its virtual authenticator validates WebAuthn
+plumbing and account selection; real Touch ID still requires a signed,
+provisioned build and hardware validation.

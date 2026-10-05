@@ -2,7 +2,7 @@ import { app, BrowserWindow, Menu, shell, type MenuItemConstructorOptions } from
 import { IpcChannel, type AppLocale, type MenuAction } from "@vela/shared";
 import desktopPackage from "../../package.json";
 
-const repoUrl = "https://github.com/KryptonGao/VelaAgent";
+const repoUrl = "https://github.com/KryptonGao/VelaHarness";
 let activeLocale: AppLocale = "zh-CN";
 
 function text(chinese: string, english: string): string {

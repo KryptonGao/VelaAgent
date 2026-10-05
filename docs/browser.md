@@ -105,9 +105,66 @@ REPL evaluator errors carry structured metadata and mark failed tool results.
 
 Guest security retains sandboxing, context isolation, web security, disabled
 Node integration, no Vela preload and HTTP(S) navigation. Popup destinations
-retain the existing in-place policy. Arbitrary CDP forwarding and a remote
-debugging port are not exposed. Native view migration, window.opener-dependent
-authorization and upload/download orchestration remain outside this release.
+open in separate native browser windows, with the same session and isolation.
+Chromium's original child WebContents is retained, preserving `window.opener`,
+`postMessage`, form POST bodies, named windows and `window.close()`. Blank
+popups may navigate later; child navigation and redirects retain the HTTP(S)
+policy. Nested popups inherit these protections, and closing a tab/window
+destroys its popup tree. Each tab can hold up to eight popups. Popup titles show
+the current origin. Popups are user-operated windows, not Browser Use logical
+tabs. Arbitrary CDP forwarding and a remote debugging port are not exposed.
+Native view migration and upload/download orchestration remain outside this release.
+
+## Passkeys and native authentication
+
+Remote pages use Chromium's `navigator.credentials` implementation. The browser
+session handles `select-webauthn-account` with a native account chooser that
+shows the relying party, requesting frame URL and supplied account identities.
+Selection requires user input; cancellation, navigation, renderer failure and
+page closure settle the callback exactly once. The chooser accepts only frames
+belonging to registered browser guests/popups in the browser partition. Device,
+camera and other permissions remain denied by default; WebAuthn does not require
+a broad WebUSB/WebHID grant.
+
+Electron 44 does not notify the app when the page aborts or times out a credential
+request. A chooser is therefore replaced by a new request from the same frame,
+and expires after 60 seconds. Page-triggered cancellation cannot dismiss it
+immediately through this version's native API; users can dismiss it with Cancel.
+
+On macOS, startup reads the executable's actual code-signing entitlements. A
+matching `<APP_ID_PREFIX>.com.vela.desktop.webauthn` keychain access group enables
+Electron's Touch ID / Secure Enclave authenticator. The signing profile must
+authorize that group. The prefix comes from the provisioning profile and may
+differ from the Team ID. Credentials are device-bound, partition-specific and
+depend on the persisted browser profile. Unsigned local builds do not enable
+Touch ID. Windows retains its native OS authentication path; external keys
+depend on the platform/key's supported WebAuthn features.
+
+The existing unsigned build remains available. To create a signed macOS build,
+provide a Developer ID signing certificate and a matching provisioning profile:
+
+```sh
+export VELA_MAC_SIGNING_IDENTITY='Developer ID Application: …'
+export VELA_MAC_PROVISIONING_PROFILE='/absolute/path/Vela.provisionprofile'
+pnpm --filter @vela/desktop dist:mac:signed
+```
+
+The signed packaging script validates the profile's app identifier and keychain
+group, embeds the profile, and creates temporary signing entitlements. It does
+not acquire certificates/profiles or notarize the app by itself. A successful
+configuration is not proof of hardware support; verify a real registration and
+authentication on a correctly signed build before releasing it.
+
+Electron 44.5.1 does **not** expose existing Safari/iCloud Keychain passkeys through
+its Touch ID authenticator. Its external-key flow also lacks PIN collection:
+requests requiring a key PIN are rejected. The upgrade from 44.4.5 includes the
+fix that rejects these requests instead of crashing the app. Conditional passkey
+autofill and physical authenticator behavior need separate device validation.
+For those unsupported cases, users can use another sign-in method or the system
+browser; system-browser cookies do not automatically transfer into Vela.
+See the [Electron WebAuthn API](https://www.electronjs.org/docs/latest/api/app#appconfigurewebauthnoptions-macos),
+[account-selection event](https://www.electronjs.org/docs/latest/api/session#event-select-webauthn-account),
+and [PIN crash fix](https://github.com/electron/electron/pull/54403).
 
 Browser tools register only when a browser service is injected. Execution-mode
 main/general agents share the conversation's pages with separate REPL bindings;
@@ -131,6 +188,7 @@ pnpm --filter @vela/desktop test:browser-repl
 pnpm --filter @vela/agent test
 pnpm typecheck
 pnpm --filter @vela/desktop build
+node apps/desktop/test/browser-auth-electron-smoke.mjs
 node_modules/.bin/electron apps/desktop/test/browser-electron-smoke.mjs
 node apps/desktop/test/browser-use-electron-smoke.mjs
 ```
@@ -141,6 +199,13 @@ The second uses real guests, CDP and the bundled utility worker for login reuse,
 forms, frames, Shadow DOM, stale references, failures, context recovery,
 concurrency and code-edit/HMR/screenshot on the same page. Its fixture avoids
 model/network dependencies outside local HTTP servers.
+
+The authentication smoke uses local origins to verify cross-origin OAuth
+callbacks, opener messaging/closure, blank popups, form POST, navigation guards
+and nested-window cleanup. A CDP virtual resident authenticator exercises real
+WebAuthn registration/authentication and the session account-selection handler.
+This does not verify Touch ID hardware, signature/provisioning authorization or
+third-party account login, and uses no personal credentials.
 
 For packaged-artifact checks, build a macOS directory with
 `pnpm --filter @vela/desktop exec electron-builder --mac --arm64 --dir` and set

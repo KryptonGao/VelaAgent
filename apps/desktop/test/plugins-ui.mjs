@@ -40,6 +40,9 @@ if (!process.versions.electron) {
   } finally { rmSync(temporary, { recursive: true, force: true }); }
 } else {
   const { app, BrowserWindow, safeStorage } = await import("electron");
+  // Use a smoke-only keychain service: the default "Vela Safe Storage" belongs to the
+  // installed app, and reading it through the ad-hoc signed dev binary raises a macOS prompt.
+  app.setName("Vela Plugin Smoke");
   app.setPath("userData", join(process.env.VELA_PLUGIN_UI_TEMP, "profile"));
   app.whenReady().then(async () => {
     const window = new BrowserWindow({ show: false, width: 900, height: 540, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });

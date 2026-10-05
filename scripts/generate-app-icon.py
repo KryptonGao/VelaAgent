@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""把 assets/icon/VelaAgentIcon.png 加工成 macOS 应用图标,输出到 apps/desktop/resources/icon.png。
+"""把 assets/icon/VelaHarnessIcon.png 加工成 macOS 应用图标,输出到 apps/desktop/resources/icon.png。
 
 macOS 不会自动给 Dock 图标加圆角:圆角形状、四周留白和透明的四角都要画进 PNG。
 按 Apple 图标网格(1024 画布、圆角方块 824×824、圆角半径 185.4)把原图铺进圆角形状内,
@@ -12,7 +12,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 REPO = Path(__file__).resolve().parent.parent
-SRC = REPO / "assets" / "icon" / "VelaAgentIcon.png"
+SRC = REPO / "assets" / "icon" / "VelaHarnessIcon.png"
 DST = REPO / "apps" / "desktop" / "resources" / "icon.png"
 
 CANVAS = 1024

@@ -1,6 +1,6 @@
 appId: com.vela.desktop
 productName: Vela
-buildVersion: 0.1.7
+buildVersion: 1.0.0
 artifactName: Vela-${shortVersion}-${arch}.${ext}
 directories:
   buildResources: resources
@@ -22,8 +22,8 @@ asarUnpack:
   # node-pty 需要真实的 spawn-helper 可执行文件,不能留在 asar 内
   - "**/node_modules/node-pty/**"
 mac:
-  bundleShortVersion: 0.1.7
-  bundleVersion: 0.1.7
+  bundleShortVersion: 1.0.0
+  bundleVersion: 1.0.0
   category: public.app-category.developer-tools
   icon: resources/icon.png
   # Keep local macOS builds fast; electron-builder otherwise signs every framework resource.

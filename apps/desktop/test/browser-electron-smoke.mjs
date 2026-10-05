@@ -211,8 +211,13 @@ async function run() {
     await until(() => requests.get("/two") > reloadRequests, "reload request"); await loaded("/two", "Page Two");
     await guest.executeJavaScript("history.pushState({},'', '/spa');document.title='SPA title'");
     await loaded("/spa", "SPA title");
-    await guest.executeJavaScript("document.querySelector('#popup').click()", true); await loaded("/two", "Page Two");
-    assert.equal(BrowserWindow.getAllWindows().length, 1);
+    await guest.executeJavaScript("document.querySelector('#popup').click()", true);
+    await until(() => BrowserWindow.getAllWindows().some(w => w !== win && w.webContents.getURL() === base + "/two"), "separate popup");
+    const popup = BrowserWindow.getAllWindows().find(w => w !== win);
+    assert.equal(popup.webContents.session, guest.session);
+    await loaded("/spa", "SPA title");
+    popup.destroy();
+    await navigate("/two"); await loaded("/two", "Page Two");
     console.log("PASS redirects, back/forward, reload, SPA navigation and popup links");
 
     await navigate("/slow");

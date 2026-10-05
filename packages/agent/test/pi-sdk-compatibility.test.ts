@@ -123,11 +123,12 @@ describe("released Pi SDK compatibility", () => {
     assert.ok(forbidden.every(name => !registry.includes(name)));
     assert.ok(!f.session.getActiveToolNames().includes("tool_search"), "MCP discovery stays inactive without enabled servers");
     const work = ["read", "bash", "edit", "write", "spawn_agent", "send_message", "followup_task", "ask_user_question"];
-    assert.deepEqual(f.session.getActiveToolNames(), work);
+    const memory = ["memory_read", "memory_update"];
+    assert.deepEqual(f.session.getActiveToolNames(), [...work, ...memory]);
     await f.runtime.setMode(f.id, "goal");
-    assert.deepEqual(f.session.getActiveToolNames(), [...work.filter(name => name !== "ask_user_question"), "record_goal_validation", "update_goal"]);
+    assert.deepEqual(f.session.getActiveToolNames(), [...work.filter(name => name !== "ask_user_question"), "record_goal_validation", "update_goal", ...memory]);
     await f.runtime.setMode(f.id, "plan");
-    assert.deepEqual(f.session.getActiveToolNames(), ["read", "bash", "ask_user_question"]);
+    assert.deepEqual(f.session.getActiveToolNames(), ["read", "bash", "ask_user_question", "memory_read"]);
     // Even if a tool was activated externally, the final mode guard must reject it.
     f.session.setActiveToolsByName(["read", "bash", "write", "ask_user_question"]);
     let approvals = 0;
@@ -140,7 +141,7 @@ describe("released Pi SDK compatibility", () => {
     await assert.rejects(readFile(join(f.cwd, "forbidden.txt")), { code: "ENOENT" });
     await assert.rejects(readFile(join(f.cwd, "forbidden-shell.txt")), { code: "ENOENT" });
     await f.runtime.setMode(f.id, "agent");
-    assert.deepEqual(f.session.getActiveToolNames(), work);
+    assert.deepEqual(f.session.getActiveToolNames(), [...work, ...memory]);
   });
 
   it("preserves approval and error results for a real bash command with a nonzero exit", async t => {
@@ -167,7 +168,7 @@ describe("released Pi SDK compatibility", () => {
     t.after(() => child.dispose());
     assert.equal(child.model?.provider, f.session.model?.provider);
     assert.equal(child.model?.id, f.session.model?.id);
-    assert.deepEqual(child.getActiveToolNames(), ["read", "bash"]);
+    assert.deepEqual(child.getActiveToolNames(), ["read", "bash", "memory_read"]);
     let approvals = 0;
     f.permission.subscribe(event => { if (event.type === "request") { approvals++; f.permission.reply(event.request.id, true); } });
     f.script([[call("explore-mutation", "bash", { command: "touch explore-forbidden.txt" })], "read-only report"], child);
@@ -182,7 +183,7 @@ describe("released Pi SDK compatibility", () => {
     t.after(() => restored.dispose());
     assert.equal(restored.sessionId, child.sessionId);
     assert.match(JSON.stringify(restored.messages), /read-only report/);
-    assert.deepEqual(restored.getActiveToolNames(), ["read", "bash"]);
+    assert.deepEqual(restored.getActiveToolNames(), ["read", "bash", "memory_read"]);
   });
 
   it("reopens synthetic legacy API-key and Codex OAuth credentials without changing the selected provider", async t => {

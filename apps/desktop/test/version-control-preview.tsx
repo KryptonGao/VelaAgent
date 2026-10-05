@@ -33,7 +33,7 @@ import "../src/renderer/version-control.css";
 const now = Date.now();
 
 const git: GitStatusSnapshot = {
-  repo: { root: "/Users/chenkaigao/Documents/Program/VelaAgent", name: "VelaAgent", remoteUrl: "git@github.com:KryptonGao/VelaAgent.git", subdir: null, empty: false },
+  repo: { root: "/Users/chenkaigao/Documents/Program/VelaHarness", name: "VelaHarness", remoteUrl: "git@github.com:KryptonGao/VelaHarness.git", subdir: null, empty: false },
   branch: "feature/version-control-ui",
   upstream: "origin/feature/version-control-ui",
   ahead: 2,
@@ -54,7 +54,7 @@ const git: GitStatusSnapshot = {
   operation: null,
   identity: { name: "Chenkai Gao", email: "chenkai@example.com", configured: true },
   remotes: [
-    { name: "origin", fetchUrl: "git@github.com:KryptonGao/VelaAgent.git", pushUrl: "git@github.com:KryptonGao/VelaAgent.git", slug: "KryptonGao/VelaAgent" },
+    { name: "origin", fetchUrl: "git@github.com:KryptonGao/VelaHarness.git", pushUrl: "git@github.com:KryptonGao/VelaHarness.git", slug: "KryptonGao/VelaHarness" },
   ],
 };
 
@@ -149,7 +149,7 @@ const prInfo: PullRequestInfo = {
   pr: null,
   otherBranchPrs: [],
   checks: [],
-  repo: { owner: "KryptonGao", name: "VelaAgent", host: "github.com", baseRepo: "KryptonGao/VelaAgent" },
+  repo: { owner: "KryptonGao", name: "VelaHarness", host: "github.com", baseRepo: "KryptonGao/VelaHarness" },
   defaultBase: "main",
   baseOptions: ["main", "develop", "feature/version-control-ui"],
   headRemote: "origin",
@@ -159,8 +159,8 @@ const prInfo: PullRequestInfo = {
 const scope: PrCompareScope = {
   base: "main",
   head: "feature/version-control-ui",
-  baseRepo: "KryptonGao/VelaAgent",
-  headRepo: "KryptonGao/VelaAgent",
+  baseRepo: "KryptonGao/VelaHarness",
+  headRepo: "KryptonGao/VelaHarness",
   commits: graphCommits.slice(0, 3).map((entry) => ({ sha: entry.sha, subject: entry.subject, authorName: entry.authorName })),
   fileCount: 8,
   addedLines: 132,
@@ -302,7 +302,7 @@ const releases: GitReleaseListResult = {
     {
       tagName: "v1.0.0",
       name: "Vela 1.0.0",
-      url: "https://github.com/KryptonGao/VelaAgent/releases/tag/v1.0.0",
+      url: "https://github.com/KryptonGao/VelaHarness/releases/tag/v1.0.0",
       draft: false,
       prerelease: false,
       isLatest: true,
@@ -329,7 +329,7 @@ const releaseScope: GitReleaseNotesScope = {
     merge: false,
   })),
   commitCount: 3,
-  pullRequests: [{ number: 128, title: "Add review threads and merge controls", author: "KryptonGao", url: "https://github.com/KryptonGao/VelaAgent/pull/128", mergedAt: now - 2 * 86_400_000 }],
+  pullRequests: [{ number: 128, title: "Add review threads and merge controls", author: "KryptonGao", url: "https://github.com/KryptonGao/VelaHarness/pull/128", mergedAt: now - 2 * 86_400_000 }],
   contributors: ["Chenkai Gao", "KryptonGao"],
   fileCount: 12,
   addedLines: 320,
@@ -427,7 +427,7 @@ const forcePushPreview: GitForcePushPreview = {
 const openPr: PrSummary = {
   number: 128,
   title: "Add review threads and merge controls",
-  url: "https://github.com/KryptonGao/VelaAgent/pull/128",
+  url: "https://github.com/KryptonGao/VelaHarness/pull/128",
   state: "open",
   isDraft: false,
   reviewDecision: "REVIEW_REQUIRED",
@@ -435,8 +435,8 @@ const openPr: PrSummary = {
   checks: "passing",
   baseRefName: "main",
   headRefName: "feature/version-control-ui",
-  baseRepo: "KryptonGao/VelaAgent",
-  headRepo: "KryptonGao/VelaAgent",
+  baseRepo: "KryptonGao/VelaHarness",
+  headRepo: "KryptonGao/VelaHarness",
   author: "KryptonGao",
   labels: ["version-control"],
   reviewers: ["teammate"],
@@ -532,7 +532,7 @@ const vela = {
   getStagedDiff: () => Promise.resolve(diffText),
   getPrScope: () => Promise.resolve(scope),
   listPrTemplates: () => Promise.resolve([{ path: ".github/PULL_REQUEST_TEMPLATE.md", name: "PULL_REQUEST_TEMPLATE", body: "## Summary\n\n## Validation\n- [ ] Describe checks run for this change" }]),
-  createPullRequestNative: () => Promise.resolve({ ok: true, step: "create", pushed: false, pr: null, url: "https://github.com/KryptonGao/VelaAgent/pull/1", number: 1, message: "已创建 PR #1", unconfirmed: false }),
+  createPullRequestNative: () => Promise.resolve({ ok: true, step: "create", pushed: false, pr: null, url: "https://github.com/KryptonGao/VelaHarness/pull/1", number: 1, message: "已创建 PR #1", unconfirmed: false }),
   commit: () => Promise.resolve({ ok: true, sha: "abc1234", shortSha: "abc1234", branch: "feature/version-control-ui", message: "提交成功", output: "" }),
   commitAndPush: () => Promise.resolve({ commit: { ok: true, sha: "abc1234", shortSha: "abc1234", branch: "feature/version-control-ui", message: "提交成功", output: "" }, push: { outcome: "ok", ok: true, message: "已推送", confirmed: true, remote: "origin", branch: "feature/version-control-ui" } }),
   pushBranch: () => Promise.resolve({ outcome: "ok", ok: true, message: "已推送", confirmed: true, remote: "origin", branch: "feature/version-control-ui" }),

@@ -62,7 +62,7 @@ const models = {
   login: { active: false }, select() {}, setThinking() {},
 } as unknown as ReturnType<typeof useModels>;
 const project = {
-  workspace: { current: "/projects/VelaAgent", recents: [] }, approval: null, environment: null, environments: [],
+  workspace: { current: "/projects/VelaHarness", recents: [] }, approval: null, environment: null, environments: [],
   sandboxMode: "ask", git: null, openWorkspaceDialog: async () => {}, replyApproval() {}, listBranches: async () => [],
 } as unknown as ProjectApi;
 
@@ -74,7 +74,7 @@ function Fixture() {
     activeConversationId: conversationId, conversations: [],
     context: { tokens: 0, contextWindow: 100000, percent: 0, messageCount: 0, toolCallCount: 0, turnCount: 0,
       segments: { system: 0, tools: 0, rules: 0, skills: 0, conversation: 0 } },
-    session: { id: conversationId, title: tr("使用统计预览", "Usage preview"), cwd: "/projects/VelaAgent", status: "ready", model: "Preview",
+    session: { id: conversationId, title: tr("使用统计预览", "Usage preview"), cwd: "/projects/VelaHarness", status: "ready", model: "Preview",
       modelReady: true, modelProvider: "preview", modelId: "preview", tools: [], mode: "agent", thinkingLevel: "medium", thinkingLevels: ["medium"] },
   } as unknown as AppState;
   return <div style={{ display: "flex", flexDirection: "column", height: "100vh", width: params.get("width") ? `${Number(params.get("width"))}px` : "100%", maxWidth: "100%" }}>
@@ -89,8 +89,8 @@ function Fixture() {
     </div>
     {params.has("settings") ? <SettingsView preferences={{ ...preferences, locale }} platform="darwin" models={models} project={project}
       conversations={[
-        { id: "sample", title: "Sample", cwd: "/projects/VelaAgent", createdAt: Date.now(), updatedAt: Date.now(), status: "ready", archivedAt: null },
-        { id: "archived", title: "Archived", cwd: "/projects/VelaAgent", createdAt: Date.now(), updatedAt: Date.now(), status: "ready", archivedAt: Date.now() },
+        { id: "sample", title: "Sample", cwd: "/projects/VelaHarness", createdAt: Date.now(), updatedAt: Date.now(), status: "ready", archivedAt: null },
+        { id: "archived", title: "Archived", cwd: "/projects/VelaHarness", createdAt: Date.now(), updatedAt: Date.now(), status: "ready", archivedAt: Date.now() },
       ]} onUnarchiveConversation={() => {}} onClose={() => {}} /> : <ChatView messages={[]} state={state} project={project} sendError={null} platform="darwin" leftCollapsed rightCollapsed
       models={models} onToggleLeft={() => {}} onToggleRight={() => {}} onSend={async () => {}} onAbort={async () => {}}
       onMode={() => {}} getQuestion={() => null} onReplyQuestion={() => {}} onBranch={() => {}}

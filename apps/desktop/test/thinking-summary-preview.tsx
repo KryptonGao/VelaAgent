@@ -26,7 +26,7 @@ const catalog: ModelCatalog = {
 };
 const models = { catalog, login: { active: false } } as unknown as ReturnType<typeof useModels>;
 const project = {
-  workspace: { current: "/projects/VelaAgent", recents: [] }, approval: null, environment: null, environments: [],
+  workspace: { current: "/projects/VelaHarness", recents: [] }, approval: null, environment: null, environments: [],
   sandboxMode: "ask", git: null,
 } as unknown as ProjectApi;
 

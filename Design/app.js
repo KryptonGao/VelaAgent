@@ -1,5 +1,5 @@
 /**
- * VELA AGENT — NATIVE MACOS CODEX-INSPIRED PROTOTYPE ENGINE
+ * VELAHARNESS — NATIVE MACOS CODEX-INSPIRED PROTOTYPE ENGINE
  * Matching User Screenshot: Frosted Blue Glass, Large Radii, Soft Diffused Shadows, No Borders
  */
 

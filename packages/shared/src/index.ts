@@ -1,4 +1,5 @@
 export * from "./mcp";
+export * from "./memory";
 export * from "./scheduled-tasks";
 export * from "./task-recipes";
 export * from "./recipe-validation";
@@ -6,6 +7,7 @@ export * from "./recipe-workflow";
 export * from "./plugin";
 import type { PluginApi } from "./plugin";
 import type { McpApi } from "./mcp";
+import type { MemoryApi, MemoryLoadReport } from "./memory";
 export * from "./trace";
 import type { TraceSnapshot, TraceDetails, TraceUpdate } from "./trace";
 export const conversationTitleMaxLength = 120;
@@ -165,6 +167,11 @@ export const IpcChannel = {
   terminalResize: "terminal:resize",
   terminalClose: "terminal:close",
   terminalEvent: "terminal:event",
+  memoryList: "memory:list",
+  memorySetEnabled: "memory:set-enabled",
+  memoryRead: "memory:read",
+  memorySave: "memory:save",
+  memoryRemove: "memory:remove",
 } as const;
 
 export const appLocales = ["zh-CN", "en"] as const;
@@ -558,6 +565,8 @@ export interface SessionSnapshot {
   /** 当前激活的执行计划；执行中才会创建。 */
   executionPlan: ExecutionPlan | null;
   goal: ConversationGoal | null;
+  /** 最近一次执行加载的记忆来源状态；只含元数据，不含正文。 */
+  memory: MemoryLoadReport[];
   error: string | null;
   /** 用户已提交、等待执行的运行中指令;投递或撤销后从这里移除。 */
   pendingInstructions: RuntimeInstruction[];
@@ -2503,6 +2512,8 @@ export interface ConversationSyncResult {
 }
 
 export interface VelaApi extends McpApi, PluginApi {
+  /** 设置页的长期记忆管理入口；Agent 工具由运行时单独提供。 */
+  memory: MemoryApi;
   /** 仅开发版提供。 */
   development?: { syncProductionConversations(): Promise<ConversationSyncResult> };
   taskRecipes?: import("./task-recipes").TaskRecipesApi;

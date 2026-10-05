@@ -79,7 +79,7 @@ const files: GitFileChange[] = [
   { path: "apps/desktop/src/index.ts", oldPath: null, status: "modified", indexStatus: null, worktreeStatus: "modified", addedLines: 3, deletedLines: 2, indexAddedLines: 0, indexDeletedLines: 0, worktreeAddedLines: 3, worktreeDeletedLines: 2 },
 ];
 
-const repo: GitRepoInfo = { root: "/tmp/vela-fixture", name: "VelaAgent", remoteUrl: null, subdir: null, empty: false };
+const repo: GitRepoInfo = { root: "/tmp/vela-fixture", name: "VelaHarness", remoteUrl: null, subdir: null, empty: false };
 const git: GitStatusSnapshot = {
   repo,
   branch: "main",

@@ -195,6 +195,13 @@ const api: VelaApi = {
     ipcRenderer.on("mcp:status", handler);
     return () => { ipcRenderer.removeListener("mcp:status", handler); };
   },
+  memory: {
+    setEnabled: (input) => ipcRenderer.invoke(IpcChannel.memorySetEnabled, input),
+    list: (input) => ipcRenderer.invoke(IpcChannel.memoryList, input ?? {}),
+    read: (input) => ipcRenderer.invoke(IpcChannel.memoryRead, input),
+    save: (input) => ipcRenderer.invoke(IpcChannel.memorySave, input),
+    remove: (input) => ipcRenderer.invoke(IpcChannel.memoryRemove, input),
+  },
   browser: {
     command: (command) => ipcRenderer.invoke(BrowserIpc.command, command),
     subscribe: (listener) => {

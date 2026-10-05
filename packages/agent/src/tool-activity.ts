@@ -13,6 +13,8 @@ export function activityFromCall(toolName: string, args: unknown): ToolActivity 
   if (toolName === "browser_repl") return { command: readString(args, "code") };
   const command = readString(args, "command");
   const path = readString(args, "path") ?? readString(args, "file_path");
+  const mcp = mcpIdentity(toolName);
+  if (mcp) return { mcp, ...(command ? { command } : {}), ...(path ? { path } : {}) };
   if (toolName === "bash") return command ? { command } : {};
   if (toolName === "read" || toolName === "edit" || toolName === "write") return path ? { path } : {};
   const summary = modeToolSummary(toolName, args);
@@ -41,6 +43,9 @@ export function activityFromExecution(
   }
   const call = activityFromCall(toolName, args);
   const text = textOf(result);
+  if (call.mcp) {
+    return { ...call, mcp: mcpIdentity(toolName, detailsOf(result)), body: clip(text) || (isError ? "执行失败" : undefined) };
+  }
   if (toolName === "browser_repl") return { ...call, body: browserResultBody(result, text) };
   if (isError) {
     return { command: call.command, path: call.path, body: clip(text) || "执行失败" };
@@ -222,6 +227,16 @@ function textOf(result: unknown): string {
 function detailsOf(result: unknown): unknown {
   if (!result || typeof result !== "object") return undefined;
   return (result as { details?: unknown }).details;
+}
+
+/** History must remain recognizable without a live MCP catalog (e.g. imported sessions). */
+function mcpIdentity(toolName: string, details?: unknown): ToolActivity["mcp"] {
+  const match = /^mcp__(.+?)__(.+)$/.exec(toolName);
+  if (!match) return undefined;
+  const server = readString(details, "server")?.trim();
+  const tool = readString(details, "tool")?.trim();
+  // Pi persists the original names here; registered names normalize hyphens to underscores.
+  return server && tool ? { server, tool } : { server: match[1]!, tool: match[2]! };
 }
 
 function readDiff(details: unknown): string | null {

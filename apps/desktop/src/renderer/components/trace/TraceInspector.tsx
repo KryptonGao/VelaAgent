@@ -9,6 +9,7 @@ import type {
 import { highlightSnippet, type ThemedToken } from "../preview/highlighter";
 import { Markdown } from "../Markdown";
 import { tr } from "../../locale";
+import { useSlidingTabIndicator } from "../useSlidingTabIndicator";
 
 export const kindLabel = (kind: TraceKind) =>
   ({
@@ -393,6 +394,7 @@ export function TraceInspector({
         ? ["overview", "preview", "raw", "source"]
         : ["overview", "preview", "raw"];
   const actualTab = tabs.includes(tab) ? tab : tabs[0]!;
+  const tabIndicator = useSlidingTabIndicator({ activeKey: actualTab });
   const body = details?.content ?? "";
   const raw = details?.raw;
   const images =
@@ -432,20 +434,27 @@ export function TraceInspector({
         </button>
       </header>
       <nav
+        ref={tabIndicator.navRef}
         className="trace-inspector-tabs"
         role="tablist"
         aria-label={tr("详情视图", "Detail view")}
+        onPointerMove={tabIndicator.onPointerMove}
+        onPointerLeave={tabIndicator.onPointerLeave}
       >
         {tabs.map((t) => (
           <button
+            type="button"
             role="tab"
+            data-tab-key={t}
             aria-selected={actualTab === t}
             key={t}
+            ref={tabIndicator.registerTab(t)}
             onClick={() => setTab(t)}
           >
             {tr(...tabNames[t]!)}
           </button>
         ))}
+        {tabIndicator.indicator}
       </nav>
       <div className="trace-inspector-scroll" role="tabpanel">
         {error ? (

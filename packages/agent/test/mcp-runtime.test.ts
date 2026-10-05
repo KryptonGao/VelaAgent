@@ -457,6 +457,21 @@ describe("AgentRuntime MCP integration", { timeout: 60_000 }, () => {
     assert.equal(await f.executions("deferred"), 1);
   });
 
+  it("restores MCP result cards after the server configuration is removed", async t => {
+    const f = await fixture(t, { mode: "full" });
+    await f.save();
+    const info = await f.tool("read-data");
+    await f.invoke("read-data");
+    await f.runtime.removeMcpServer({ ...f.target, scope: "global", name: "fixture" });
+    await f.restore();
+    assert.equal((await f.catalog()).servers.some(server => server.name === "fixture"), false);
+    const tool = f.runtime.getMessages(f.id).flatMap(message => message.tools).find(tool => tool.name === info.registeredName);
+    assert.ok(tool);
+    assert.equal(tool.status, "done");
+    assert.deepEqual(tool.activity.mcp, { server: "fixture", tool: "read-data" });
+    assert.ok(tool.activity.body);
+  });
+
   it("explicit null conversationId creates a management bridge distinct from the active conversation", async t => {
     const f = await fixture(t, { mode: "full" });
     await f.save(); await f.connected();
@@ -535,6 +550,9 @@ describe("AgentRuntime MCP integration", { timeout: 60_000 }, () => {
     const added = ready.servers.find(server => server.name === "added")!.tools.find(tool => tool.name === "read-data")!;
     assert.equal(added.exposure, "direct");
     assert.ok(f.session().getActiveToolNames().includes(added.registeredName!));
+    // MCP 刷新重算激活集合时，内置记忆工具仍按权限矩阵保留。
+    assert.ok(f.session().getActiveToolNames().includes("memory_read"));
+    assert.ok(f.session().getActiveToolNames().includes("memory_update"));
     assert.equal((await f.invoke("read-data", {}, undefined, "added")).isError, false);
     assert.equal(await f.executions("added"), 1);
     await eventually(() => alive(oldPid), value => !value, "idle reload leaked the old process");

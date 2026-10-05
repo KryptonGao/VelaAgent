@@ -60,7 +60,7 @@ export class PluginRegistry {
       // Pi's `http` transport is Streamable HTTP (the public plugin type is explicit).
       config: { type: "http", url: plugin.mcpUrl, description: plugin.description,
         enabled: enabled.has(plugin.id), exposure: "deferred",
-        ...(plugin.authType === "oauth2" ? { oauth: { clientName: "Vela Agent", ...plugin.oauth } } : {}) },
+        ...(plugin.authType === "oauth2" ? { oauth: { clientName: "VelaHarness", ...plugin.oauth } } : {}) },
     }));
   }
   /** Reserve the namespace even when a plugin is disabled or a project is untrusted. */

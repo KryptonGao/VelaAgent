@@ -59,7 +59,7 @@ try {
         })()`);
         assert.ok(state.id);
         assert.equal(state.model, null);
-        assert.deepEqual(state.modes[0].tools, ['read', 'bash', 'ask_user_question', 'list_scheduled_tasks']);
+        assert.deepEqual(state.modes[0].tools, ['read', 'bash', 'ask_user_question', 'list_scheduled_tasks', 'memory_read']);
         assert.ok(state.modes[1].tools.includes('update_goal'));
         assert.ok(state.modes[2].tools.includes('browser_repl'));
         assert.ok(state.modes.every(mode => !mode.tools.includes('codemode') && !mode.tools.includes('tool_search')));

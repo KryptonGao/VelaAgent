@@ -27,19 +27,19 @@ const models = {
   add() {}, remove() {}, logout() {}, loginProvider() {}, replyLogin() {}, cancelLogin() {}, dismissLogin() {},
 } as unknown as ReturnType<typeof useModels>;
 const project = {
-  workspace: { current: "/projects/VelaAgent", recents: [] }, approval: null, environment: null, environments: [],
+  workspace: { current: "/projects/VelaHarness", recents: [] }, approval: null, environment: null, environments: [],
   sandboxMode: "ask", git: null, openWorkspaceDialog: async () => {}, replyApproval() {}, listBranches: async () => [],
 } as unknown as ProjectApi;
 const now = Date.now();
 const initial: ConversationSummary[] = [
-  { id: "a", title: "更强的会话整理与检索", cwd: "/projects/VelaAgent", createdAt: now, updatedAt: now, archivedAt: null, status: "ready", turnCompletedAt: now },
-  { id: "b", title: "修复登录页面", cwd: "/projects/VelaAgent", createdAt: now, updatedAt: now - 60_000, archivedAt: null, status: "streaming" },
+  { id: "a", title: "更强的会话整理与检索", cwd: "/projects/VelaHarness", createdAt: now, updatedAt: now, archivedAt: null, status: "ready", turnCompletedAt: now },
+  { id: "b", title: "修复登录页面", cwd: "/projects/VelaHarness", createdAt: now, updatedAt: now - 60_000, archivedAt: null, status: "streaming" },
   { id: "c", title: "Release notes", cwd: "/projects/StudyPulse", createdAt: now, updatedAt: now - 120_000, archivedAt: null, status: "ready" },
-  { id: "d", title: "已经归档的检索讨论", cwd: "/projects/VelaAgent", createdAt: now, updatedAt: now, archivedAt: now, status: "ready" },
+  { id: "d", title: "已经归档的检索讨论", cwd: "/projects/VelaHarness", createdAt: now, updatedAt: now, archivedAt: now, status: "ready" },
   { id: "waiting", title: "确认发布范围", cwd: "/projects/StudyPulse", createdAt: now, updatedAt: now - 180_000, archivedAt: null, status: "streaming" },
-  { id: "error", title: "检查构建失败", cwd: "/projects/VelaAgent", createdAt: now, updatedAt: now - 240_000, archivedAt: null, status: "error" },
+  { id: "error", title: "检查构建失败", cwd: "/projects/VelaHarness", createdAt: now, updatedAt: now - 240_000, archivedAt: null, status: "error" },
   { id: "yesterday", title: "评估 Windows x86 支持与安装流程", cwd: "C:\\projects\\Desktop", createdAt: now, updatedAt: now - 86_400_000, archivedAt: null, status: "ready" },
-  { id: "earlier", title: "优化 README", cwd: "/projects/VelaAgent", createdAt: now, updatedAt: now - 3 * 86_400_000, archivedAt: null, status: "ready" },
+  { id: "earlier", title: "优化 README", cwd: "/projects/VelaHarness", createdAt: now, updatedAt: now - 3 * 86_400_000, archivedAt: null, status: "ready" },
 ];
 function Fixture() {
   const [conversations, setConversations] = useState(initial);

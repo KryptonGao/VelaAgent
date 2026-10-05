@@ -12,6 +12,7 @@ import { Type } from "typebox";
 import { isPlanSafeCommand } from "./plan-command";
 import { executionPlanItemMax, type ExecutionPlanUpdateItem } from "./plan";
 import { agentToolNames } from "./subagent";
+import { memoryReadToolName } from "./memory-tools";
 import type { GoalValidationDraft } from "./goal-validation";
 
 export const goalContinuePrompt =
@@ -21,7 +22,7 @@ export const goalTurnLimit = 20;
 
 export const goalTurnLimitNote = "已达到本轮自动执行上限，可以继续；完成前仍需提交交付验证。";
 
-const planPrompt = `你正处于 Plan 模式，只能查阅代码，不能修改文件或执行会改动系统的命令。
+const planPrompt = `你正处于 Plan 模式，只能查阅代码，不能修改文件或执行会改动系统的命令。可以用 ${memoryReadToolName} 读取长期记忆，但不能写入。
 
 先理解用户目标，主动探索代码库，把实现所需的事实查清楚：相关模块、数据流、接口、持久化、测试和现存问题。
 能从仓库、配置、文档或源码里查到的信息必须自己查，不要把仓库里能查到的答案抛给用户。
@@ -98,7 +99,7 @@ export interface ToolPolicy {
   authorizeCall(call: ToolPolicyCall): ToolAuthorizationResult;
 }
 
-const planAllowedTools = new Set(["read", "bash", "ask_user_question"]);
+const planAllowedTools = new Set(["read", "bash", "ask_user_question", memoryReadToolName]);
 const planDeniedTools = new Set(["edit", "write", "apply_patch"]);
 
 export class DefaultToolPolicy implements ToolPolicy {

@@ -10,7 +10,7 @@ import {
   createSandboxedToolDefinitions,
   createWorktree, removeWorktree,
 } from "@vela/workspace";
-import { app, BrowserWindow, ipcMain, nativeImage, nativeTheme, session, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, session, shell, webContents } from "electron";
 import type { BrowserWindowConstructorOptions } from "electron";
 import { IpcChannel } from "@vela/shared";
 import { writeFileSync } from "node:fs";
@@ -26,6 +26,7 @@ import { TaskRecipeHost } from "./task-recipe-host";
 import { executeScheduledRecipe } from './task-recipe-schedule';
 import { ScheduledTaskHost } from "./scheduled-task-host";
 import { McpHost } from "./mcp-host";
+import { MemoryHost } from "./memory-host";
 import { SecureCredentialStore } from "./plugin-credentials";
 import { ensureLoginShellPath } from "./shell-path";
 import { TerminalHost } from "./terminal-host";
@@ -33,6 +34,7 @@ import { configureVelaProfile, prepareVelaHome } from "./vela-home";
 import { registerDevelopmentIpc } from "./development-host";
 import { UiStorage } from "./ui-storage";
 import { registerUiBrowserSecurity } from "./browser-security";
+import { configureBrowserPlatformAuthenticator, readWebAuthnAccessGroup, registerBrowserWebAuthn } from "./browser-webauthn";
 import { BrowserHost } from "./browser-host";
 import { BrowserCdp } from "./browser-cdp";
 import { BrowserReplManager } from "./browser-repl";
@@ -57,6 +59,7 @@ const rootDir = dirname(fileURLToPath(import.meta.url));
 const preloadPath = join(rootDir, "../preload/index.js");
 
 let mcpHost: McpHost | null = null;
+let memoryHost: MemoryHost | null = null;
 let scheduledTaskHost: ScheduledTaskHost | null = null;
 let taskScheduler: ScheduledTaskScheduler | null = null;
 let taskRecipeHost: TaskRecipeHost | null = null;
@@ -103,7 +106,8 @@ function createWindow(): BrowserWindow {
   });
 
   browserHost?.registerWindow(win.id, win.webContents);
-  registerUiBrowserSecurity(win.webContents, (guest) => browserHost?.registerGuest(win.id, guest));
+  registerUiBrowserSecurity(win.webContents, (guest) => browserHost?.registerGuest(win.id, guest),
+    (options) => new BrowserWindow({ ...options, parent: win }));
   win.once("closed", () => { browserRepl?.closeWindow(win.id); browserHost?.closeWindow(win.id); });
 
   win.once("ready-to-show", () => {
@@ -172,6 +176,16 @@ async function start(): Promise<void> {
   const browserSession = session.fromPartition(UI_BROWSER_PARTITION);
   browserSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   browserSession.setPermissionCheckHandler(() => false);
+  const platformAuthenticator = configureBrowserPlatformAuthenticator(app, process.platform, readWebAuthnAccessGroup());
+  if (process.platform === "darwin" && !platformAuthenticator) {
+    console.info("[vela] Touch ID passkeys require a signed and provisioned build with the Vela WebAuthn keychain entitlement.");
+  }
+  const disposeWebAuthn = registerBrowserWebAuthn(browserSession, {
+    contentsFromFrame: (frame) => webContents.fromFrame(frame),
+    parentForContents: (contents) => BrowserWindow.fromWebContents(contents.hostWebContents ?? contents),
+    showMessageBox: (parent, options) => dialog.showMessageBox(parent, options),
+  });
+  app.once("will-quit", disposeWebAuthn);
   const fallbackCwd = resolve(app.getAppPath(), "../..");
   await prepareVelaHome(home, app.getPath("userData"));
 
@@ -233,6 +247,7 @@ async function start(): Promise<void> {
     mcpOpenUrl: (url) => { void shell.openExternal(url).catch(() => undefined); },
     mcpPermission: { request: (input) => sandbox.request({ ...input, workspace: input.cwd }) },
     browserReplPermission: { request: (input) => sandbox.request({ ...input, workspace: input.cwd }) },
+    memoryPermission: { request: (input) => sandbox.request({ ...input, workspace: input.workspace ?? input.cwd }) },
     cwd: fallbackCwd,
     isWorkspaceCwd: (cwd) => cwd !== fallbackCwd || workspaceManager.getState().recents.some(recent => recent.path === cwd),
     agentDir: home,
@@ -247,8 +262,12 @@ async function start(): Promise<void> {
     // 激活会话变化时让工作区跟随,保证输入区与仓库卡片显示的目录即会话目录。
     onActiveCwd: (cwd, hasWorkspace) => void project?.syncConversationWorkspace(cwd, hasWorkspace),
   });
-  const recipeWorkspaces = () => [...new Set([...workspaceManager.getState().recents.map(r => r.path),
-    ...runtime.listConversations().filter(c => c.hasWorkspace !== false).map(c => c.cwd)])];
+  // 已登记工作区：当前选择、最近使用和已有会话的工作目录，供配方与记忆管理共用。
+  const registeredWorkspaces = () => [...new Set([
+    workspaceManager.getState().current,
+    ...workspaceManager.getState().recents.map(r => r.path),
+    ...runtime.listConversations().filter(c => c.hasWorkspace !== false).map(c => c.cwd),
+  ].filter((path): path is string => typeof path === "string" && path.length > 0))];
   const recipes = new TaskRecipeService(join(home, "task-recipes.json"), {
     resolveExecution: draft => runtime.resolveRecipeExecution(draft, draft.sandboxModeOverride ?? sandbox.getMode()),
     create: run => runtime.createRecipeConversation(run), submit: (run, stage) => runtime.submitRecipe(run, stage),
@@ -265,7 +284,7 @@ async function start(): Promise<void> {
       if (!result.ok) throw new Error(result.message);
     },
     trustedSnapshot: recipe => scheduler.list().tasks.some(task => JSON.stringify(task.recipeBinding?.recipeSnapshot) === JSON.stringify(recipe)),
-    workspaces: recipeWorkspaces, runningWorkspaces: () => runtime.listConversations().filter(c => c.status === "streaming" || runtime.getAgents(c.id).some(a => a.kind !== "root" && a.status === "running")).map(c => c.cwd),
+    workspaces: registeredWorkspaces, runningWorkspaces: () => runtime.listConversations().filter(c => c.status === "streaming" || runtime.getAgents(c.id).some(a => a.kind !== "root" && a.status === "running")).map(c => c.cwd),
   });
   recipes.init(); taskRecipes = recipes;
   if (!recipes.list().error) {
@@ -283,7 +302,7 @@ async function start(): Promise<void> {
     if (event.type === "request" && event.request.conversationId) recipes.waiting(event.request.conversationId, event.request.id, true);
     else if (event.type === "resolved") recipes.waiting("", event.id, false);
   });
-  taskRecipeHost = new TaskRecipeHost(recipes, recipeWorkspaces, runtime); taskRecipeHost.register();
+  taskRecipeHost = new TaskRecipeHost(recipes, registeredWorkspaces, runtime); taskRecipeHost.register();
   // 「帮我批准」模式下由当前对话选择的模型判断操作风险。
   sandbox.setRiskEvaluator((input) => runtime.evaluateSandboxRisk(input));
 
@@ -310,6 +329,8 @@ async function start(): Promise<void> {
   scheduledTaskHost.register();
   mcpHost = new McpHost(runtime, () => workspaceManager.getState().current ?? fallbackCwd);
   mcpHost.register();
+  memoryHost = new MemoryHost(runtime, { workspaces: registeredWorkspaces });
+  memoryHost.register();
   terminals = new TerminalHost(() => workspaceManager.getState().current ?? fallbackCwd);
   terminals.register();
   registerOpenTargetIpc();
@@ -359,6 +380,8 @@ app.on("before-quit", (event) => {
   scheduledTaskHost = null;
   mcpHost?.dispose();
   mcpHost = null;
+  memoryHost?.dispose();
+  memoryHost = null;
   const closing = host?.dispose();
   browserRepl?.dispose();
   browserRepl = null;

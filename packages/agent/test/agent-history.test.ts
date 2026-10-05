@@ -18,7 +18,7 @@ function agent(overrides: Partial<StoredAgent> = {}): StoredAgent {
 
 describe("子代理历史恢复", () => {
   it("真实 SDK 执行 spawn_agent 和 read 后，退出重启能恢复思考与完整工具正文", { timeout: 20_000 }, async () => {
-    const dir = await mkdtemp(join(tmpdir(), "vela-agent-sdk-history-"));
+    const dir = await mkdtemp(join(tmpdir(), "vela-harness-sdk-history-"));
     const runtimes: AgentRuntime[] = [];
     const failures: Error[] = [];
     const server = createServer(async (request, response) => {
@@ -97,7 +97,7 @@ describe("子代理历史恢复", () => {
   });
 
   it("新进程在启动模型前即可读取完整历史，激活对话后仍保留嵌套代理与停止状态", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "vela-agent-history-"));
+    const dir = await mkdtemp(join(tmpdir(), "vela-harness-history-"));
     let runtime: AgentRuntime | null = null;
     let restarted: AgentRuntime | null = null;
     try {
@@ -109,7 +109,7 @@ describe("子代理历史恢复", () => {
         { type: "toolCall", id: "read-1", name: "read", arguments: { path: "package.json" } },
       ], timestamp: 2 } as never);
       child.appendMessage({ role: "toolResult", toolCallId: "read-1", toolName: "read",
-        content: [{ type: "text", text: '{"name":"vela-agent"}' }], isError: false, timestamp: 3 } as never);
+        content: [{ type: "text", text: '{"name":"vela-harness"}' }], isError: false, timestamp: 3 } as never);
       child.appendMessage({ role: "assistant", content: [{ type: "text", text: "检查完成" }], timestamp: 4 } as never);
       const store = new ConversationStore(join(dir, "conversations.json"));
       store.put({ id: root.getSessionId(), cwd: dir, title: "历史对话", createdAt: 1, updatedAt: 2,
@@ -128,7 +128,7 @@ describe("子代理历史恢复", () => {
       const transcript = runtime.getAgentMessages(root.getSessionId(), "child");
       assert.equal(transcript[0]?.text, "查 package.json");
       assert.equal(transcript[1]?.thinking, "先读取文件");
-      assert.equal(transcript[1]?.tools[0]?.activity.body, '{"name":"vela-agent"}');
+      assert.equal(transcript[1]?.tools[0]?.activity.body, '{"name":"vela-harness"}');
       assert.equal(transcript.at(-1)?.text, "检查完成");
       assert.equal(runtime.getAgentMessages(root.getSessionId(), "unknown").length, 0);
 

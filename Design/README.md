@@ -1,4 +1,4 @@
-# Vela Agent — Native macOS Desktop UI (Codex Inspired)
+# VelaHarness — Native macOS Desktop UI (Codex Inspired)
 
 已根据提供的参考截图全面重构：采用 **左侧半透明冰蓝毛玻璃**、**大圆角**、**超柔和弥散阴影** 以及 **全站无描边（Strict Borderless）** 的现代原生 macOS 桌面设计语言。
 
@@ -55,4 +55,4 @@
 * **`Cmd+K`**：快速聚焦搜索
 * **`Enter`**：在底部大圆角输入框内发送消息并模拟 Agent 思考
 
-本地双击直接打开体验：[Design/index.html](file:///Users/chenkaigao/Documents/Program/VelaAgent/Design/index.html)
+本地双击直接打开体验：[Design/index.html](./index.html)

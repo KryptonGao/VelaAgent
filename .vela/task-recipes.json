@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "recipes": [
     {
-      "name": "发布 VelaAgent 新版本 Release",
-      "description": "改版本号为 x.x.x(.x)，打包 .dmg 和 .app，写 x.x.x(.x) 的 Release Notes（/Users/chenkaigao/Documents/Program/VelaAgent/RELEASE_NOTES.md），Commit，Push 所有更改，发布 Release",
+      "name": "发布 VelaHarness 新版本 Release",
+      "description": "改版本号为 x.x.x(.x)，打包 .dmg 和 .app，写 x.x.x(.x) 的 Release Notes（RELEASE_NOTES.md），Commit，Push 所有更改，发布 Release",
       "tags": [],
       "defaultMode": "agent",
       "parameters": [],
-      "objectiveTemplate": "改版本号为 x.x.x(.x)，打包 .dmg 和 .app，写 x.x.x(.x) 的 Release Notes（/Users/chenkaigao/Documents/Program/VelaAgent/RELEASE_NOTES.md），Commit，Push 所有更改，发布 Release",
+      "objectiveTemplate": "改版本号为 x.x.x(.x)，打包 .dmg 和 .app，写 x.x.x(.x) 的 Release Notes（RELEASE_NOTES.md），Commit，Push 所有更改，发布 Release",
       "workflowTemplate": "已处理该报告唯一可执行项：\n\n- `packages/agent/package.json` 的 `test:mcp` 补入 `mcp-redaction.test.ts`（agent 定向 **71/71 通过**，此前 69）。\n- `apps/desktop/package.json` 的 `test:mcp` 补入 `mcp-tool-result.test.ts`（desktop 定向 **32/32 通过**，此前 27）。\n- 提交 `06fd10e test: include MCP redaction and tool-result tests in targeted runs` 已推送。\n\n关于「MCP/Scheduled Tasks/Plugins 的 Electron 冒烟未登记为 test-center fixture」：这些本来就是 `test:*` 脚本，test-center 按约定从脚本自动推导出 `mcp` / `scheduled-tasks` / `plugins` 功能分组（见 `test-center/README.md`），无需登记为浏览器 fixture；发布时它们已作为独立冒烟全部跑过并写入 Release Notes 的验证段。\n\n当前最终状态：`main` → `06fd10e`，tag `v0.1.6` → `6590680`，Release v0.1.6 与三个资产不变且已核验。",
-      "deliverableTemplate": "改版本号为 x.x.x(.x)，打包 .dmg 和 .app，写 x.x.x(.x) 的 Release Notes（/Users/chenkaigao/Documents/Program/VelaAgent/RELEASE_NOTES.md），Commit，Push 所有更改，发布 Release",
+      "deliverableTemplate": "改版本号为 x.x.x(.x)，打包 .dmg 和 .app，写 x.x.x(.x) 的 Release Notes（RELEASE_NOTES.md），Commit，Push 所有更改，发布 Release",
       "sourceReference": {
         "conversationId": "01a102b4-cbfd-745c-85bc-8c6fd1c1ba51",
         "messageId": "8cd96b8e-486f-4b27-b420-058b68397830"

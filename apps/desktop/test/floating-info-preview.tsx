@@ -20,7 +20,7 @@ const state: AppState = {
   activeConversationId: "fixture",
   conversations: [],
   session: {
-    id: "fixture", title: planFixture ? "Plan 展示与右侧面板" : "悬浮信息布局", status: "ready", cwd: "/workspace/VelaAgent",
+    id: "fixture", title: planFixture ? "Plan 展示与右侧面板" : "悬浮信息布局", status: "ready", cwd: "/workspace/VelaHarness",
     model: "Preview model", modelProvider: "preview", modelId: "preview", modelReady: true,
     thinkingLevel: "medium", thinkingLevels: ["off", "medium"], tools: ["read", "bash"], mode: planFixture ? "plan" : "agent",
     proposedPlan: planFixture ? plans[1]! : null, planRevisions: planFixture ? plans : [], executionPlan: null, goal: null, error: null,
@@ -36,7 +36,7 @@ const noopSubscription = () => () => {};
 const eventListeners = new Set<(event: AgentStreamEvent) => void>();
 const emit = (event: AgentStreamEvent) => { for (const listener of eventListeners) listener(event); };
 let branchName = "main";
-const gitSnapshot = () => ({ repo: { name: "VelaAgent", root: "/workspace/VelaAgent" }, branch: branchName,
+const gitSnapshot = () => ({ repo: { name: "VelaHarness", root: "/workspace/VelaHarness" }, branch: branchName,
   upstream: `origin/${branchName}`, files: [], addedLines: 0, deletedLines: 0 });
 window.vela = {
   platform: "darwin", setLocale: () => {},
@@ -53,7 +53,7 @@ window.vela = {
   getCatalog: async () => ({ models: [], providers: [] }),
   getAgentSettings: async () => ({ provider: null, modelId: null, thinkingLevel: "medium", newConversationSelection: "default", instructions: "" }),
   listSkills: async () => ({ skillsDir: "/workspace/skills", skills: [], diagnostics: [] }),
-  getWorkspaceState: async () => ({ current: "/workspace/VelaAgent", recents: [{ path: "/workspace/VelaAgent", name: "VelaAgent" }] }),
+  getWorkspaceState: async () => ({ current: "/workspace/VelaHarness", recents: [{ path: "/workspace/VelaHarness", name: "VelaHarness" }] }),
   getEnvironment: async () => null,
   listEnvironments: async () => [],
   getGitStatus: async () => params.has("nogit") ? { ...gitSnapshot(), repo: null } : gitSnapshot(),

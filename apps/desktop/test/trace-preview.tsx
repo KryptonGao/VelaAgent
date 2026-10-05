@@ -217,7 +217,7 @@ function Fixture() {
         <p style={{ marginTop: 32, color: "var(--text-muted)" }}>
           工作区 / Workspace
         </p>
-        <p>⌑ VelaAgent</p>
+        <p>⌑ VelaHarness</p>
         <p style={{ marginTop: 28, color: "var(--text-muted)" }}>
           会话 / Conversations
         </p>
