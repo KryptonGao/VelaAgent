@@ -22,6 +22,8 @@
 | [built-in-mcp-plugins.md](./built-in-mcp-plugins.md) | 使用者与开发者 | Notion 内置插件、通用 OAuth、安全凭证、插件扩展与验证边界。 |
 | [scheduled-tasks.md](./scheduled-tasks.md) | 使用者与开发者 | 定时任务的时间格式、执行与权限、错过与并发策略、存储与恢复、实现与验证。 |
 | [requirements/version-control.md](./requirements/version-control.md) | 产品与开发者 | 版本控制需求：Git/GH CLI 分工、Commit 与同步、提交关系图、PR、AI 文案辅助及验收标准；P0–P2 已实现，P3 尚未实现。 |
+| [requirements/pull-requests.md](./requirements/pull-requests.md) | 产品与开发者 | Pull Request 中心方案：仅经 GH CLI 访问 GitHub，跨仓库关联查询、分页去重、概览与 diff、同步及验收；第一期读取闭环已实现，AI 与远程写入留待后续。 |
+| [pr-inbox.md](./pr-inbox.md) | 使用者与开发者 | Pull Request 中心的已实现能力、gh/IPC/缓存结构、针对性验证和第一期边界。 |
 | [task-recipes.md](./task-recipes.md) | 使用者与开发者 | 任务配方 P0/P1/P2 的使用、结构化阶段、分支审批与重试、团队共享、效果比较，以及验证和边界。 |
 | [requirements/task-recipes.md](./requirements/task-recipes.md) | 产品与开发者 | 任务配方需求基线：参数化模板、预览、新对话启动、版本快照与使用记录；P0/P1/P2 已实现。 |
 | [plan-mode.md](./plan-mode.md) | 使用者 | Plan 模式的工作方式：规划流程、Plan Document、revision、批准与执行、只读限制和常见问题。 |

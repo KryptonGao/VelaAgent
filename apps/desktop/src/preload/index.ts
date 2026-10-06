@@ -1,6 +1,7 @@
 import { BrowserIpc, type BrowserWindowState } from "../../../../packages/shared/src/browser";
 import {
   IpcChannel,
+  PrInboxIpc,
   TaskRecipesIpc,
   ScheduledTasksIpc,
   type ScheduledTasksState,
@@ -136,6 +137,17 @@ import {
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from "electron";
 
 const api: VelaApi = {
+  prInbox: {
+    list: (query, options) => ipcRenderer.invoke(PrInboxIpc.list, query, options),
+    enrich: (targets, options) => ipcRenderer.invoke(PrInboxIpc.enrich, targets, options),
+    detail: (target, options) => ipcRenderer.invoke(PrInboxIpc.detail, target, options),
+    activity: (target, kind, cursor, headSha, threadId, options) => ipcRenderer.invoke(PrInboxIpc.activity, target, kind, cursor, headSha, threadId, options),
+    files: (target, page, headSha, baseSha, options) => ipcRenderer.invoke(PrInboxIpc.files, target, page, headSha, baseSha, options),
+    comment: (target, body, options) => ipcRenderer.invoke(PrInboxIpc.comment, target, body, options),
+    cancel: id => ipcRenderer.invoke(PrInboxIpc.cancel, id),
+    open: (target, url) => ipcRenderer.invoke(PrInboxIpc.open, target, url),
+    openTerminal: () => ipcRenderer.invoke(PrInboxIpc.terminal),
+  },
   taskRecipes: {
     list: locale => ipcRenderer.invoke(TaskRecipesIpc.list, locale),
     save: (input, id, revision, workspace) => ipcRenderer.invoke(TaskRecipesIpc.save, input, id, revision, workspace),

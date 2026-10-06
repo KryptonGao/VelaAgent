@@ -31,7 +31,7 @@ export function DiffPane({
   return (
     <pre className="changes-diff-body diff-content-enter">
       {parsed.rows.map((row, index) => (
-        <DiffLine key={index} row={row} highlight={highlight} />
+        <DiffLine key={index} row={row} highlight={highlight} showLineNumbers={showLineNumbers} />
       ))}
     </pre>
   );
@@ -87,13 +87,14 @@ function SplitCell({
   );
 }
 
-function DiffLine({ row, highlight }: { row: DiffRow; highlight: HighlightedDiff | null }) {
+function DiffLine({ row, highlight, showLineNumbers }: { row: DiffRow; highlight: HighlightedDiff | null; showLineNumbers: boolean }) {
   if (row.kind !== "add" && row.kind !== "del" && row.kind !== "ctx") {
     return <div className={`diff-line ${row.kind}`}>{rowText(row)}</div>;
   }
   const tokens = rowTokens(row, highlight);
   return (
     <div className={`diff-line ${row.kind}`}>
+      {showLineNumbers && <><span className="diff-line-number" aria-hidden="true">{row.oldLineNumber ?? ''}</span><span className="diff-line-number" aria-hidden="true">{row.newLineNumber ?? ''}</span></>}
       <span className="diff-sign">{row.sign}</span>
       {tokens
         ? tokens.map((token, index) => (

@@ -12,6 +12,7 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --experimental-transform-types --test test/sandbox-permission-manager.test.ts test/git-service.test.ts test/git-p1.test.ts test/git-p2.test.ts test/pr-p2.test.ts test/operation-log.test.ts"
+    "test": "node --experimental-transform-types --test test/sandbox-permission-manager.test.ts test/git-service.test.ts test/git-p1.test.ts test/git-p2.test.ts test/pr-p2.test.ts test/operation-log.test.ts",
+    "test:pr-inbox": "node --experimental-transform-types --test test/gh-run.test.ts test/pr-inbox.test.ts"
   }
 }

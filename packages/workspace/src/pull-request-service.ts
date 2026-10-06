@@ -1938,7 +1938,7 @@ function isReviewOutdated(commitSha: string | null, headSha: string | null): boo
 }
 
 /** gh 的 reviews 数组单项 → PrReviewSummary;与当前 head 不一致即为过期。 */
-function toReviewSummary(value: unknown, headSha: string | null): PrReviewSummary | null {
+export function toReviewSummary(value: unknown, headSha: string | null): PrReviewSummary | null {
   if (!isRecord(value)) return null;
   const rawState = readText(value, "state");
   const commitSha = readCommitOid(value.commit) ?? readCommitOid(value.originalCommit);
@@ -1970,7 +1970,7 @@ function readCommitOid(value: unknown): string | null {
  * PR-06:审阅线程映射;comments 按查询顺序平铺,同时用 replyTo 还原
  * 一级回复关系(缺少 replyTo 时把首条之后的评论视为回复)。
  */
-function toReviewThread(value: unknown): PrReviewThread | null {
+export function toReviewThread(value: unknown): PrReviewThread | null {
   if (!isRecord(value)) return null;
   const id = readText(value, "id");
   if (!id) return null;
@@ -2027,7 +2027,7 @@ function readCommentParentId(record: Record<string, unknown>): string | null {
 }
 
 /** PR-06:评论节点 → PrReviewComment;代码版本以 originalCommit 为准。 */
-function toReviewComment(value: unknown): PrReviewComment {
+export function toReviewComment(value: unknown): PrReviewComment {
   const record = isRecord(value) ? value : {};
   const reviewState = isRecord(record.pullRequestReview)
     ? readText(record.pullRequestReview, "state")
@@ -2264,7 +2264,7 @@ function countChecks(value: unknown): { failing: number; pending: number } {
 }
 
 /** gh 的 state/isDraft → PrState;MERGED/CLOSED 优先于 draft。 */
-function readPrState(value: Record<string, unknown>): PrState {
+export function readPrState(value: Record<string, unknown>): PrState {
   const rawState = (readText(value, "state") ?? "OPEN").toUpperCase();
   if (rawState === "MERGED") return "merged";
   if (rawState === "CLOSED") return "closed";
@@ -2272,7 +2272,7 @@ function readPrState(value: Record<string, unknown>): PrState {
 }
 
 /** gh 的 bucket/state → 检查单项状态;取消与跳过单独区分。 */
-function mapCheckState(bucket: string | null, state: string | null): PrCheckState {
+export function mapCheckState(bucket: string | null, state: string | null): PrCheckState {
   const b = (bucket ?? "").toLowerCase();
   const s = (state ?? "").toLowerCase();
   if (b === "pass" || s === "success" || s === "passing" || s === "pass") return "passing";

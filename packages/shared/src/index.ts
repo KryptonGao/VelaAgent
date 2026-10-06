@@ -1,3 +1,4 @@
+export * from "./pr-inbox";
 export * from "./mcp";
 export * from "./memory";
 export * from "./scheduled-tasks";
@@ -2512,6 +2513,7 @@ export interface ConversationSyncResult {
 }
 
 export interface VelaApi extends McpApi, PluginApi {
+  prInbox: import("./pr-inbox").PrInboxApi;
   /** 设置页的长期记忆管理入口；Agent 工具由运行时单独提供。 */
   memory: MemoryApi;
   /** 仅开发版提供。 */

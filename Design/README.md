@@ -56,3 +56,5 @@
 * **`Enter`**：在底部大圆角输入框内发送消息并模拟 Agent 思考
 
 本地双击直接打开体验：[Design/index.html](./index.html)
+
+Pull Request 独立设计稿：[pull-requests-preview.html](./pull-requests-preview.html)，支持关联关系、仓库、状态与关键词筛选，以及概览 / 变更双视图。使用本地模拟数据，设计与验证记录见 [pull-requests/README.md](./pull-requests/README.md)。

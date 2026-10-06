@@ -18,8 +18,11 @@ import {
 } from "./conversation-activity";
 import { ConversationSearchDialog } from "./ConversationSearchDialog";
 import { ClockIcon } from "./icons";
+import { useSidebarItems } from "../hooks/useSidebarItems";
 
 interface SidebarProps {
+  onOpenPrInbox: () => void;
+  prInboxOpen: boolean;
   onOpenRecipes: () => void;
   recipesOpen: boolean;
   onOpenScheduledTasks: () => void;
@@ -41,6 +44,8 @@ interface SidebarProps {
 }
 
 export function Sidebar({
+  onOpenPrInbox,
+  prInboxOpen,
   onOpenRecipes,
   recipesOpen,
   onOpenScheduledTasks,
@@ -61,6 +66,7 @@ export function Sidebar({
   onRenameConversation,
 }: SidebarProps) {
   const [searchOpen, setSearchOpen] = useState(false);
+  const items = useSidebarItems();
   const [view, setView] = useStoredState<SidebarView>("vela.sidebarView", "activity", isSidebarView);
   const [priorityConversations, setPriorityConversations] = useStoredState<Record<string, boolean>>(
     "vela.priorityConversations", {}, isBooleanRecord,
@@ -197,20 +203,23 @@ export function Sidebar({
         </div>
       </div>
 
-      <div className="sidebar-quick-actions">
-        <button className="quick-action-item" type="button" aria-current={scheduledTasksOpen ? "page" : undefined} onClick={onOpenScheduledTasks}>
+      {Object.values(items).some(Boolean) ? <div className="sidebar-quick-actions">
+        {items.prInbox ? <button className="quick-action-item" type="button" aria-current={prInboxOpen ? "page" : undefined} onClick={onOpenPrInbox}>
+          <span className="quick-action-item-left"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="6" cy="5" r="3"/><circle cx="6" cy="19" r="3"/><circle cx="18" cy="19" r="3"/><path d="M6 8v8M18 16V9a4 4 0 0 0-4-4h-2m2-2-2 2 2 2"/></svg><span>Pull Request</span></span>
+        </button> : null}
+        {items.scheduledTasks ? <button className="quick-action-item" type="button" aria-current={scheduledTasksOpen ? "page" : undefined} onClick={onOpenScheduledTasks}>
           <span className="quick-action-item-left"><ClockIcon /><span>{tr("定时任务", "Scheduled Tasks")}</span></span>
-        </button>
-        <button className="quick-action-item" type="button" onClick={() => onNewChat()}>
+        </button> : null}
+        {items.newChat ? <button className="quick-action-item" type="button" onClick={() => onNewChat()}>
           <span className="quick-action-item-left">
             <ComposeIcon />
             <span>{tr("新对话", "New chat")}</span>
           </span>
-        </button>
-        <button className="quick-action-item" type="button" aria-current={recipesOpen ? "page" : undefined} onClick={onOpenRecipes}>
+        </button> : null}
+        {items.recipes ? <button className="quick-action-item" type="button" aria-current={recipesOpen ? "page" : undefined} onClick={onOpenRecipes}>
           <span className="quick-action-item-left"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></svg><span>{tr("任务配方", "Task Recipes")}</span></span>
-        </button>
-      </div>
+        </button> : null}
+      </div> : null}
 
       <div ref={scrollAreaRef} className="sidebar-scroll-area">
         {view === "activity" ? <div className="sidebar-activity-view">

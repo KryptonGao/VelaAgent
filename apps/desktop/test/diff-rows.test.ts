@@ -107,3 +107,15 @@ describe("splitDiffRows", () => {
     assert.equal(context?.left?.text, "same");
   });
 });
+
+
+describe("remote PR hunk coordinates", () => {
+  it("keeps original line numbers across hunk gaps and headers inside changed text", () => {
+    const diff = "--- a/file.ts\n+++ b/file.ts\n@@ -12,2 +20,2 @@\n--- old code\n+++ new code\n same\n@@ -100 +110 @@\n-old\n+new\n";
+    const rows = parseUnifiedDiff(diff).rows;
+    assert.deepEqual(rows.filter(r => r.kind === 'del').map(r => [r.text, r.oldLineNumber]), [['-- old code', 12], ['old', 100]]);
+    assert.deepEqual(rows.filter(r => r.kind === 'add').map(r => [r.text, r.newLineNumber]), [['++ new code', 20], ['new', 110]]);
+    const ctx = rows.find(r => r.kind === 'ctx'); assert.equal(ctx.oldLineNumber, 13); assert.equal(ctx.newLineNumber, 21);
+    const split = splitDiffRows(rows); assert.equal(split.find(r => r.left?.kind === 'del').right.newLineNumber, 20);
+  });
+});

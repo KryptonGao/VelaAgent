@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VelaHarness — 在本地倉庫工作的桌面 AI 編程助手</title>
+<meta name="description" content="VelaHarness 是在本地程式碼倉庫中工作的桌面 AI 編程助手：緊湊模式、Codex 同款 SubAgents、DeepSeek Harness 同款軌跡介面。">
+<link rel="icon" href="assets/icon-full.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="bg-orbs" aria-hidden="true"><i></i><i></i><i></i></div>
+
+<!-- ============ NAV ============ -->
+<header class="nav" id="nav">
+  <div class="wrap nav-in">
+    <a class="brand" href="#top" aria-label="VelaHarness">
+      <img src="assets/mark.png" alt="" width="34" height="27">
+      <span>Vela<b>Harness</b></span>
+    </a>
+    <nav class="nav-links" aria-label="主選單">
+      <a href="#pillars" data-en="Highlights">特色</a>
+      <a href="#workflow" data-en="Workflow">工作流程</a>
+      <a href="#capabilities" data-en="Capabilities">能力</a>
+      <a href="#trust" data-en="Local &amp; safe">本地與安全</a>
+      <a href="#start" data-en="Quick start">快速開始</a>
+    </nav>
+    <div class="nav-right">
+      <button class="lang" id="lang" type="button" aria-label="切換語言 / Switch language">
+        <span data-l="zh">繁</span><span data-l="en">EN</span>
+      </button>
+      <a class="btn btn-sm btn-dark" href="https://github.com/KryptonGao/VelaHarness" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+
+<!-- ============ HERO ============ -->
+<section class="hero">
+  <div class="wrap hero-in">
+    <div class="pill reveal" data-en="<i class='dot'></i>1.0 is here · Project &amp; global memory">
+      <i class="dot"></i>1.0 正式版 · 新增專案與全域記憶
+    </div>
+    <h1 class="reveal d1">
+      <span data-en="The desktop AI coding assistant">在本地倉庫裡工作的</span><br>
+      <em data-en="that works in your repo.">桌面 AI 編程助手</em>
+    </h1>
+    <p class="lead reveal d2" data-en="VelaHarness understands your project, splits up the work, edits and runs your code. Watch progress in a compact chat, track subagents in a dedicated panel, and inspect every step in the execution trace.">
+      VelaHarness 理解你的專案、拆分任務、修改並執行程式碼。用緊湊對話看進度，用獨立面板追蹤子代理，用執行軌跡檢查每一步。
+    </p>
+    <div class="cta reveal d3">
+      <a class="btn btn-primary" href="#start" data-en="Get started">開始使用</a>
+      <a class="btn btn-ghost" href="#pillars" data-en="See what's inside">看看有什麼</a>
+    </div>
+    <ul class="badges reveal d3" aria-label="環境">
+      <li>macOS</li><li>Electron 44</li><li>React 19</li><li>TypeScript</li><li>Apache-2.0</li>
+    </ul>
+
+    <div class="stage reveal d4" id="stage">
+      <div class="glow" aria-hidden="true"></div>
+      <img class="shot" src="assets/desktop.png" width="1800" height="1200"
+           alt="VelaHarness 桌面應用：左側會話列表、中間緊湊對話、右側檔案預覽。"
+           data-en-alt="VelaHarness desktop app: conversation list, compact chat, and file preview.">
+      <div class="chip c1"><i class="ic ic-green"></i><span data-en="3 subagents in parallel">3 個子代理並行</span></div>
+      <div class="chip c2"><i class="ic ic-blue"></i><span data-en="Cache hit 98%">快取命中 98%</span></div>
+      <div class="chip c3"><i class="ic ic-amber"></i><span data-en="Edit +2 −1 ✓">Edit +2 −1 ✓</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ STATS ============ -->
+<section class="stats">
+  <div class="wrap stats-in">
+    <div class="stat reveal"><b data-count="3">3</b><span data-en="task modes<br>Agent · Plan · Goal">任務模式<br>Agent · Plan · Goal</span></div>
+    <div class="stat reveal d1"><b data-count="3">3</b><span data-en="permission tiers<br>from ask to full access">權限檔位<br>從逐次詢問到完全存取</span></div>
+    <div class="stat reveal d2"><b data-count="1063">1063</b><span data-en="Node tests passed<br>in the 1.0.0 release">項 Node 測試通過<br>1.0.0 發佈驗證</span></div>
+    <div class="stat reveal d3"><b>~/.vela</b><span data-en="data stays on<br>your machine">資料存放在<br>你的本機</span></div>
+  </div>
+</section>
+
+<!-- ============ PILLARS ============ -->
+<section class="sec" id="pillars">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <p class="eyebrow" data-en="Three signature experiences">三大招牌體驗</p>
+      <h2 data-en="See the result first. Dig into the process only when you want to." >先看結果，想看過程時再展開</h2>
+    </div>
+
+    <!-- compact -->
+    <article class="feat reveal">
+      <div class="feat-text">
+        <span class="num">01</span>
+        <h3 data-en="Compact mode">緊湊模式</h3>
+        <p class="tagline" data-en="Fold tool calls into process lines so the task itself fills your view.">把工具呼叫收成過程行，讓任務內容佔據主要視野。</p>
+        <ul class="ticks">
+          <li data-en="Reading files, editing code and running commands show as single lines; consecutive calls merge into an expandable summary.">讀檔案、改程式碼、執行命令以單行呈現，連續呼叫自動合併為可展開的摘要。</li>
+          <li data-en="Click a filename to preview it on the right; expand an edit for the diff, a command for its output.">點檔名開右側預覽，展開改動看 diff，展開命令看輸出。</li>
+          <li data-en="When a turn finishes, collapse the whole process and keep only the conclusion.">完成後可收起整輪過程，只保留結論。</li>
+          <li data-en="Prefer cards? Switch in Settings → Appearance → Tool display.">偏好卡片？可在「設定 → 外觀」切換工具顯示。</li>
+        </ul>
+      </div>
+      <figure class="feat-shot">
+        <img src="assets/compact.jpg" loading="lazy" width="1800" height="1178"
+             alt="緊湊模式：登入重新導向任務中的檔案查閱、三處修改與測試命令以可展開的過程行呈現。"
+             data-en-alt="Compact mode: file reads, three edits and a test command shown as expandable process lines.">
+      </figure>
+    </article>
+
+    <!-- subagents -->
+    <article class="feat flip reveal">
+      <div class="feat-text">
+        <span class="num">02</span>
+        <h3 data-en="Codex-style SubAgents">Codex 同款 SubAgents</h3>
+        <p class="tagline" data-en="The main agent coordinates; subagents read, build and review in parallel.">主代理統籌，子代理並行查閱、實作與審閱。</p>
+        <ul class="ticks">
+          <li data-en="Split work with <code>spawn_agent</code>, exchange findings with <code>send_message</code>, keep going with <code>followup_task</code>.">用 <code>spawn_agent</code> 拆分任務、<code>send_message</code> 交換發現、<code>followup_task</code> 繼續派工。</li>
+          <li data-en="Subagents can spawn their own children, forming a path-addressed agent tree like <code>/root/auth</code>.">子代理還能建立自己的子任務，形成 <code>/root/auth</code> 這樣按路徑組織的代理樹。</li>
+          <li data-en="Click an agent path to see its messages, thinking, tool calls and result in a separate right-hand panel with tabs.">點代理路徑，在右側獨立面板檢視其訊息、思考、工具呼叫與結果，並以分頁切換。</li>
+          <li data-en="<code>explore</code> is read-only; <code>general</code> uses the session's permissions. Subagent sessions persist across restarts."><code>explore</code> 唯讀查閱；<code>general</code> 沿用目前會話權限。子代理會話會持久化，重開聊天可恢復。</li>
+        </ul>
+      </div>
+      <figure class="feat-shot">
+        <img src="assets/subagents.jpg" loading="lazy" width="1800" height="1200"
+             alt="SubAgents：主代理並行分派 routing、auth、review，右側分頁展示 auth 子代理的執行流。"
+             data-en-alt="SubAgents: the main agent dispatches routing, auth and review in parallel; the right panel shows the auth subagent's run.">
+      </figure>
+    </article>
+
+    <!-- trace -->
+    <article class="feat reveal">
+      <div class="feat-text">
+        <span class="num">03</span>
+        <h3 data-en="DeepSeek Harness-style trace">DeepSeek Harness 同款軌跡介面</h3>
+        <p class="tagline" data-en="Switch from chat to trace and inspect how the agent reached its answer, node by node.">從對話切到軌跡，逐節點檢查 Agent 如何得出結果。</p>
+        <ul class="ticks">
+          <li data-en="A timeline linked to an event list: thinking, tool calls, returns and assistant output.">時間軸與事件列表聯動，展示思考、工具呼叫、回傳與助手輸出。</li>
+          <li data-en="View the timeline by duration, turn or model call; select a node to inspect args, result, schema and timing.">可按時長、輪次或模型呼叫檢視；選中節點即看參數、結果、Schema 與計時。</li>
+          <li data-en="Per-request metrics: time to first token, generation time, token usage and cache hit rate.">請求指標涵蓋首 Token 延遲、生成耗時、Token 用量與快取命中率。</li>
+          <li data-en="The initial system prompt and tool definitions are viewable too.">初始系統提示詞與工具定義同樣可查看。</li>
+        </ul>
+      </div>
+      <figure class="feat-shot">
+        <img src="assets/trace.jpg" loading="lazy" width="1800" height="1200"
+             alt="軌跡介面：上方為時間軸，中間為思考與工具事件，右側為選中 bash 呼叫的測試回傳，底部為統計。"
+             data-en-alt="Trace view: timeline on top, thinking and tool events in the middle, a selected bash call's output on the right, stats at the bottom.">
+      </figure>
+    </article>
+
+    <p class="fine reveal" data-en="Screenshots are rendered from VelaHarness's real UI components with sample data. The atlas-web project, conversations, test results, timings and token metrics are for illustration only, not real task records or benchmarks. “Style” describes interaction and layout, not affiliation.">
+      截圖由 VelaHarness 的真實介面元件搭配示例資料渲染。atlas-web 專案、對話、測試結果、耗時與 Token 指標僅作展示，不代表真實任務紀錄或效能基準；「同款」描述的是互動體驗與介面組織方式。
+    </p>
+  </div>
+</section>
+
+<!-- ============ WORKFLOW ============ -->
+<section class="sec sec-tint" id="workflow">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <p class="eyebrow" data-en="Workflow">工作流程</p>
+      <h2 data-en="Three ways to work. Pick the one that fits the task.">三種工作方式，依任務選擇</h2>
+    </div>
+
+    <div class="modes reveal" role="tablist" aria-label="任務模式">
+      <button role="tab" class="mode-tab on" data-mode="agent" aria-selected="true">Agent</button>
+      <button role="tab" class="mode-tab" data-mode="plan" aria-selected="false">Plan</button>
+      <button role="tab" class="mode-tab" data-mode="goal" aria-selected="false">Goal</button>
+    </div>
+
+    <div class="mode-panels reveal d1">
+      <div class="mode-panel on" data-panel="agent">
+        <div class="mode-copy">
+          <h3 data-en="Read, write and run — day to day">日常讀寫與執行</h3>
+          <p data-en="The default mode. Read the project, edit files, run commands, and delegate to subagents. With an approved plan, it can track progress with <code>update_plan</code>.">預設模式。閱讀專案、修改檔案、執行命令，並可把工作委派給子代理；有已批准的計畫時，會用 <code>update_plan</code> 追蹤進度。</p>
+          <div class="tools"><code>read</code><code>bash</code><code>edit</code><code>write</code><code>spawn_agent</code><code>ask_user_question</code></div>
+        </div>
+        <div class="term" aria-hidden="true">
+          <div class="term-bar"><i></i><i></i><i></i><span>Agent · atlas-web</span></div>
+          <pre><span class="c">›</span> 修復登入後丟失目標頁面的問題
+<span class="dim">思考  沿登入回呼與路由守衛定位 redirect…</span>
+<span class="blue">Read</span>  src/auth/callback.ts
+<span class="amb">Edit</span>  src/auth/redirect.ts   <span class="grn">+2</span> <span class="red">−1</span>
+<span class="blue">Bash</span>  pnpm test -- redirect.test.ts
+<span class="grn">✓ 8 passed</span>  1.42s</pre>
+        </div>
+      </div>
+
+      <div class="mode-panel" data-panel="plan">
+        <div class="mode-copy">
+          <h3 data-en="Research first, change nothing">先調研，不動任何檔案</h3>
+          <p data-en="Plan is read-only: no edit tools, and <code>bash</code> allows only read-only commands. It asks only when a product choice can't be inferred from code, then produces a Plan Document you approve before implementation.">Plan 模式唯讀：沒有寫入工具，<code>bash</code> 只放行唯讀命令。只有無法從程式碼推斷的產品選擇才會提問，最後輸出一份 Plan Document，批准後再實作。</p>
+          <div class="tools"><code>read</code><code>bash (read-only)</code><code>ask_user_question</code><code>memory_read</code></div>
+        </div>
+        <div class="term" aria-hidden="true">
+          <div class="term-bar"><i></i><i></i><i></i><span>Plan · read-only</span></div>
+          <pre><span class="c">›</span> 為專案列表加入搜尋
+<span class="blue">Read</span>  src/list/ProjectList.tsx
+<span class="blue">Read</span>  src/api/projects.ts
+<span class="dim">需要確認：搜尋是前端篩選還是走 API？</span>
+<span class="pur">Plan Document</span>  revision 1
+  ├ 資料流與介面變更
+  ├ 實作步驟
+  └ <span class="grn">等待你的批准</span></pre>
+        </div>
+      </div>
+
+      <div class="mode-panel" data-panel="goal">
+        <div class="mode-copy">
+          <h3 data-en="Keep going until it's done">圍繞目標持續推進</h3>
+          <p data-en="For multi-step objectives. Goal mode can write files and run commands, and records validation results with <code>record_goal_validation</code> so progress is checked against the goal, not just reported.">適合多步目標。Goal 模式可寫檔、執行命令，並用 <code>record_goal_validation</code> 記錄驗證結果，讓進度對照目標檢查，而不只是口頭回報。</p>
+          <div class="tools"><code>read</code><code>bash</code><code>edit</code><code>write</code><code>update_goal</code><code>record_goal_validation</code></div>
+        </div>
+        <div class="term" aria-hidden="true">
+          <div class="term-bar"><i></i><i></i><i></i><span>Goal · migrate-router</span></div>
+          <pre><span class="pur">Goal</span>  遷移路由到新版 API
+<span class="grn">✓</span> 盤點舊用法 (42 處)
+<span class="grn">✓</span> 逐模組改寫
+<span class="amb">◐</span> 驗證：型別檢查 + 單元測試
+<span class="dim">○ 清理相容層</span>
+<span class="dim">validation recorded · 1/2</span></pre>
+        </div>
+      </div>
+    </div>
+
+    <ol class="steps reveal">
+      <li><b>1</b><span data-en="Pick a local project or Git worktree">選擇本機專案或 Git worktree</span></li>
+      <li><b>2</b><span data-en="Choose a mode and describe the task">選擇模式，描述任務</span></li>
+      <li><b>3</b><span data-en="Follow compact chat, subagents and trace">用緊湊對話、子代理面板與軌跡跟進</span></li>
+      <li><b>4</b><span data-en="Review the Git diff, then accept or roll back">審閱 Git 差異，接受或回退</span></li>
+    </ol>
+  </div>
+</section>
+
+<!-- ============ CAPABILITIES ============ -->
+<section class="sec" id="capabilities">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <p class="eyebrow" data-en="More capabilities">更多工作能力</p>
+      <h2 data-en="Everything a daily driver needs, in one window.">日常主力需要的，都在同一個視窗裡</h2>
+    </div>
+
+    <div class="bento">
+      <article class="card span2 reveal">
+        <div class="card-ic">🧠</div>
+        <h3 data-en="Project &amp; global memory">專案記憶與全域記憶</h3>
+        <p data-en="Two plain Markdown files: cross-project preferences and this project's conventions and decisions. Loaded before every run; review, edit, clear or delete them in Settings → Memory.">兩份純 Markdown 檔：跨專案的個人偏好，與目前專案的慣例和決策。每次執行前自動載入，可在「設定 → 記憶」檢視、編輯、清空或刪除。</p>
+        <pre class="code"><span class="dim"># &lt;workspace&gt;/.vela/MEMORY.md</span>
+- 測試指令：<span class="blue">pnpm test:center</span>
+- 文件正文使用簡體中文
+- 決策：redirect 僅允許站內路徑</pre>
+      </article>
+
+      <article class="card reveal d1">
+        <div class="card-ic">🌿</div>
+        <h3 data-en="Local workspace &amp; worktree">本機工作區與 worktree</h3>
+        <p data-en="Work in your original checkout or in an isolated Git worktree on its own <code>vela/wt-*</code> branch.">在原工作區，或在獨立的 <code>vela/wt-*</code> 分支 worktree 中處理任務。</p>
+      </article>
+
+      <article class="card reveal">
+        <div class="card-ic">🔍</div>
+        <h3 data-en="Review &amp; workbench">審閱與工作面板</h3>
+        <p data-en="Git diff and staging state. Right-hand tabs host file preview, changes and an integrated terminal; <kbd>⌘T</kbd> opens a new tab.">檢視 Git 差異與暫存狀態；右側分頁承載檔案預覽、變更與整合終端機，<kbd>⌘T</kbd> 新增分頁。</p>
+      </article>
+
+      <article class="card reveal d1">
+        <div class="card-ic">🔌</div>
+        <h3 data-en="MCP servers">MCP 伺服器</h3>
+        <p data-en="Connect local or remote MCP tools with global or project config, on-demand discovery, project trust and read-only grants.">連接本機或遠端 MCP 工具；支援全域與專案設定、按需探索、專案信任與唯讀授權。</p>
+      </article>
+
+      <article class="card reveal d2">
+        <div class="card-ic">⏰</div>
+        <h3 data-en="Scheduled tasks">定時任務</h3>
+        <p data-en="Run once, daily, weekly or on a Cron schedule. Each run starts a new conversation in the bound workspace.">一次、每日、每週或 Cron 排程；每次執行都在綁定工作區的新對話中進行。</p>
+      </article>
+
+      <article class="card span2 reveal">
+        <div class="card-ic">📋</div>
+        <h3 data-en="Task recipes">任務配方</h3>
+        <p data-en="Save parameterised task templates. Fill in parameters, preview, then launch in a new conversation. Supports Agent / Plan, version snapshots, project libraries, import/export, Skill dependencies, schedule binding and isolated worktrees — plus structured stages, branching, approvals and team sharing.">儲存參數化任務模板，填入參數、預覽後在新對話中啟動。支援 Agent / Plan、版本快照、專案庫與匯入匯出、Skill 依賴、定時綁定與獨立 worktree，以及結構化階段、條件分支、審批與團隊共享。</p>
+        <div class="tools"><code>/fix-bug</code><code>/review-changes</code><code>/prepare-release</code></div>
+      </article>
+
+      <article class="card reveal">
+        <div class="card-ic">🌐</div>
+        <h3 data-en="Browser panel">瀏覽器面板</h3>
+        <p data-en="Open links in a panel tab, and let agents operate the same pages through Browser Use. Supports popups and passkeys.">連結可在面板分頁中開啟，Agent 能透過 Browser Use 操作同一批頁面；支援彈出視窗與 Passkey。</p>
+      </article>
+
+      <article class="card reveal d1">
+        <div class="card-ic">🧩</div>
+        <h3 data-en="Skills &amp; integrations">Skill 與整合</h3>
+        <p data-en="Drop a <code>SKILL.md</code> folder into <code>~/.vela/skills</code>. Connect built-in apps like Notion in one click; OAuth runs in your system browser.">把含 <code>SKILL.md</code> 的資料夾放進 <code>~/.vela/skills</code> 即可；Notion 等內建應用一鍵連接，OAuth 在系統瀏覽器完成。</p>
+      </article>
+
+      <article class="card span2 reveal d2">
+        <div class="card-ic">🎨</div>
+        <h3 data-en="Models, themes &amp; language">模型、主題與語言</h3>
+        <p data-en="Sign in to a provider, use an API key, or add a custom endpoint. Light / dark themes, Chinese and English UI.">登入模型提供方、填寫 API 金鑰或新增自訂介面；淺色／深色主題，中英文介面。</p>
+      </article>
+    </div>
+
+    <div class="shots-row reveal">
+      <figure><img src="assets/model-providers.jpg" loading="lazy" width="1800" height="1200" alt="模型與帳號設定" data-en-alt="Model and account settings"><figcaption data-en="Models &amp; accounts">模型與帳號</figcaption></figure>
+      <figure><img src="assets/themes.jpg" loading="lazy" width="1800" height="1200" alt="外觀設定：淺色與深色主題" data-en-alt="Appearance: light and dark themes"><figcaption data-en="Themes &amp; language">主題與語言</figcaption></figure>
+      <figure><img src="assets/task-review.jpg" loading="lazy" width="1800" height="1200" alt="任務與審閱" data-en-alt="Tasks and review"><figcaption data-en="Task review">任務審閱</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<!-- ============ TRUST ============ -->
+<section class="sec sec-tint" id="trust">
+  <div class="wrap trust-in">
+    <div class="trust-copy reveal">
+      <p class="eyebrow" data-en="Local &amp; safe">本地與安全</p>
+      <h2 data-en="You decide how much the agent can do on its own.">Agent 能自己做多少，由你決定</h2>
+      <p class="lead2" data-en="Conversations, accounts, workspaces and execution traces are stored under <code>~/.vela</code> on your machine. Credentials for built-in integrations are encrypted with the system's secure storage.">對話、帳號、工作區與執行軌跡都保存在本機 <code>~/.vela</code>；內建整合的憑據由系統安全儲存加密。</p>
+      <p class="honest" data-en="Heads-up: permissions are an interactive approval policy, not an OS-level sandbox. Execution is currently local (workspace or Git worktree); remote and isolated sandboxes are not implemented yet.">
+        <b>如實說明：</b>權限是互動式審批策略，不是作業系統層級的沙箱；目前只支援在本機工作區或 Git worktree 執行，遠端與隔離沙箱尚未實作。
+      </p>
+      <ul class="ticks">
+        <li data-en="Edit a past message and roll the workspace back to its checkpoint — pre-existing uncommitted changes are kept.">修改過去的訊息並回退到檢查點，發送前已有的未提交改動會保留。</li>
+        <li data-en="Memory never stores secrets, tokens or raw tool output; writes are conflict-safe with revisions.">記憶不會儲存機密、Token 或原始工具輸出；寫入帶 revision 防衝突。</li>
+      </ul>
+    </div>
+
+    <div class="perm reveal d1">
+      <div class="perm-card">
+        <header><span class="lock">🛡</span><b data-en="Ask every time">每次詢問</b><em data-en="Safest">最謹慎</em></header>
+        <p data-en="Approve before terminal commands run. Writes outside the workspace also ask.">執行終端機命令前請你批准；寫入工作區之外的位置也會詢問。</p>
+      </div>
+      <div class="perm-card mid">
+        <header><span class="lock">✨</span><b data-en="Smart approve">幫我批准</b><em data-en="Balanced">折衷</em></header>
+        <p data-en="The selected model judges risk; you're asked only for risky actions or if judging fails.">由目前對話選用的模型判斷風險，只有風險操作或判斷失敗時才詢問你。</p>
+      </div>
+      <div class="perm-card full">
+        <header><span class="lock">⚡</span><b data-en="Full access">完全存取</b><em data-en="Fastest">最流暢</em></header>
+        <p data-en="Skip per-action confirmations — for work you trust end to end.">跳過逐項確認，適合你完全信任的任務。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ QUICK START ============ -->
+<section class="sec" id="start">
+  <div class="wrap start-in">
+    <div class="reveal">
+      <p class="eyebrow" data-en="Quick start">快速開始</p>
+      <h2 data-en="From source in a few commands.">幾行指令，從原始碼啟動</h2>
+      <p class="lead2" data-en="The repository currently runs from source. You need <b>Node.js ≥ 22.19</b> and <b>pnpm 11.24.0</b> (pinned via <code>packageManager</code>).">目前提供從原始碼啟動。需要 <b>Node.js 22.19 以上</b>與 <b>pnpm 11.24.0</b>（由 <code>packageManager</code> 欄位固定）。</p>
+
+      <ol class="launch">
+        <li data-en="Sign in to a model provider in <b>Settings → Models &amp; accounts</b>, or add a custom endpoint.">在「設定 → 模型與帳號」登入模型提供方，或新增自訂介面。</li>
+        <li data-en="Choose a local project directory or Git worktree.">選擇本機專案目錄或 Git worktree。</li>
+        <li data-en="Pick <code>Agent</code>, <code>Plan</code> or <code>Goal</code>, then describe your task.">選擇 <code>Agent</code>、<code>Plan</code> 或 <code>Goal</code>，描述你的任務。</li>
+      </ol>
+    </div>
+
+    <div class="reveal d1">
+      <div class="term big">
+        <div class="term-bar">
+          <i></i><i></i><i></i><span>zsh — VelaHarness</span>
+          <button class="copy" id="copy" type="button" data-en="Copy">複製</button>
+        </div>
+        <pre id="cmd"><span class="dim"># clone &amp; install</span>
+git clone https://github.com/KryptonGao/VelaHarness.git
+cd VelaHarness
+pnpm install
+
+<span class="dim"># launch the Electron dev environment</span>
+pnpm dev</pre>
+      </div>
+      <p class="fine" data-en="Dev builds use a separate <code>~/.vela-dev</code> profile and can run alongside an installed Vela.app. The macOS release build is not notarized — on first launch use Open Anyway in System Settings → Privacy &amp; Security.">開發版使用獨立的 <code>~/.vela-dev</code> 資料目錄，可與已安裝的 Vela.app 同時運行。macOS 發佈包未經公證，首次啟動請在「系統設定 → 隱私權與安全性」選擇「仍要打開」。</p>
+      <table class="keys">
+        <tr><td><kbd>⌘B</kbd></td><td data-en="Toggle left sidebar">收合／展開左側欄</td></tr>
+        <tr><td><kbd>⌘J</kbd></td><td data-en="Toggle right panel">收合／展開右側欄</td></tr>
+        <tr><td><kbd>⌘T</kbd></td><td data-en="New workbench tab">新增工作面板分頁</td></tr>
+        <tr><td><kbd>⌘,</kbd></td><td data-en="Open Settings">開啟設定</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FINAL CTA ============ -->
+<section class="final">
+  <div class="wrap final-in reveal">
+    <img src="assets/mark.png" alt="" width="64" height="51">
+    <h2 data-en="Bring an agent into your repo.">讓 Agent 住進你的倉庫</h2>
+    <p data-en="Open source under Apache-2.0. Star it, try it, tell us what's missing." >以 Apache-2.0 開源。去看看原始碼、試用它，並告訴我們還缺什麼。</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/KryptonGao/VelaHarness" target="_blank" rel="noopener" data-en="View on GitHub">前往 GitHub</a>
+      <a class="btn btn-ghost" href="#start" data-en="Quick start">快速開始</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <span class="brand sm"><img src="assets/mark.png" alt="" width="24" height="19"><span>Vela<b>Harness</b></span></span>
+    <span data-en="Built on the Pi Agent TypeScript SDK · Electron · React">基於 Pi Agent TypeScript SDK · Electron · React 建構</span>
+    <span>© 2026 VelaHarness</span>
+  </div>
+</footer>
+
+<script src="script.js"></script>
+</body>
+</html>

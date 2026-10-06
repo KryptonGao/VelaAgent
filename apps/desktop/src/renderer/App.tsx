@@ -1,3 +1,4 @@
+import { PrInboxPage } from "./components/PrInboxPage";
 import { uiStorage } from "./ui-storage";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentInfo, TaskRecipe } from "@vela/shared";
@@ -118,6 +119,7 @@ export function App() {
   // preview or workspace-change action needs it.
   const [rightCollapsed, setRightCollapsed] = useStoredState("vela.rightCollapsed", true, isBoolean);
   const [scheduledTasksOpen, setScheduledTasksOpen] = useState(false);
+  const [prInboxOpen, setPrInboxOpen] = useState(false);
   const [recipesOpen, setRecipesOpen] = useState(false);
   const [recipeToUse, setRecipeToUse] = useState<TaskRecipe | null>(null);
   const consumeRecipeSelection = useCallback(() => setRecipeToUse(null), []);
@@ -128,10 +130,10 @@ export function App() {
     const leave = () => { setRecipesOpen(false); action(); };
     if (recipeLeaveGuard.current) recipeLeaveGuard.current(leave); else leave();
   }, []);
-  const openRecipes = useCallback(() => { setSettingsOpen(false); setScheduledTasksOpen(false); setRecipesOpen(true); }, []);
+  const openRecipes = useCallback(() => { setSettingsOpen(false); setPrInboxOpen(false); setScheduledTasksOpen(false); setRecipesOpen(true); }, []);
   const consumeRecipeSeed = useCallback(() => setRecipeSeed(null), []);
   const floatingInfo = preferences.infoLayout === "floating";
-  const contextSidebarOpen = !floatingInfo && !rightCollapsed && !scheduledTasksOpen && !recipesOpen;
+  const contextSidebarOpen = !floatingInfo && !rightCollapsed && !scheduledTasksOpen && !recipesOpen && !prInboxOpen;
   const [environmentCollapsed, setEnvironmentCollapsed] = useStoredState("vela.environmentCollapsed", false, isBoolean);
   const toggleInfo = useCallback(() => {
     if (floatingInfo) setEnvironmentCollapsed(value => !value);
@@ -526,10 +528,10 @@ export function App() {
         toggleInfo();
       } else if (key === "t") {
         event.preventDefault();
-        leaveRecipes(() => { setScheduledTasksOpen(false); openStartTab(); });
+        leaveRecipes(() => { setPrInboxOpen(false); setScheduledTasksOpen(false); openStartTab(); });
       } else if (event.code === "Comma") {
         event.preventDefault();
-        leaveRecipes(() => { setScheduledTasksOpen(false); setSettingsOpen((open) => !open); });
+        leaveRecipes(() => { setPrInboxOpen(false); setScheduledTasksOpen(false); setSettingsOpen((open) => !open); });
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -550,9 +552,9 @@ export function App() {
     return vela.onMenuAction((action) => {
       if (!onboardingComplete) return;
       if (action === "new-chat") {
-        leaveRecipes(() => { setScheduledTasksOpen(false); setSettingsOpen(false); void session.newChat(); });
+        leaveRecipes(() => { setPrInboxOpen(false); setScheduledTasksOpen(false); setSettingsOpen(false); void session.newChat(); });
       } else {
-        leaveRecipes(() => { setScheduledTasksOpen(false); setSettingsOpen((open) => !open); });
+        leaveRecipes(() => { setPrInboxOpen(false); setScheduledTasksOpen(false); setSettingsOpen((open) => !open); });
       }
     });
   }, [onboardingComplete, session.newChat, leaveRecipes]);
@@ -576,7 +578,7 @@ export function App() {
         <div className="app-screens">
           <BrowserViewHost tabs={browser.allTabs}
             activeTabId={browser.tabs.some(tab => tab.id === activeWorkbenchTabId) ? activeWorkbenchTabId : null}
-            visible={onboardingComplete && !settingsOpen && !scheduledTasksOpen && !recipesOpen && !workbenchCollapsed} hosted={browser.hosted} command={browser.command} />
+            visible={onboardingComplete && !settingsOpen && !scheduledTasksOpen && !recipesOpen && !prInboxOpen && !workbenchCollapsed} hosted={browser.hosted} command={browser.command} />
           <ScreenPresence present={!onboardingComplete} className="app-screen-onboarding">
             <div className={`vela-window platform-${platform} onboarding-window`}>
               <OnboardingView
@@ -607,11 +609,13 @@ export function App() {
           <ScreenPresence present={onboardingComplete} className="app-screen-main">
             <div className={`vela-window platform-${platform}${leftCollapsed ? " left-collapsed" : ""}${!contextSidebarOpen ? " right-collapsed" : ""}${floatingInfo ? " layout-floating" : ""}`}>
               <Sidebar
+                prInboxOpen={prInboxOpen}
+                onOpenPrInbox={() => leaveRecipes(() => { setSettingsOpen(false); setScheduledTasksOpen(false); setPrInboxOpen(true); })}
                 onOpenRecipes={openRecipes}
                 recipesOpen={recipesOpen}
                 onOpenScheduledTasks={() => leaveRecipes(() => {
                   setSettingsOpen(false);
-                  setScheduledTasksOpen(true);
+                  setPrInboxOpen(false); setScheduledTasksOpen(true);
                 })}
                 collapsed={leftCollapsed}
                 resize={resize}
@@ -619,16 +623,16 @@ export function App() {
                 conversations={session.conversations}
                 waitingConversationIds={session.waitingConversationIds}
                 scheduledTasksOpen={scheduledTasksOpen}
-                activeConversationId={scheduledTasksOpen || recipesOpen ? null : session.activeConversationId}
+                activeConversationId={scheduledTasksOpen || recipesOpen || prInboxOpen ? null : session.activeConversationId}
                 settingsOpen={settingsOpen}
                 settingsLabel={tr("设置", "Settings")}
                 onToggle={() => setLeftCollapsed((value) => !value)}
-                onOpenSettings={() => leaveRecipes(() => { setScheduledTasksOpen(false); setSettingsOpen((open) => !open); })}
+                onOpenSettings={() => leaveRecipes(() => { setPrInboxOpen(false); setScheduledTasksOpen(false); setSettingsOpen((open) => !open); })}
                 onNewChat={(cwd) => leaveRecipes(() => {
-                  setScheduledTasksOpen(false); setSettingsOpen(false); void session.newChat(cwd);
+                  setPrInboxOpen(false); setScheduledTasksOpen(false); setSettingsOpen(false); void session.newChat(cwd);
                 })}
                 onSwitchConversation={(id) => leaveRecipes(() => {
-                  setScheduledTasksOpen(false); setSettingsOpen(false); void session.switchTo(id);
+                  setPrInboxOpen(false); setScheduledTasksOpen(false); setSettingsOpen(false); void session.switchTo(id);
                 })}
                 onArchiveConversation={(id) => void session.archive(id)}
                 onRenameConversation={openRenameConversation}
@@ -639,7 +643,7 @@ export function App() {
                   onCloseFileTab={onCloseFileTab}
                   onCloseAllFileTabs={onCloseAllFileTabs}
                 >
-                  <Presence present={!settingsOpen && !scheduledTasksOpen && !recipesOpen} keepMounted={scheduledTasksOpen || recipesOpen} className="main-stage-pane">
+                  <Presence present={!settingsOpen && !scheduledTasksOpen && !recipesOpen && !prInboxOpen} keepMounted={scheduledTasksOpen || recipesOpen || prInboxOpen} className="main-stage-pane">
                     <PlanDocumentProvider
                       plans={session.state?.session.planRevisions ?? []}
                       draft={session.planDraft}
@@ -760,6 +764,9 @@ export function App() {
                     </PlanDocumentProvider>
                   </Presence>
                 </FilePreviewProvider>
+                <Presence present={prInboxOpen} keepMounted className="main-stage-pane scheduled-tasks-stage">
+                  <PrInboxPage active={prInboxOpen} sidebarCollapsed={leftCollapsed} onToggleSidebar={toggleLeft} />
+                </Presence>
                 <Presence present={recipesOpen} className="main-stage-pane scheduled-tasks-stage">
                   <TaskRecipesPage catalog={models.catalog} workspace={project.workspace?.current ?? null}
                     workspaces={[...new Set([...(project.workspace?.recents.map(r => r.path) ?? []), ...session.conversations.filter(c => c.hasWorkspace !== false).map(c => c.cwd)])]}
@@ -776,12 +783,12 @@ export function App() {
                     sidebarCollapsed={leftCollapsed}
                     onToggleSidebar={toggleLeft}
                     onOpenConversation={(id) => {
-                      setScheduledTasksOpen(false);
+                      setPrInboxOpen(false); setScheduledTasksOpen(false);
                       void session.switchTo(id);
                     }}
                   />
                 </Presence>
-                <Presence present={settingsOpen && !scheduledTasksOpen && !recipesOpen} className="main-stage-pane">
+                <Presence present={settingsOpen && !scheduledTasksOpen && !recipesOpen && !prInboxOpen} className="main-stage-pane">
                   <SettingsView
                     onPreviewSound={sounds.preview}
                     preferences={preferences}

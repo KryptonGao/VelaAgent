@@ -576,7 +576,8 @@ code,
 .main-chat-view::before,
 .workbench-panel::before,
 .settings-view::before,
-.scheduled-tasks-page-shell::before {
+.scheduled-tasks-page-shell::before,
+.pr-inbox-page::before {
   content: "";
   position: absolute;
   top: 0;
@@ -594,7 +595,8 @@ code,
 .main-chat-view::after,
 .workbench-panel::after,
 .settings-view::after,
-.scheduled-tasks-page-shell::after {
+.scheduled-tasks-page-shell::after,
+.pr-inbox-page::after {
   content: "";
   position: absolute;
   top: var(--header-height);
@@ -614,7 +616,8 @@ code,
 .main-chat-view::after,
 .workbench-panel::after,
 .settings-view::after,
-.scheduled-tasks-page-shell::after {
+.scheduled-tasks-page-shell::after,
+.pr-inbox-page::after {
   border-radius: var(--paper-left-radius) var(--paper-right-radius) var(--paper-right-radius) var(--paper-left-radius);
 }
 /* 有实色背景的子区域也跟随纸面圆角,不裁掉输入框向上展开的菜单。 */
@@ -8723,3 +8726,11 @@ a.mcp-result-title:hover { color: var(--accent-blue); }
 .memory-error .settings-error { margin: 0; }
 .memory-confirm { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
 .memory-settings :is(button, textarea, select):focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 3px; }
+
+.settings-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+}

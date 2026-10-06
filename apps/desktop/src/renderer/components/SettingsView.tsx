@@ -1,3 +1,4 @@
+import { setSidebarItem, sidebarItemIds, useSidebarItems } from "../hooks/useSidebarItems";
 import {
   customModelApis,
   thinkingLevels,
@@ -1075,6 +1076,7 @@ function AppearanceSection({
     setFileIconTheme,
   } = preferences;
   const text = copy.appearance;
+  const sidebarItems = useSidebarItems();
   const soundLabels = {
     error: text.soundError, complete: text.soundComplete,
     question: text.soundQuestion, permission: text.soundPermission,
@@ -1191,6 +1193,19 @@ function AppearanceSection({
       <SettingsBlock title={text.conversationLinkTarget} hint={text.conversationLinkHint}>
         <Segmented label={text.conversationLinkTarget} value={conversationLinkTarget}
           options={conversationLinkOptions} onChange={setConversationLinkTarget} />
+      </SettingsBlock>
+      <SettingsBlock title={text.sidebarItems} hint={text.sidebarItemsHint}>
+        {sidebarItemIds.map(id => (
+          <div key={id} className="settings-switch-row">
+            <span>{text.sidebarItemLabels[id]}</span>
+            <button type="button" role="switch" aria-checked={sidebarItems[id]}
+              aria-label={text.sidebarItemLabels[id]}
+              className={`settings-skill-toggle${sidebarItems[id] ? " on" : ""}`}
+              onClick={() => setSidebarItem(id, !sidebarItems[id])}>
+              <span className="settings-skill-toggle-knob" />
+            </button>
+          </div>
+        ))}
       </SettingsBlock>
       <SettingsBlock title={text.composerCapsules} hint={text.composerCapsulesHint}>
         <Segmented

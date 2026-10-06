@@ -29,6 +29,7 @@ import { McpHost } from "./mcp-host";
 import { MemoryHost } from "./memory-host";
 import { SecureCredentialStore } from "./plugin-credentials";
 import { ensureLoginShellPath } from "./shell-path";
+import { PrInboxHost } from "./pr-inbox-host";
 import { TerminalHost } from "./terminal-host";
 import { configureVelaProfile, prepareVelaHome } from "./vela-home";
 import { registerDevelopmentIpc } from "./development-host";
@@ -69,6 +70,7 @@ let browserHost: BrowserHost | null = null;
 let browserRepl: BrowserReplManager | null = null;
 let project: ProjectHost | null = null;
 let terminals: TerminalHost | null = null;
+let prInboxHost: PrInboxHost | null = null;
 
 /*
  * macOS 上由系统 vibrancy 提供毛玻璃,窗口底色必须是透明的,
@@ -216,6 +218,8 @@ async function start(): Promise<void> {
   const operations = new GitOperationLog(join(home, "git-operations.json"));
   await operations.init();
   const files = new WorkspaceFileService();
+  prInboxHost = new PrInboxHost();
+  prInboxHost.register();
   const pr = new PullRequestService(
     () => git.getSnapshot(),
     (url) => void shell.openExternal(url).catch(() => undefined),
@@ -374,6 +378,7 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   if (shutdownStarted) return;
   shutdownStarted = true;
+  prInboxHost?.dispose();
   try { taskRecipes?.stop(); } catch (error) { console.error("[vela] recipe shutdown write failed", error); }
   taskRecipeHost?.dispose(); taskRecipeHost = null;
   scheduledTaskHost?.dispose();

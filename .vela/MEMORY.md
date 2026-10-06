@@ -1,3 +1,4 @@
+---
 # Vela 项目记忆
 
 ## 项目概况
@@ -51,3 +52,6 @@
 - 模式：Agent / Plan / Goal。Plan 只读（禁编辑写入、只放行只读命令），产出 Plan Document 并在批准后执行。
 - 界面默认紧凑模式收拢工具调用；`*-preview.tsx` 等预览页面复用真实组件、使用生成数据，不调用模型。
 - 用户 Skill 加载顺序：`.pi/skills`、`.agents/skills`、`~/.agents/skills`、`~/.vela/skills`，项目内同名优先。
+- GitHub 集成全部经本地 `gh` CLI（`packages/workspace/src/gh-run.ts` 的 `runGh`，支持 `cwd: null`），不引入 GitHub App、自建 OAuth 或 token 存储；`pull-request-service.ts` 的 `probeGh` 按 no-gh / 未登录 / 无权限 / 离线降级。仅支持 github.com，GitHub Enterprise 不在范围（`packages/workspace/src/github-url.ts` 的 `githubSlug`）。
+- 现有 PR 能力都绑定「当前仓库 + 当前分支」（`pr view` / `pr list --head`），跨仓库查询需用 `gh search prs` 或 `gh api graphql`；`gh search prs --json` 不含 `reviewDecision`/检查状态，GraphQL search 可一次取全。
+- gh 账户级查询边界（实测）：`gh pr list` 必须有仓库上下文（无 cwd 报 not a git repository），也可用 `--repo owner/name` 指定；GraphQL `User` 只有 `pullRequests` 连接（非 search，可游标翻全量，本人 authored 142/142 一致），assigned / review-requested / mentions 只能走 search，而 search 结果硬上限 1000（REST `page=1001` 报 422）、另有搜索限流与索引延迟；可见范围 = 有权限的私有库 + 全局公开库。

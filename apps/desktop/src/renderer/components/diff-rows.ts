@@ -62,12 +62,20 @@ export function parseUnifiedDiff(diff: string): ParsedDiff {
   // git 输出以换行结尾,split 会多出一个空元素;差异正文里的空行总带前缀,不会为空串。
   if (lines[lines.length - 1] === "") lines.pop();
 
+  let oldLineNumber: number | undefined;
+  let newLineNumber: number | undefined;
+  let inHunk = false;
   for (const line of lines) {
+    if (line.startsWith("diff --git ")) { inHunk = false; oldLineNumber = undefined; newLineNumber = undefined; }
     if (line.startsWith("@@")) {
+      const header = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+      oldLineNumber = header ? Number(header[1]) : undefined;
+      newLineNumber = header ? Number(header[2]) : undefined;
+      inHunk = !!header;
       rows.push({ kind: "hunk", text: line, sign: "", oldIndex: -1, newIndex: -1 });
       continue;
     }
-    if (isDiffMeta(line)) {
+    if (!inHunk && isDiffMeta(line)) {
       rows.push({ kind: "meta", text: line, sign: "", oldIndex: -1, newIndex: -1 });
       continue;
     }
@@ -81,19 +89,23 @@ export function parseUnifiedDiff(diff: string): ParsedDiff {
       const text = line.slice(1);
       const newIndex = newLines.length;
       newLines.push(text);
-      rows.push({ kind: "add", text, sign, oldIndex: -1, newIndex });
+      rows.push({ kind: "add", text, sign, oldIndex: -1, newIndex, newLineNumber });
+      if (newLineNumber !== undefined) newLineNumber++;
     } else if (sign === "-") {
       const text = line.slice(1);
       const oldIndex = oldLines.length;
       oldLines.push(text);
-      rows.push({ kind: "del", text, sign, oldIndex, newIndex: -1 });
+      rows.push({ kind: "del", text, sign, oldIndex, newIndex: -1, oldLineNumber });
+      if (oldLineNumber !== undefined) oldLineNumber++;
     } else if (sign === " ") {
       const text = line.slice(1);
       const oldIndex = oldLines.length;
       const newIndex = newLines.length;
       oldLines.push(text);
       newLines.push(text);
-      rows.push({ kind: "ctx", text, sign, oldIndex, newIndex });
+      rows.push({ kind: "ctx", text, sign, oldIndex, newIndex, oldLineNumber, newLineNumber });
+      if (oldLineNumber !== undefined) oldLineNumber++;
+      if (newLineNumber !== undefined) newLineNumber++;
     } else {
       // hunk 之外无法识别的前缀行(例如 `Binary files ... differ`),按元信息展示。
       rows.push({ kind: "meta", text: line, sign: "", oldIndex: -1, newIndex: -1 });
