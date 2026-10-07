@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { setLogSinks, type LogEntry } from "@vela/shared";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -78,15 +79,15 @@ describe("durable UI storage", () => {
 
   it("shows legacy summaries even if migration cannot be saved, then retries on the next read", () => {
     const storage = browserStorage({ "vela.thinkingSummaries.v1": JSON.stringify({ old: "Saved summary" }) });
-    const errors: string[] = [];
-    const originalError = console.error;
-    console.error = (message: string) => { errors.push(message); };
+    const errors: LogEntry[] = [];
+    setLogSinks([]);
+    setLogSinks([{ write: entry => { if (entry.level === "error") errors.push(entry); } }]);
     try {
       assert.deepEqual(readThinkingSummaries({
         getItem: storage.getItem,
         setItem: () => { throw new Error("Disk full"); },
       }), { old: { status: "done", text: "Saved summary" } });
-    } finally { console.error = originalError; }
+    } finally { setLogSinks([]); }
     assert.equal(errors.length, 1);
     assert.equal(storage.getItem(thinkingSummariesStorageKey), null);
     assert.deepEqual(readThinkingSummaries(storage), { old: { status: "done", text: "Saved summary" } });

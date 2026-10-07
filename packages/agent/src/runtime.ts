@@ -156,6 +156,9 @@ import {
   createExploreGuardExtension,
   spawnAgentToolName,
 } from "./subagent";
+import { createLogger } from "@vela/shared";
+
+const log = createLogger("runtime");
 
 const recipePromptToken = Symbol("recipe-stage-prompt");
 
@@ -1017,7 +1020,7 @@ export class AgentRuntime {
     const entry = conversationId ? this.conversations.get(conversationId) : this.activeConversation();
     if (!entry) return;
     entry.stopRequested = true;
-    try { this.options.onRecipeStop?.(entry.id); } catch (error) { console.error("[vela] recipe stop notification failed", error); }
+    try { this.options.onRecipeStop?.(entry.id); } catch (error) { log.error("recipe stop notification failed", error); }
     // 停止一并撤销还没投递的排队/调整指令,避免下一次发言时意外继续。
     entry.pendingInstructions = [];
     this.syncPendingInstructions(entry);
@@ -1214,7 +1217,7 @@ export class AgentRuntime {
       await session.reload();
       this.applyActiveTools(entry);
     } catch (error) {
-      if (process.env.VELA_DEBUG) console.error("[vela] 重新加载 Skill 失败:", error);
+      log.debug("skill reload failed", error);
       return;
     }
     // 重新加载期间 Skill 又变了就留到下一次发言再刷。
@@ -2133,7 +2136,7 @@ export class AgentRuntime {
       this.mcpBridges.set(session, mcp);
       this.attachEntry(entry, session, sessionManager);
       entry.control = control;
-      await session.bindExtensions({ onError: event => { if (process.env.VELA_DEBUG) console.error("[vela] extension", event.event); } });
+      await session.bindExtensions({ onError: event => { log.debug("extension error", event.event); } });
       if (this.disposed) { await this.closeSession(session); await control.dispose(); throw new Error("Vela runtime has closed"); }
       control.registerRoot(session);
       entry.skillsRevision = this.skillsRevision;
@@ -2145,9 +2148,7 @@ export class AgentRuntime {
         error: null,
       });
     } catch (error) {
-      if (process.env.VELA_DEBUG) {
-        console.error("[vela] 会话启动失败:", error);
-      }
+      log.warn("session start failed", error);
       await this.detachEntry(entry);
       this.patchEntry(entry, {
         status: "error",
@@ -2928,7 +2929,7 @@ export class AgentRuntime {
     try {
       await session.sendCustomMessage(payload, options);
     } catch (error) {
-      if (process.env.VELA_DEBUG) console.error("[vela] 子代理消息投递失败:", error);
+      log.debug("subagent message delivery failed", error);
     }
   }
 

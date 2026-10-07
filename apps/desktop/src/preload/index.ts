@@ -127,6 +127,7 @@ import {
   type TerminalSessionInfo,
   type ThinkingLevel,
   type TranscriptMessage,
+  LogsIpc,
   type VelaApi,
   type WorkspaceEvent,
   type WorkspaceFileContent,
@@ -221,6 +222,13 @@ const api: VelaApi = {
       ipcRenderer.on(BrowserIpc.state, handler);
       return () => { ipcRenderer.removeListener(BrowserIpc.state, handler); };
     },
+  },
+  logs: {
+    write: entry => ipcRenderer.send(LogsIpc.write, entry),
+    getSettings: () => ipcRenderer.invoke(LogsIpc.getSettings),
+    setLevel: level => ipcRenderer.invoke(LogsIpc.setLevel, level),
+    openFolder: () => ipcRenderer.invoke(LogsIpc.openFolder),
+    export: options => ipcRenderer.invoke(LogsIpc.export, options),
   },
   platform: process.platform,
   development: ipcRenderer.sendSync(IpcChannel.appIsDevelopment) ? {

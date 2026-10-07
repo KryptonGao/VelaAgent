@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BrowserAgentCursor, BrowserPanelApi, BrowserUiCommand, BrowserWindowState } from "@vela/shared";
 import { BrowserController } from "./browser-controller";
+import { createLogger } from "../logger";
+
+const log = createLogger("browser");
 
 export interface RendererBrowserTab { id: string; conversationId: string | null; controller: BrowserController; width?: number; height?: number; agentCursor?: BrowserAgentCursor | null }
 const empty: BrowserWindowState = { tabs: [], selected: {}, activeConversationId: null, operating: [], focusRequest: null };
@@ -10,7 +13,7 @@ export function useBrowserTabs(conversationId: string | null = null) {
   const [allTabs, setTabs] = useState<RendererBrowserTab[]>([]);
   const controllers = useRef(new Map<string, BrowserController>());
   const command = useCallback((request: BrowserUiCommand) => {
-    if (api) void api.command(request).catch((error: unknown) => console.error("Browser command failed", error));
+    if (api) void api.command(request).catch((error: unknown) => log.error("browser command failed", error));
   }, [api]);
   useEffect(() => {
     if (!api) return;
@@ -28,7 +31,7 @@ export function useBrowserTabs(conversationId: string | null = null) {
       for (const id of controllers.current.keys()) if (!next.tabs.some(tab => tab.id === id)) controllers.current.delete(id);
     };
     const unsubscribe = api.subscribe(next => { received = true; project(next); });
-    void api.command({ type: "state" }).then(next => { if (!received) project(next); }).catch(console.error);
+    void api.command({ type: "state" }).then(next => { if (!received) project(next); }).catch((error: unknown) => log.error("browser state request failed", error));
     return () => { live = false; unsubscribe(); };
   }, [api, command]);
   // Commands share the IPC channel: activation is sent before subsequent user opens.

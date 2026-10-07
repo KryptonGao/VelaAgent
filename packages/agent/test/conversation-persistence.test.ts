@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { setLogSinks, type LogEntry } from "@vela/shared";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -116,8 +117,10 @@ describe("conversation persistence", () => {
     const { file } = await fixture(t);
     const store = new ConversationStore(file);
     await mkdir(file);
-    const errors: unknown[][] = [];
-    t.mock.method(console, "error", (...args: unknown[]) => errors.push(args));
+    const errors: LogEntry[] = [];
+    setLogSinks([]);
+    setLogSinks([{ write: entry => { if (entry.level === "error") errors.push(entry); } }]);
+    t.after(() => setLogSinks([]));
     store.put(stored());
     store.flushSync();
     assert.equal(errors.length, 1);

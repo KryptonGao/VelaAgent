@@ -8734,3 +8734,29 @@ a.mcp-result-title:hover { color: var(--accent-blue); }
   gap: 12px;
   padding: 6px 0;
 }
+
+/* ---------- 渲染崩溃兜底界面 ---------- */
+.app-crash {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 640px;
+  margin: 15vh auto 0;
+  padding: 0 24px;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+.app-crash h1 { margin: 0; font-size: 20px; }
+.app-crash p { margin: 0; color: var(--text-secondary); }
+.app-crash pre {
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  max-height: 200px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-code);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.app-crash-actions { display: flex; gap: 8px; }

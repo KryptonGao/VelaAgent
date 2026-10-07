@@ -38,6 +38,9 @@ import {
   type PlanDocumentState,
 } from "./plan-draft";
 import { AppLocaleProvider, setActiveLocale, tr } from "./locale";
+import { createLogger } from "./logger";
+
+const log = createLogger("app");
 
 const onboardingCompleteKey = "vela.onboarding.complete";
 const onboardingStepKey = "vela.onboarding.step";
@@ -311,7 +314,7 @@ export function App() {
     void browser.open(id, url).catch((error: unknown) => {
       if (pendingBrowserTab.current === id) pendingBrowserTab.current = null;
       setActiveWorkbenchTabId(current => current === id ? null : current);
-      console.error("Could not open browser tab", error);
+      log.error("could not open browser tab", error);
     });
     setWorkbenchCollapsed(false);
     setActiveWorkbenchTabId(id);

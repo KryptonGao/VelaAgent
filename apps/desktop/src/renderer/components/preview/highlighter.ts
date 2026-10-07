@@ -5,6 +5,9 @@ import {
   type ThemedToken,
 } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
+import { createLogger } from "../../logger";
+
+const log = createLogger("highlight");
 
 export type { ThemedToken };
 
@@ -150,7 +153,7 @@ async function ensureLanguage(highlighter: HighlighterCore, lang: string): Promi
       .then((module) => highlighter.loadLanguage(module as never))
       .then(() => true)
       .catch((error) => {
-        console.error("[vela-highlight] 语言加载失败", lang, error);
+        log.error(`language load failed: ${lang}`, error);
         return false;
       });
     pendingLangs.set(lang, pending);
@@ -188,7 +191,7 @@ async function highlightWithLanguage(lang: string, content: string): Promise<The
   try {
     highlighter = await getHighlighter();
   } catch (error) {
-    console.error("[vela-highlight] highlighter 创建失败", error);
+    log.error("highlighter creation failed", error);
     return null;
   }
   if (!(await ensureLanguage(highlighter, lang))) return null;
@@ -196,7 +199,7 @@ async function highlightWithLanguage(lang: string, content: string): Promise<The
     const result = highlighter.codeToTokens(content, { lang, theme: velaTheme });
     return result.tokens;
   } catch (error) {
-    console.error("[vela-highlight] codeToTokens 失败", lang, error);
+    log.error(`codeToTokens failed: ${lang}`, error);
     return null;
   }
 }

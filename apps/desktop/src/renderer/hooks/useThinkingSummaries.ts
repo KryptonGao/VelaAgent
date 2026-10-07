@@ -11,6 +11,9 @@ import {
 import { readThinkingSummaries, thinkingSummariesStorageKey } from "../thinking-summary-storage";
 import type { ThinkingSummaryStyle } from "./usePreferences";
 import type { UiMessage } from "./useSession";
+import { createLogger } from "../logger";
+
+const log = createLogger("thinking-summary");
 
 export interface ThinkingSummariesApi {
   enabled: boolean;
@@ -31,7 +34,7 @@ function writeStoredSummaries(records: Record<string, ThinkingSummaryState>) {
   try {
     uiStorage.setItem(thinkingSummariesStorageKey, serializeStoredSummaries(records));
   } catch {
-    console.error("[vela] Failed to save thinking summaries");
+    log.error("failed to save thinking summaries");
   }
 }
 

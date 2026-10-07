@@ -4,6 +4,12 @@ import desktopPackage from "../../package.json";
 
 const repoUrl = "https://github.com/KryptonGao/VelaHarness";
 let activeLocale: AppLocale = "zh-CN";
+let diagnostics: DiagnosticsMenuActions | null = null;
+
+export interface DiagnosticsMenuActions {
+  exportLogs(): void;
+  openLogsFolder(): void;
+}
 
 function text(chinese: string, english: string): string {
   return activeLocale === "en" ? english : chinese;
@@ -21,6 +27,12 @@ export function setApplicationLocale(locale: AppLocale): void {
     applicationVersion: desktopPackage.shortVersion ?? app.getVersion(),
     credits: text("在你选定的代码仓库中工作的桌面 AI 编程助手。", "A desktop AI coding assistant that works in the code repository you choose."),
   });
+}
+
+/** 帮助菜单里的日志入口直接在主进程执行,不经渲染层。 */
+export function setDiagnosticsMenuActions(actions: DiagnosticsMenuActions): void {
+  diagnostics = actions;
+  installApplicationMenu();
 }
 
 function sendMenuAction(action: MenuAction): void {
@@ -101,6 +113,13 @@ export function installApplicationMenu(): void {
           label: text("项目主页", "Project Website"),
           click: () => void shell.openExternal(repoUrl),
         },
+        ...(diagnostics
+          ? [
+              { type: "separator" },
+              { label: text("导出诊断日志…", "Export Diagnostic Logs…"), click: () => diagnostics?.exportLogs() },
+              { label: text("打开日志文件夹", "Open Logs Folder"), click: () => diagnostics?.openLogsFolder() },
+            ] satisfies MenuItemConstructorOptions[]
+          : []),
       ],
     },
   ];

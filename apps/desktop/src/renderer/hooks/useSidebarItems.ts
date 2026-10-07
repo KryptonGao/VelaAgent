@@ -1,6 +1,9 @@
 import { useSyncExternalStore } from "react";
 import { readStoredState } from "./useStoredState";
 import { uiStorage } from "../ui-storage";
+import { createLogger } from "../logger";
+
+const log = createLogger("preferences");
 
 export const sidebarItemIds = ["prInbox", "scheduledTasks", "newChat", "recipes"] as const;
 export type SidebarItemId = (typeof sidebarItemIds)[number];
@@ -17,7 +20,7 @@ const listeners = new Set<() => void>();
 export function setSidebarItem(id: SidebarItemId, visible: boolean) {
   current = { ...current, [id]: visible };
   try { uiStorage.setItem(key, JSON.stringify(current)); }
-  catch (error) { console.error("[vela] Failed to save UI preference", key, error); }
+  catch (error) { log.error(`failed to save UI preference ${key}`, error); }
   listeners.forEach(listener => listener());
 }
 

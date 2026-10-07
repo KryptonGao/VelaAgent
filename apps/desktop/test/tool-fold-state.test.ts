@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { setLogSinks, type LogEntry } from "@vela/shared";
 import { describe, it } from "node:test";
 import { createFoldStore, foldRowId, foldSequenceId, toolFoldStorageKey, type FoldStorage } from "../src/renderer/components/tool-fold-state.ts";
 import { createUiStorage } from "../src/renderer/ui-storage.ts";
@@ -111,9 +112,9 @@ describe("tool fold state", () => {
   it("falls back to memory on storage failure and warns once", () => {
     const unavailable = () => { throw new Error("Unavailable"); };
     const store = createFoldStore({ sessionId: "a", storage: { getItem: unavailable, setItem: unavailable, removeItem: unavailable } });
-    const warnings: unknown[] = [];
-    const original = console.warn;
-    console.warn = value => { warnings.push(value); };
+    const warnings: LogEntry[] = [];
+    setLogSinks([]);
+    setLogSinks([{ write: entry => { if (entry.level === "warn") warnings.push(entry); } }]);
     try {
       store.setExpanded(foldRowId("call"), true);
       store.flush();
@@ -122,7 +123,7 @@ describe("tool fold state", () => {
       store.flush();
       assert.equal(store.peekExpanded(foldRowId("call"), true), false);
       store.resetSession();
-    } finally { console.warn = original; }
+    } finally { setLogSinks([]); }
     assert.equal(warnings.length, 1);
   });
 

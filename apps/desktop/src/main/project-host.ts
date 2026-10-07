@@ -66,6 +66,9 @@ import {
 } from "@vela/workspace";
 import { BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { getApplicationLocale } from "./menu";
+import { createLogger } from "@vela/shared";
+
+const log = createLogger("project");
 
 const agentMutationDebounceMs = 800;
 const maxAttachmentCount = 20;
@@ -1159,7 +1162,7 @@ export class ProjectHost {
   }
 
   private async onWorkspaceChanged(workspace: WorkspaceState): Promise<void> {
-    if (process.env.VELA_DEBUG) console.log(`[vela] onWorkspaceChanged -> ${workspace.current}`);
+    log.debug("workspace changed", { workspace: workspace.current });
     await this.options.env.setWorkspace(workspace.current);
     const environment = this.options.env.getActive();
     this.broadcast(IpcChannel.workspaceEvent, {

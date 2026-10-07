@@ -4,6 +4,9 @@ import { stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { ScheduledTask, ScheduledTaskInput, ScheduledTaskPatch, ScheduledTaskRun, ScheduledTasksState } from "@vela/shared";
 import { nextTaskTime, parseTaskInput } from "./task-schedule";
+import { createLogger } from "@vela/shared";
+
+const log = createLogger("scheduler");
 
 export type TaskExecutor = (task: ScheduledTask, linkConversation: (id: string) => void, run: ScheduledTaskRun) => Promise<void>;
 
@@ -112,7 +115,7 @@ export class ScheduledTaskScheduler {
         const missed = now - task.nextRunAt > 60_000 && task.missedPolicy === "skip";
         this.claim(task, "scheduled", task.nextRunAt, overlap ? "上一次执行尚未结束" : missed ? "已按策略跳过错过的执行" : undefined);
       }
-    } catch (error) { console.error("[vela] scheduled task poll failed", error); }
+    } catch (error) { log.error("scheduled task poll failed", error); }
     finally { this.arm(); }
   }
   private claim(task: ScheduledTask, trigger: ScheduledTaskRun["trigger"], scheduledAt: number, skip?: string): ScheduledTaskRun {
@@ -138,7 +141,7 @@ export class ScheduledTaskScheduler {
           await this.execute(task, id => this.patchRun(run.id, { conversationId: id }), structuredClone(run));
         } catch (error) { failure = error instanceof Error ? error.message : String(error); }
         this.patchRun(run.id, { status: failure ? "failed" : "success", error: failure, finishedAt: this.now() });
-      }).catch(error => { console.error("[vela] task record write failed", error); }).finally(() => { this.running.delete(task.id); });
+      }).catch(error => { log.error("task record write failed", error); }).finally(() => { this.running.delete(task.id); });
       this.running.set(task.id, pending);
     }
     return structuredClone(run);
@@ -174,7 +177,7 @@ export class ScheduledTaskScheduler {
       renameSync(temporary, this.file);
     } finally { rmSync(temporary, { force: true }); }
     this.state = next;
-    for (const listener of this.listeners) { try { listener(this.list()); } catch (error) { console.error(error); } }
+    for (const listener of this.listeners) { try { listener(this.list()); } catch (error) { log.error("scheduler listener failed", error); } }
   }
   private clearTimer(): void { if (this.timer) clearTimeout(this.timer); this.timer = null; }
   private arm(): void {

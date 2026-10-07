@@ -1,4 +1,7 @@
 import { parseStoredSummaries, serializeStoredSummaries, type ThinkingSummaryState } from "./thinking-summary";
+import { createLogger } from "./logger";
+
+const log = createLogger("thinking-summary");
 
 // 保存格式未变时保持同一个键；提示词更新只影响之后生成的总结。
 export const thinkingSummariesStorageKey = "vela.thinkingSummaries";
@@ -20,7 +23,7 @@ export function readThinkingSummaries(storage: Pick<Storage, "getItem" | "setIte
       storage.setItem(thinkingSummariesStorageKey, serialized);
     } catch {
       // 写入失败时本次仍显示历史总结，旧记录保留以便下次重试迁移。
-      console.error("[vela] Failed to migrate thinking summaries");
+      log.error("failed to migrate thinking summaries");
     }
   }
   return records;

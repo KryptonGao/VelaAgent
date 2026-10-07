@@ -5,6 +5,9 @@ import { latestPlan, migrateLegacyPlan, sortPlans, type LegacyPlanRecord } from 
 import { readFile } from "node:fs/promises";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { createLogger } from "@vela/shared";
+
+const log = createLogger("conversations");
 
 export interface StoredConversation {
   /** 与 Pi 会话 id 一致,重启后据此找回会话文件。 */
@@ -160,7 +163,7 @@ export class ConversationStore {
     } catch (error) {
       // 保留 dirty，使退出或下次变更时仍会重试。
       if (strict) throw error;
-      console.error("[vela] Failed to save conversations", error);
+      log.error("failed to save conversations", error);
     }
   }
 

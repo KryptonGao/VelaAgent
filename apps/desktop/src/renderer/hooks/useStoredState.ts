@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { uiStorage } from "../ui-storage";
+import { createLogger } from "../logger";
+
+const log = createLogger("preferences");
 
 export function readStoredState<T>(key: string, fallback: T, accept: (value: unknown) => value is T, storage = uiStorage): T {
   try {
@@ -16,7 +19,7 @@ export function useStoredState<T>(key: string, fallback: T, accept: (value: unkn
   const [value, setValue] = useState<T>(() => readStoredState(key, fallback, accept));
   useEffect(() => {
     try { uiStorage.setItem(key, JSON.stringify(value)); }
-    catch (error) { console.error("[vela] Failed to save UI preference", key, error); }
+    catch (error) { log.error(`failed to save UI preference ${key}`, error); }
   }, [key, value]);
   return [value, setValue] as const;
 }

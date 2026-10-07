@@ -10,6 +10,9 @@ import type { PluginApi } from "./plugin";
 import type { McpApi } from "./mcp";
 import type { MemoryApi, MemoryLoadReport } from "./memory";
 export * from "./trace";
+export * from "./redaction";
+export * from "./logging";
+import type { LogsApi } from "./logging";
 import type { TraceSnapshot, TraceDetails, TraceUpdate } from "./trace";
 export const conversationTitleMaxLength = 120;
 
@@ -2520,6 +2523,8 @@ export interface VelaApi extends McpApi, PluginApi {
   development?: { syncProductionConversations(): Promise<ConversationSyncResult> };
   taskRecipes?: import("./task-recipes").TaskRecipesApi;
   scheduledTasks?: import("./scheduled-tasks").ScheduledTasksApi;
+  /** 应用日志：写入、级别设置与诊断包导出。 */
+  logs?: LogsApi;
   browser?: import("./browser").BrowserPanelApi;
   platform: string;
   /** Present in the desktop app; browser-only previews use localStorage. */

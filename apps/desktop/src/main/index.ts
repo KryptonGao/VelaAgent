@@ -12,11 +12,13 @@ import {
 } from "@vela/workspace";
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, session, shell, webContents } from "electron";
 import type { BrowserWindowConstructorOptions } from "electron";
-import { IpcChannel } from "@vela/shared";
+import { createLogger, IpcChannel } from "@vela/shared";
 import { writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { setApplicationLocale } from "./menu";
+import { getApplicationLocale, setApplicationLocale, setDiagnosticsMenuActions } from "./menu";
+import { LogService } from "./log-service";
+import { installCrashHandlers, LogHost, systemInfo } from "./log-host";
 import { registerOpenTargetIpc } from "./open-targets";
 import { ProjectHost } from "./project-host";
 import { SessionHost } from "./session-host";
@@ -44,6 +46,10 @@ import { UI_BROWSER_PARTITION } from "../browser-policy";
 import appIconPath from "../../resources/icon.png?asset";
 
 const home = configureVelaProfile(app);
+// 日志最先就绪:之后的启动失败、崩溃都能落盘到 <home>/logs。
+const logService = new LogService({ home, console: !app.isPackaged || !!process.env.VELA_DEBUG, debug: !!process.env.VELA_DEBUG });
+installCrashHandlers(logService);
+const log = createLogger("main");
 // Only one Main Process per profile may claim its persisted task queue.
 const primaryInstance = app.requestSingleInstanceLock();
 if (!primaryInstance) app.quit();
@@ -71,6 +77,7 @@ let browserRepl: BrowserReplManager | null = null;
 let project: ProjectHost | null = null;
 let terminals: TerminalHost | null = null;
 let prInboxHost: PrInboxHost | null = null;
+let logHost: LogHost | null = null;
 
 /*
  * macOS 上由系统 vibrancy 提供毛玻璃,窗口底色必须是透明的,
@@ -131,7 +138,7 @@ function createWindow(): BrowserWindow {
                 void win.webContents
                   .executeJavaScript(`(() => { const buttons = document.querySelectorAll('.vc-subtabs button'); buttons[${subTab}]?.click(); return buttons.length; })()`)
                   .then((count) => {
-                    if (process.env.VELA_DEBUG) console.log(`[vela] capture sub-tab ${subTab}, buttons=${String(count)}`);
+                    log.debug(`capture sub-tab ${subTab}, buttons=${String(count)}`);
                   })
                   .catch(() => undefined);
               }, 400);
@@ -154,7 +161,7 @@ function createWindow(): BrowserWindow {
   });
 
   win.webContents.on("did-fail-load", (_event, code, description) => {
-    console.error(`[vela] renderer failed to load: ${code} ${description}`);
+    log.error(`renderer failed to load: ${code} ${description}`);
   });
 
   win.webContents.on("will-navigate", (event, url) => {
@@ -180,7 +187,7 @@ async function start(): Promise<void> {
   browserSession.setPermissionCheckHandler(() => false);
   const platformAuthenticator = configureBrowserPlatformAuthenticator(app, process.platform, readWebAuthnAccessGroup());
   if (process.platform === "darwin" && !platformAuthenticator) {
-    console.info("[vela] Touch ID passkeys require a signed and provisioned build with the Vela WebAuthn keychain entitlement.");
+    log.info("Touch ID passkeys require a signed and provisioned build with the Vela WebAuthn keychain entitlement.");
   }
   const disposeWebAuthn = registerBrowserWebAuthn(browserSession, {
     contentsFromFrame: (frame) => webContents.fromFrame(frame),
@@ -196,7 +203,7 @@ async function start(): Promise<void> {
     try {
       event.returnValue = { value: uiStorage.getItem(key) };
     } catch (error) {
-      console.error("[vela] UI storage read failed", error);
+      log.error("UI storage read failed", error);
       event.returnValue = { error: String(error) };
     }
   });
@@ -205,7 +212,7 @@ async function start(): Promise<void> {
       uiStorage.setItem(key, value);
       event.returnValue = {};
     } catch (error) {
-      console.error("[vela] UI storage write failed", error);
+      log.error("UI storage write failed", error);
       event.returnValue = { error: String(error) };
     }
   });
@@ -244,6 +251,14 @@ async function start(): Promise<void> {
     (task, onCreated, run) => task.recipeBinding ? executeScheduledRecipe(recipes, task, onCreated, run) : runtime.runScheduledTask(task.workspace, task.prompt, onCreated, task));
   scheduler.init();
   taskScheduler = scheduler;
+  logHost = new LogHost(logService, {
+    home,
+    agentDir: home,
+    activeConversationId: () => runtime.activeConversationId,
+    mcpCatalog: () => runtime.getMcpCatalog({ cwd: runtime.getSnapshot().cwd, conversationId: runtime.activeConversationId }),
+    locale: getApplicationLocale,
+  });
+  logHost.register();
   const runtime = new AgentRuntime({
     scheduledTasks: scheduler,
     pluginCredentialStore: new SecureCredentialStore(join(home, "integrations-auth.enc.json")),
@@ -293,7 +308,7 @@ async function start(): Promise<void> {
   recipes.init(); taskRecipes = recipes;
   if (!recipes.list().error) {
     try { await runtime.reconcileRecipeConversations(recipes.list().runs); }
-    catch (error) { console.error("[vela] recipe conversation reconciliation failed", error); }
+    catch (error) { log.error("recipe conversation reconciliation failed", error); }
   }
   runtime.subscribeQuestions(event => {
     if (event.type === "request") recipes.waiting(event.request.conversationId, event.request.id, true);
@@ -346,7 +361,7 @@ async function start(): Promise<void> {
   const snapshot = await runtime.switchWorkspace(workspace.current ?? fallbackCwd, workspace.current !== null);
   scheduler.start();
   const detail = snapshot.error ?? snapshot.model ?? "未选择模型";
-  console.log(`[vela] session ${snapshot.status}: ${detail} (${workspace.current ?? fallbackCwd})`);
+  log.info(`session ${snapshot.status}: ${detail}`, { cwd: workspace.current ?? fallbackCwd });
 }
 
 app.whenReady().then(() => {
@@ -360,7 +375,19 @@ app.whenReady().then(() => {
   });
   setApplicationLocale("zh-CN");
 
-  void start();
+  log.info("app started", systemInfo());
+  setDiagnosticsMenuActions({
+    exportLogs: () => {
+      const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null;
+      void logHost?.exportBundle(win, { includeTrace: false }).catch(error => {
+        log.error("diagnostics export failed", error);
+        dialog.showErrorBox(getApplicationLocale() === "en" ? "Export failed" : "导出失败", String((error as Error)?.message ?? error));
+      });
+    },
+    openLogsFolder: () => { void logHost?.openFolder().catch(error => log.error("open logs folder failed", error)); },
+  });
+
+  start().catch(error => log.error("startup failed", error));
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -378,8 +405,11 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   if (shutdownStarted) return;
   shutdownStarted = true;
+  log.info("app quitting");
   prInboxHost?.dispose();
-  try { taskRecipes?.stop(); } catch (error) { console.error("[vela] recipe shutdown write failed", error); }
+  logHost?.dispose();
+  logHost = null;
+  try { taskRecipes?.stop(); } catch (error) { log.error("recipe shutdown write failed", error); }
   taskRecipeHost?.dispose(); taskRecipeHost = null;
   scheduledTaskHost?.dispose();
   scheduledTaskHost = null;
@@ -397,5 +427,5 @@ app.on("before-quit", (event) => {
   project = null;
   terminals?.dispose();
   terminals = null;
-  void Promise.allSettled([Promise.resolve(closing), taskScheduler?.drain(), taskRecipes?.drain()]).finally(() => { shutdownComplete = true; app.quit(); });
+  void Promise.allSettled([Promise.resolve(closing), taskScheduler?.drain(), taskRecipes?.drain()]).finally(() => { logService.dispose(); shutdownComplete = true; app.quit(); });
 });

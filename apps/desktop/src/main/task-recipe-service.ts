@@ -10,6 +10,9 @@ import { expandRecipe, expandStageInstructions, recipeStageSelected, canRetryRec
 import { builtinRecipes } from './task-recipe-builtins';
 import { ProjectRecipeLibrary } from './task-recipe-library';
 import { TeamRecipeLibraries } from './task-recipe-team';
+import { createLogger } from "@vela/shared";
+
+const log = createLogger("recipes");
 
 export interface RecipeHostRuntime {
   resolveExecution(draft: RecipeUseDraft): Promise<RecipeExecution>;
@@ -432,7 +435,7 @@ export class TaskRecipeService {
     this.commit(next => { const run = next.runs.find(r => r.id === id)!; if (activeStatuses.includes(run.status)) Object.assign(run, patch); });
   }
   private assertWritable(): void { if (!this.loaded || this.error) throw new Error(this.error ?? '配方库未加载'); }
-  private emit(): void { for (const listener of this.listeners) { try { listener(); } catch (error) { console.error(error); } } }
+  private emit(): void { for (const listener of this.listeners) { try { listener(); } catch (error) { log.error("recipe listener failed", error); } } }
   private commit(change: (next: Store) => void): void {
     const next = structuredClone(this.store); change(next);
     mkdirSync(dirname(this.file), { recursive: true }); const temporary = `${this.file}.${randomUUID()}.tmp`;

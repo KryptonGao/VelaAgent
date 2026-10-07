@@ -1,3 +1,7 @@
+import { createLogger } from "../logger";
+
+const log = createLogger("tool-fold");
+
 export type ToolFoldState = { sequences: Record<string, boolean>; rows: Record<string, boolean> };
 export interface FoldStorage {
   getItem(key: string): string | null | undefined;
@@ -23,7 +27,7 @@ export function createFoldStore({ sessionId, storage }: { sessionId: string | nu
   const warn = () => {
     if (!warned) {
       warned = true;
-      console.warn("Could not persist tool fold state; using memory for this session.");
+      log.warn("could not persist tool fold state; using memory for this session");
     }
   };
   const validId = (id: string): boolean => /^(rows|sequences):.+/.test(id);

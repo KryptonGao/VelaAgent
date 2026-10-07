@@ -2,6 +2,9 @@ import { existsSync, mkdirSync } from "node:fs";
 import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
+import { createLogger } from "@vela/shared";
+
+const log = createLogger("home");
 
 const agentFiles = ["auth.json", "models.json", "selection.json"] as const;
 
@@ -69,7 +72,7 @@ async function migrateLegacyHome(home: string, legacyUserData: string): Promise<
   const raw = await readFile(legacyIndex, "utf8");
   const rewritten = rewriteSessionFiles(raw, join(legacyAgent, "sessions"), join(home, "sessions"));
   await writeFile(nextIndex, rewritten.endsWith("\n") ? rewritten : `${rewritten}\n`, "utf8");
-  console.log(`[vela] migrated data to ${home}`);
+  log.info("migrated data", { home });
 }
 
 async function copyMissing(from: string, to: string): Promise<void> {
