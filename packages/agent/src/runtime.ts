@@ -6,14 +6,18 @@ import type { CredentialStore } from "./mcp/credentials";
 import type { BuiltInPlugin, PluginCatalog, PluginTarget, PluginStatusEvent } from "@vela/shared";
 import { redactMcpDisplay, mcpConfiguredSecrets } from "./mcp-redaction";
 import { McpSessionBridge, isMcpTool, type McpPermission } from "./mcp-session";
-import { createScheduledTaskTools, scheduledTaskInstructions, scheduledTaskToolNames } from "./scheduled-task-tools";
+import { createScheduledTaskTools, scheduledTaskInstructions } from "./scheduled-task-tools";
 import { RecipeGenerator, parseRecipeGenerateInput } from './recipe-generator';
 import type { RecipeExecution, RecipeRun, RecipeStageSubmission, RecipeSubmitResult, RecipeStageEvidence, RecipeUseDraft, ScheduledTaskInput, SandboxExecutionContext, SandboxMode, ScheduledTaskService } from "@vela/shared";
 import type { McpCatalog, McpCatalogInput, McpServerInput, McpServerTarget, McpEnabledInput, McpProjectTrustInput, McpToolReadOnlyInput, McpStatusEvent, MemoryLoadReport } from "@vela/shared";
-import { browserToolNames, browserUseInstructions, createBrowserTools, type BrowserReplService, type BrowserReplPermission } from "./browser-use";
-import { TurnCheckpoints, type TurnCheckpoint } from "./turn-checkpoints";
-import { TraceRecorder } from "./trace";
-import type { TraceSummaryRequest, TraceUpdate } from "@vela/shared";
+import { browserUseInstructions, createBrowserTools, type BrowserReplService, type BrowserReplPermission } from "./browser-use";
+import { TurnCheckpoints, changedPaths, type TurnCheckpoint } from "./turn-checkpoints";
+import type { TraceRecorder } from "./trace";
+import { ConversationTraces, subscribeTracedSession } from "./runtime-tracing";
+import { SkillLibrary } from "./runtime-skills";
+import { ToolLoadout } from "./runtime-tools";
+import { RecipeSubmitOutcome, stageResponseEvidence, suspendAutomaticRecovery } from "./recipe-stage";
+import type { BranchConversationOptions, CheckpointRestorePreview, CheckpointTimeline, TraceSummaryRequest, TraceUpdate } from "@vela/shared";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -64,7 +68,6 @@ import { defaultToolNames } from "@vela/tools";
 import { getCurrentTools, clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
 import { existsSync, readdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   countConversationActivity,
@@ -89,16 +92,14 @@ import { ModelDirectory } from "./model-directory";
 import { MemoryService } from "./memory";
 import { MemorySettings } from "./memory-settings";
 import { createMemoryContextExtension } from "./memory-context";
-import { createMemoryTools, memoryDisabledInstructions, memoryInstructions, memoryReadOnlyInstructions, memoryReadToolName, memoryToolNames, memoryUpdateToolName, type MemoryWritePermission } from "./memory-tools";
+import { createMemoryTools, memoryDisabledInstructions, memoryInstructions, memoryReadOnlyInstructions, type MemoryWritePermission } from "./memory-tools";
 import { openCodeSessionHeaders } from "./provider-headers";
 import {
   createModeExtension,
   createModeTools,
-  defaultToolPolicy,
   goalContinuePrompt,
   goalTurnLimit,
   goalTurnLimitNote,
-  modeToolNames,
   type AskUserInput,
   type AskUserOutcome,
   type ToolOutcome,
@@ -128,13 +129,6 @@ import {
   sandboxRiskSystemPrompt,
   sandboxRiskTimeoutMs,
 } from "./sandbox-risk";
-import { loadSkillCatalog } from "./skill-catalog";
-import {
-  deleteSkill as deleteSkillFiles,
-  readDisabledSkills,
-  setSkillEnabled as storeSkillEnabled,
-} from "./skill-management";
-import { migrateExternalSkills, scanExternalSkills as scanExternalSkillSources } from "./skill-migration";
 import { activityFromCall, activityFromExecution, activityFromOutput, toolResultIsError } from "./tool-activity";
 import {
   branchLeafForTurn,
@@ -151,8 +145,6 @@ import {
 } from "./agent-control";
 import {
   agentKindPrompt,
-  agentToolNames,
-  agentToolNamesFor,
   createExploreGuardExtension,
   spawnAgentToolName,
 } from "./subagent";
@@ -301,8 +293,8 @@ export class AgentRuntime {
   private readonly questionListeners = new Set<(event: AskUserQuestionEvent) => void>();
   /** toolCallId -> 已校验参数。结果事件本身不带参数，用来还原命令和路径。 */
   private readonly toolArgs = new Map<string, unknown>();
+  private readonly traces: ConversationTraces;
   /** toolCallId -> Goal id 与执行时工作区修订号。 */
-  private readonly traces = new Map<string, TraceRecorder>();
   private readonly toolGoalContexts = new Map<string, { goalId: string; workRevision: number }>();
   /** toolCallId -> 子代理工具参数；子代理事件不带参数，结果事件用它还原命令和路径。 */
   private readonly agentToolArgs = new Map<string, unknown>();
@@ -314,10 +306,8 @@ export class AgentRuntime {
   private readonly store: ConversationStore;
   private currentCwd: string;
   private currentHasWorkspace: boolean | undefined;
-  /** 被停用的 Skill 名称；启动会话时据此过滤，null 表示还没读取。 */
-  private disabledSkills: Set<string> | null = null;
-  /** 每次停用、启用或删除 Skill 时递增，用于让已打开的会话在下次发言前刷新 Skill。 */
-  private skillsRevision = 0;
+  private readonly skills: SkillLibrary;
+  private readonly tools: ToolLoadout;
   private readonly mcpConfig: McpConfigService;
   private readonly plugins: PluginRegistry;
   private readonly oauthMcp: OAuthMCPManager;
@@ -347,6 +337,21 @@ export class AgentRuntime {
     this.currentCwd = options.cwd;
     this.memory = new MemoryService({ agentDir: options.agentDir });
     this.memorySettings = new MemorySettings(options.agentDir);
+    this.skills = new SkillLibrary(options.agentDir);
+    this.tools = new ToolLoadout({
+      scheduledTasks: Boolean(options.scheduledTasks),
+      browser: Boolean(options.browserRepl),
+      memoryEnabled: () => this.memorySettings.enabled,
+    });
+    this.traces = new ConversationTraces({
+      agentDir: options.agentDir,
+      emit: (event) => this.emit(event),
+      history: (conversationId) => {
+        const entry = this.conversations.get(conversationId);
+        if (entry?.sessionManager) return entry.sessionManager;
+        return entry?.sessionFile ? SessionManager.open(entry.sessionFile, this.sessionDir(), entry.snapshot.cwd) : null;
+      },
+    });
     this.plugins = new PluginRegistry(join(options.agentDir, "integrations.json"), options.builtInPlugins);
     this.oauthMcp = new OAuthMCPManager({ agentDir: options.agentDir, credentialStore: options.pluginCredentialStore,
       isPlugin: name => this.plugins.ownsServer(name), openUrl: options.mcpOpenUrl });
@@ -517,14 +522,18 @@ export class AgentRuntime {
     if (!entry || entry.recipeRunId !== run.id) throw new Error("配方对话绑定不可用");
     if (!entry.session) await this.startInternal(entry);
     this.requireIdle(entry.id, true);
-    if (entry.snapshot.mode !== run.mode || entry.session?.model?.provider !== run.resolvedExecution.model.provider || entry.session?.model?.id !== run.resolvedExecution.model.id || entry.session?.thinkingLevel !== run.resolvedExecution.thinkingLevel) throw new Error("聊天的模式或模型已变化，请检查后新建配方任务");
+    const expected = run.resolvedExecution;
+    const model = entry.session?.model;
+    if (entry.snapshot.mode !== run.mode || model?.provider !== expected.model.provider || model?.id !== expected.model.id
+      || entry.session?.thinkingLevel !== expected.thinkingLevel) throw new Error("聊天的模式或模型已变化，请检查后新建配方任务");
     if (entry.control?.list().some(agent => agent.kind !== "root" && agent.status === "running")) throw new Error("聊天仍有运行中的子任务");
     entry.recipeWorkflowActive = true;
   }
   finishRecipeWorkflow(run: RecipeRun): void {
     const entry = this.conversations.get(run.conversationId);
     if (!entry || entry.recipeRunId !== run.id) return;
-    entry.recipeWorkflowActive = false; entry.recipeStageSideEffect = undefined;
+    entry.recipeWorkflowActive = false;
+    entry.recipeStageSideEffect = undefined;
     if (!this.disposed) this.applyActiveTools(entry);
   }
 
@@ -533,41 +542,31 @@ export class AgentRuntime {
     const entry = this.conversations.get(run.conversationId);
     if (!entry?.session || entry.recipeRunId !== run.id) throw new Error("配方对话绑定不可用");
     if (stage) {
-      if (!entry.recipeWorkflowActive || run.mode !== "agent" || !run.recipeSnapshot.stages?.some(s => s.id === stage.id && s.sideEffect === stage.sideEffect)) throw new Error("阶段执行绑定不可用");
+      const declared = run.recipeSnapshot.stages?.some(s => s.id === stage.id && s.sideEffect === stage.sideEffect);
+      if (!entry.recipeWorkflowActive || run.mode !== "agent" || !declared) throw new Error("阶段执行绑定不可用");
       entry.recipeStageSideEffect = stage.sideEffect;
       this.applyActiveTools(entry);
     }
-    const previousRetryEnabled = entry.session.settingsManager.getRetrySettings().enabled;
-    const previousCompactionEnabled = entry.session.settingsManager.getCompactionEnabled();
-    if (stage) { entry.session.settingsManager.setRetryEnabled(false); entry.session.settingsManager.setCompactionEnabled(false); }
-    let failure: string | undefined; let result: RecipeSubmitResult | undefined;
-    const evidence: RecipeStageEvidence[] = [];
+    const restoreRecovery = stage ? suspendAutomaticRecovery(entry.session.settingsManager) : null;
+    const outcome = new RecipeSubmitOutcome(entry.id, Boolean(stage));
     const leaf = entry.sessionManager?.getLeafId();
-    const unsubscribe = this.subscribe(event => {
-      if (event.conversationId !== entry.id) return;
-      if (event.type === "error") failure = event.message;
-      if (stage && event.type === "tool_end" && evidence.length < 9999) evidence.push({ type: "tool", id: event.toolCallId, label: `${event.toolName} · ${event.isError ? 'error' : 'completed'}`.slice(0, 300) });
-      if (event.type === "prompt_end") result = { status: event.status === "stopped" ? "stopped" : failure ? "failed" : event.status, error: failure ?? event.error, planPending: event.planPending };
-    });
+    const unsubscribe = this.subscribe(event => outcome.observe(event));
     try {
       const text = stage?.prompt ?? run.expandedPrompt;
       this.emit({ type: "user_message", conversationId: entry.id, text });
       await this.prompt(entry.id, text, undefined, undefined, recipePromptToken);
       if (this.disposed) throw new Error("应用退出导致任务中断");
-      if (!result) {
-        if (entry.stopRequested) result = { status: "stopped" };
-        else if (failure) result = { status: "failed", error: failure };
-        else throw new Error("无法确认回合结果，请检查聊天");
-      }
-      if (stage) {
-        const branch = entry.sessionManager?.getBranch() ?? [];
-        const start = leaf ? branch.findIndex(item => item.id === leaf) + 1 : 0;
-        const response = branch.slice(start).findLast(item => item.type === "message" && item.message.role === "assistant" && isVisibleTranscriptMessage(item.message as AgentMessage));
-        if (response) evidence.push({ type: "response", id: response.id, label: '阶段回复 / Stage response' });
-        return { ...result, evidence, retrySafe: result.status === "failed" && stage.sideEffect === "read_only" };
-      }
-      return result;
-    } finally { unsubscribe(); entry.recipeStageSideEffect = undefined; if (stage) { entry.session.settingsManager.setRetryEnabled(previousRetryEnabled); entry.session.settingsManager.setCompactionEnabled(previousCompactionEnabled); } if (entry.session && !this.disposed) this.applyActiveTools(entry); }
+      const result = outcome.settle(entry.stopRequested);
+      if (!stage) return result;
+      const response = stageResponseEvidence(entry.sessionManager?.getBranch() ?? [], leaf);
+      const evidence = response ? [...outcome.evidence, response] : outcome.evidence;
+      return { ...result, evidence, retrySafe: result.status === "failed" && stage.sideEffect === "read_only" };
+    } finally {
+      unsubscribe();
+      entry.recipeStageSideEffect = undefined;
+      restoreRecovery?.();
+      if (entry.session && !this.disposed) this.applyActiveTools(entry);
+    }
   }
 
   /** Scheduler entry point: create a persisted background chat without changing the selected workspace. */
@@ -608,7 +607,7 @@ export class AgentRuntime {
    * 从某一轮回复处分支:把该轮及之前的历史复制成新会话文件并切换过去。
    * turnIndex 是界面上可见用户消息的序号(从 0 数起),与 getMessages 的轮次一致。
    */
-  async branchConversation(conversationId: string, turnIndex: number): Promise<SessionSnapshot> {
+  async branchConversation(conversationId: string, turnIndex: number, options: BranchConversationOptions = {}): Promise<SessionSnapshot> {
     return this.exclusive(async () => {
       await this.ready();
       const source = this.conversations.get(conversationId);
@@ -621,7 +620,24 @@ export class AgentRuntime {
       const sources = transcriptSourcesFromProjection(manager.buildSessionProjection());
       const leaf = branchLeafForTurn(sources, turnIndex);
       if (!leaf) throw new Error("找不到要分支的回复");
-      const sourceTimings = readTurnTimings(manager.getBranch());
+      const sourceBranch = manager.getBranch();
+      const sourceTimings = readTurnTimings(sourceBranch);
+      const sourceCheckpoints = this.checkpoints(source);
+      const points = await sourceCheckpoints.list();
+      if (options.restoreFiles) {
+        // 工作区文件回到这一轮之后：撤销其后各轮的改动；原对话历史保留，但它之后的文件改动不再在工作区里。
+        this.assertWorkspaceIdle(source.snapshot.cwd);
+        const next = this.visibleUserSources(manager)[turnIndex + 1];
+        if (next) {
+          const position = sourceBranch.findIndex(item => item.id === next.entryId);
+          const later = new Set(sourceBranch.slice(position).map(item => item.id));
+          if (!points.some(point => point.userEntryId === next.entryId)) throw new Error("下一轮没有单独的文件检查点，无法把文件恢复到这一轮之后");
+          const selected = sourceBranch.flatMap(item => later.has(item.id) ? points.filter(point => point.userEntryId === item.id) : []);
+          this.rewindingWorkspaces.add(source.snapshot.cwd);
+          try { await sourceCheckpoints.restore(selected); }
+          finally { this.rewindingWorkspaces.delete(source.snapshot.cwd); }
+        }
+      }
       const branchedFile = manager.createBranchedSession(leaf);
       if (!branchedFile) throw new Error("无法创建分支会话");
       const branched = SessionManager.open(branchedFile, this.sessionDir(), source.snapshot.cwd);
@@ -642,6 +658,12 @@ export class AgentRuntime {
         entry.latestProposedPlanId = source.latestProposedPlanId;
         this.syncPlanState(entry);
       }
+      // 分叉保留到这一轮为止的检查点，新聊天也能回退这些轮次。子代理与执行进度不随分支复制，
+      // 所以元数据里也去掉它们，回退时不会改写原对话的子代理会话。
+      const kept = new Set(branched.getEntries().map(item => item.id));
+      await sourceCheckpoints.copyTo(this.checkpoints(entry),
+        points.filter(point => point.userEntryId && kept.has(point.userEntryId) && (point.leaf === null || kept.has(point.leaf))),
+        metadata => ({ ...metadata, executionPlans: [], activeExecutionPlanId: null, goal: null, agents: [], agentLeaves: {} }));
       this.trace(source.id).forkTo(this.trace(entry.id, false), turnIndex);
       this.store.update(entry.id, countTranscriptActivity(branchedSources));
       return this.startInternal(entry);
@@ -718,67 +740,133 @@ export class AgentRuntime {
     await this.exclusive(async () => {
       await this.ready();
       const entry = this.conversations.get(conversationId);
-      if (!entry?.session || !entry.sessionManager) throw new Error("对话不存在或已结束");
-      for (const other of this.conversations.values()) {
-        if (other.snapshot.cwd !== entry.snapshot.cwd) continue;
-        if (other.driving || other.session?.isStreaming || other.control?.list().some(agent => agent.kind !== "root" && agent.status === "running")) {
-          throw new Error("工作区还有任务运行中，请停止或等待完成后修改消息");
-        }
-      }
-      const manager = entry.sessionManager;
-      const sources = transcriptSourcesFromProjection(manager.buildSessionProjection());
-      const user = sources.filter(source => source.message.role === "user" && isVisibleTranscriptMessage(source.message))[turnIndex];
-      if (!user?.entryId) throw new Error("找不到要修改的消息");
-      const checkpoints = this.checkpoints(entry);
-      const points = await checkpoints.list();
-      const point = points.find(item => item.userEntryId === user.entryId);
-      if (!point) throw new Error("这条历史消息没有文件检查点，无法回退更改");
-      const branch = manager.getBranch();
-      const position = branch.findIndex(item => item.id === user.entryId);
-      const abandoned = new Set(branch.slice(position).map(item => item.id));
-      const selected = points.filter(item => item.userEntryId && abandoned.has(item.userEntryId))
-        .sort((a, b) => branch.findIndex(item => item.id === a.userEntryId) - branch.findIndex(item => item.id === b.userEntryId));
-      // Validate files before touching chat history; conflict failures leave the whole chat intact.
-      this.rewindingWorkspaces.add(entry.snapshot.cwd);
-      try {
-        await checkpoints.restore(selected);
-        const selection = { model: entry.session.model, thinkingLevel: entry.session.thinkingLevel as ThinkingLevel };
-        await this.detachEntry(entry);
-        if (point.leaf) manager.branch(point.leaf); else manager.resetLeaf();
-        manager.appendCustomEntry("vela_rewind", { turnIndex });
-        entry.plans = point.metadata.plans;
-        entry.latestProposedPlanId = point.metadata.latestProposedPlanId;
-        entry.executionPlans = point.metadata.executionPlans;
-        entry.activeExecutionPlanId = point.metadata.activeExecutionPlanId;
-        entry.storedAgents = point.metadata.agents;
-        for (const agent of entry.storedAgents) {
-          if (!agent.sessionFile || !existsSync(agent.sessionFile)) continue;
-          const child = SessionManager.open(agent.sessionFile, this.childSessionDir(entry.id), entry.snapshot.cwd);
-          const leaf = point.metadata.agentLeaves[agent.id];
-          if (leaf) child.branch(leaf); else child.resetLeaf();
-          child.appendCustomEntry("vela_rewind", { turnIndex });
-        }
-        entry.agentMutationsSeen = new Set(entry.storedAgents.filter(agent => agent.mutated).map(agent => agent.id));
-        entry.goalValidationEvidence.clear();
-        entry.goalValidationSequence = Math.max(0, ...(point.metadata.goal?.validation?.checks.map(check => check.sequence) ?? [0]));
-        entry.planStream = null;
-        entry.planStreamPlan = null;
-        entry.pendingInstructions = [];
-        this.syncPendingInstructions(entry);
-        entry.generation = { stepStartedAt: null, firstTokenAt: null, outputTokens: 0, elapsedMs: 0 };
-        entry.snapshot.goal = point.metadata.goal;
-        this.syncPlanState(entry);
-        const retainedTraceTurns = branch.slice(0, position).filter(item => item.type === "message" && item.message.role === "user" &&
-          isVisibleTranscriptMessage(item.message as AgentMessage) && userMessageText(item.message as AgentMessage) !== goalContinuePrompt).length;
-        this.trace(entry.id).rewindTo(retainedTraceTurns);
-        this.store.update(entry.id, countTranscriptActivity(transcriptSourcesFromProjection(manager.buildSessionProjection())));
-        this.persistEntry(entry);
-        this.store.flushSync();
-        await checkpoints.remove(selected);
-        await this.startInternal(entry, selection);
-        this.emit({ type: "agents", conversationId: entry.id, agents: entry.control?.list() ?? [] });
-      } finally { this.rewindingWorkspaces.delete(entry.snapshot.cwd); }
+      if (!entry) throw new Error("对话不存在或已结束");
+      await this.rewindEntry(entry, turnIndex);
     });
+  }
+
+  /** Return to the state right after a turn (-1 is the start of the chat): later turns and their file changes are undone. */
+  async restoreCheckpoint(conversationId: string, turnIndex: number): Promise<void> {
+    await this.exclusive(async () => {
+      await this.ready();
+      const entry = this.conversations.get(conversationId);
+      if (!entry) throw new Error("对话不存在或已结束");
+      if (!entry.session) await this.startInternal(entry);
+      const turns = this.visibleUserSources(entry.sessionManager!).length;
+      if (!Number.isInteger(turnIndex) || turnIndex < -1 || turnIndex >= turns) throw new Error("找不到要回到的检查点");
+      if (turnIndex === turns - 1) throw new Error("已经在这个检查点");
+      await this.rewindEntry(entry, turnIndex + 1);
+    });
+  }
+
+  /** Each turn's checkpoint and whether returning to it is safe right now. Nothing is written. */
+  async getCheckpoints(conversationId: string): Promise<CheckpointTimeline> {
+    await this.ready();
+    const entry = this.conversations.get(conversationId);
+    if (!entry) throw new Error("对话不存在或已结束");
+    const manager = entry.sessionManager ?? (entry.sessionFile ? SessionManager.open(entry.sessionFile, this.sessionDir(), entry.snapshot.cwd) : null);
+    if (!manager) return { conversationId, start: null, turns: [] };
+    const users = this.visibleUserSources(manager);
+    const branch = manager.getBranch();
+    const points = await this.checkpoints(entry).list();
+    const byUser = new Map(points.filter(point => point.userEntryId).map(point => [point.userEntryId!, point]));
+    // Same selection as rewindEntry: every checkpoint from a turn to the end of the branch, oldest first.
+    const ordered = branch.flatMap(item => byUser.get(item.id) ?? []);
+    const failures = await this.checkpoints(entry).check(ordered);
+    const preview = (index: number): CheckpointRestorePreview => {
+      const point = byUser.get(users[index]!.entryId ?? "");
+      const removedTurns = users.length - index;
+      if (!point) return { available: false, reason: "这一轮与上一轮在同一次运行中，没有单独的文件检查点", removedTurns, files: [] };
+      const from = ordered.indexOf(point);
+      const files = [...new Set(ordered.slice(from).flatMap(changedPaths))].sort();
+      const reason = failures[from];
+      return reason ? { available: false, reason, removedTurns, files } : { available: true, removedTurns, files };
+    };
+    return {
+      conversationId,
+      start: users.length > 0 ? preview(0) : null,
+      turns: users.map((user, index) => {
+        const point = byUser.get(user.entryId ?? "");
+        return {
+          turnIndex: index,
+          text: userMessageText(user.message),
+          timestamp: user.timestamp,
+          changedFiles: point ? changedPaths(point) : null,
+          restore: index + 1 < users.length ? preview(index + 1) : null,
+        };
+      }),
+    };
+  }
+
+  private visibleUserSources(manager: SessionManager) {
+    return transcriptSourcesFromProjection(manager.buildSessionProjection())
+      .filter(source => source.message.role === "user" && isVisibleTranscriptMessage(source.message));
+  }
+
+  private assertWorkspaceIdle(cwd: string) {
+    for (const other of this.conversations.values()) {
+      if (other.snapshot.cwd !== cwd) continue;
+      if (other.driving || other.session?.isStreaming || other.control?.list().some(agent => agent.kind !== "root" && agent.status === "running")) {
+        throw new Error("工作区还有任务运行中，请停止或等待完成后修改消息");
+      }
+    }
+  }
+
+  private async rewindEntry(entry: Conversation, turnIndex: number): Promise<void> {
+    if (!entry.session || !entry.sessionManager) throw new Error("对话不存在或已结束");
+    this.assertWorkspaceIdle(entry.snapshot.cwd);
+    const manager = entry.sessionManager;
+    const user = this.visibleUserSources(manager)[turnIndex];
+    if (!user?.entryId) throw new Error("找不到要修改的消息");
+    const checkpoints = this.checkpoints(entry);
+    const points = await checkpoints.list();
+    const point = points.find(item => item.userEntryId === user.entryId);
+    if (!point) throw new Error("这条历史消息没有文件检查点，无法回退更改");
+    const branch = manager.getBranch();
+    const position = branch.findIndex(item => item.id === user.entryId);
+    const abandoned = new Set(branch.slice(position).map(item => item.id));
+    const selected = points.filter(item => item.userEntryId && abandoned.has(item.userEntryId))
+      .sort((a, b) => branch.findIndex(item => item.id === a.userEntryId) - branch.findIndex(item => item.id === b.userEntryId));
+    // Validate files before touching chat history; conflict failures leave the whole chat intact.
+    this.rewindingWorkspaces.add(entry.snapshot.cwd);
+    try {
+      await checkpoints.restore(selected);
+      const selection = { model: entry.session.model, thinkingLevel: entry.session.thinkingLevel as ThinkingLevel };
+      await this.detachEntry(entry);
+      if (point.leaf) manager.branch(point.leaf); else manager.resetLeaf();
+      manager.appendCustomEntry("vela_rewind", { turnIndex });
+      entry.plans = point.metadata.plans;
+      entry.latestProposedPlanId = point.metadata.latestProposedPlanId;
+      entry.executionPlans = point.metadata.executionPlans;
+      entry.activeExecutionPlanId = point.metadata.activeExecutionPlanId;
+      entry.storedAgents = point.metadata.agents;
+      for (const agent of entry.storedAgents) {
+        if (!agent.sessionFile || !existsSync(agent.sessionFile)) continue;
+        const child = SessionManager.open(agent.sessionFile, this.childSessionDir(entry.id), entry.snapshot.cwd);
+        const leaf = point.metadata.agentLeaves[agent.id];
+        if (leaf) child.branch(leaf); else child.resetLeaf();
+        child.appendCustomEntry("vela_rewind", { turnIndex });
+      }
+      entry.agentMutationsSeen = new Set(entry.storedAgents.filter(agent => agent.mutated).map(agent => agent.id));
+      entry.goalValidationEvidence.clear();
+      entry.goalValidationSequence = Math.max(0, ...(point.metadata.goal?.validation?.checks.map(check => check.sequence) ?? [0]));
+      entry.planStream = null;
+      entry.planStreamPlan = null;
+      entry.pendingInstructions = [];
+      this.syncPendingInstructions(entry);
+      entry.generation = { stepStartedAt: null, firstTokenAt: null, outputTokens: 0, elapsedMs: 0 };
+      entry.snapshot.goal = point.metadata.goal;
+      this.syncPlanState(entry);
+      const retainedTraceTurns = branch.slice(0, position).filter(item => item.type === "message" && item.message.role === "user" &&
+        isVisibleTranscriptMessage(item.message as AgentMessage) && userMessageText(item.message as AgentMessage) !== goalContinuePrompt).length;
+      this.trace(entry.id).rewindTo(retainedTraceTurns);
+      this.store.update(entry.id, countTranscriptActivity(transcriptSourcesFromProjection(manager.buildSessionProjection())));
+      this.persistEntry(entry);
+      this.store.flushSync();
+      await checkpoints.remove(selected);
+      await this.startInternal(entry, selection);
+      this.emit({ type: "agents", conversationId: entry.id, agents: entry.control?.list() ?? [] });
+    } finally { this.rewindingWorkspaces.delete(entry.snapshot.cwd); }
   }
 
   private checkpoints(entry: Conversation) {
@@ -1148,71 +1236,39 @@ export class AgentRuntime {
 
   /** 用户 Skill 目录。与会话启动时 Pi 扫描的 `<agentDir>/skills` 相同。 */
   skillsDirectory(): string {
-    return join(this.options.agentDir, "skills");
+    return this.skills.directory();
   }
 
   /** 按当前工作区扫描用户 Skill、项目 Skill 和 ~/.agents/skills。 */
   listSkills(cwd: string): Promise<SkillCatalog> {
-    return loadSkillCatalog({ cwd, agentDir: this.options.agentDir });
+    return this.skills.list(cwd);
   }
 
   /** 启用或停用一个 Skill；已打开的对话会在下次发言前重新加载资源。 */
   setSkillEnabled(cwd: string, name: string, enabled: boolean): Promise<SkillCatalog> {
-    return this.exclusive(async () => {
-      await storeSkillEnabled(this.options.agentDir, name, enabled);
-      this.disabledSkills = await readDisabledSkills(this.options.agentDir);
-      this.skillsRevision += 1;
-      return this.listSkills(cwd);
-    });
+    return this.exclusive(() => this.skills.setEnabled(cwd, name, enabled));
   }
 
   /** 删除 Vela 用户 Skill 目录里的 Skill；已打开的对话会在下次发言前重新加载资源。 */
   deleteSkill(cwd: string, name: string, location: string): Promise<SkillCatalog> {
-    return this.exclusive(async () => {
-      await deleteSkillFiles({ agentDir: this.options.agentDir, name, location });
-      this.disabledSkills = await readDisabledSkills(this.options.agentDir);
-      this.skillsRevision += 1;
-      return this.listSkills(cwd);
-    });
+    return this.exclusive(() => this.skills.delete(cwd, name, location));
   }
 
   /** 列出 Codex 与 Claude Code 中可复制到 Vela 的 Skill。 */
   scanExternalSkills(cwd: string): Promise<ExternalSkillScan> {
-    return scanExternalSkillSources(this.skillMigrationOptions(cwd));
+    return this.skills.scanExternal(cwd);
   }
 
   /** 把选中的外部 Skill 复制到用户 Skill 目录。 */
   migrateSkills(cwd: string, ids: readonly string[]): Promise<SkillMigrationResult> {
-    return migrateExternalSkills(this.skillMigrationOptions(cwd), ids);
-  }
-
-  private skillMigrationOptions(cwd: string) {
-    return {
-      home: homedir(),
-      cwd,
-      skillsDir: this.skillsDirectory(),
-      codexHome: process.env.CODEX_HOME,
-      claudeHome: process.env.CLAUDE_CONFIG_DIR,
-    };
-  }
-
-  private async loadDisabledSkills(): Promise<Set<string>> {
-    this.disabledSkills ??= await readDisabledSkills(this.options.agentDir);
-    return this.disabledSkills;
-  }
-
-  /** 从资源里去掉被停用的 Skill，让模型和 /skill:名称 都看不到。 */
-  private withoutDisabledSkills<T extends { skills: Array<{ name: string }> }>(base: T): T {
-    const disabled = this.disabledSkills;
-    if (!disabled || disabled.size === 0) return base;
-    return { ...base, skills: base.skills.filter((skill) => !disabled.has(skill.name)) };
+    return this.skills.migrate(cwd, ids);
   }
 
   /** 停用、启用或删除 Skill 后，让会话在下次发言前重新加载 Skill 列表。 */
   private async refreshEntrySkills(entry: Conversation): Promise<void> {
     const session = entry.session;
-    if (!session || entry.skillsRevision === this.skillsRevision) return;
-    const revision = this.skillsRevision;
+    if (!session || entry.skillsRevision === this.skills.revision) return;
+    const revision = this.skills.revision;
     try {
       await session.reload();
       this.applyActiveTools(entry);
@@ -1221,7 +1277,7 @@ export class AgentRuntime {
       return;
     }
     // 重新加载期间 Skill 又变了就留到下一次发言再刷。
-    if (revision === this.skillsRevision) entry.skillsRevision = revision;
+    if (revision === this.skills.revision) entry.skillsRevision = revision;
   }
 
   saveAgentSettings(input: AgentSettings): Promise<AgentSettings> {
@@ -1324,15 +1380,7 @@ export class AgentRuntime {
   }
 
   private trace(conversationId: string, restoreHistory = true): TraceRecorder {
-    let recorder = this.traces.get(conversationId);
-    if (!recorder) {
-      recorder = new TraceRecorder(conversationId, join(this.options.agentDir, "traces", `${conversationId}.jsonl`), (event) => this.emit(event));
-      this.traces.set(conversationId, recorder);
-      const entry = this.conversations.get(conversationId);
-      const manager = entry?.sessionManager ?? (entry?.sessionFile ? SessionManager.open(entry.sessionFile, this.sessionDir(), entry.snapshot.cwd) : null);
-      if (manager && restoreHistory) recorder.restoreHistory(manager.getBranch());
-    }
-    return recorder;
+    return this.traces.get(conversationId, restoreHistory);
   }
 
   getTrace(conversationId: string) {
@@ -1340,7 +1388,7 @@ export class AgentRuntime {
     return this.redactMcpForConversation(conversationId, this.trace(conversationId).snapshot());
   }
 
-  /** Trace bookkeeping must never block a summary; narrow test harnesses may omit the trace map. */
+  /** Trace bookkeeping must never block a summary; narrow test harnesses may omit the traces. */
   private recordSummaryUsage(conversationId: string, summary: Omit<TraceSummaryRequest, "id">): void {
     if (!this.traces) return;
     this.trace(conversationId).recordSummary(summary);
@@ -1673,7 +1721,7 @@ export class AgentRuntime {
       nativeTools: nativeTools ?? (() => {
         const entry = conversationId ? this.conversations.get(conversationId) : undefined;
         if (!entry) return [];
-        return [...this.nativeToolNames(entry.snapshot.mode, entry.snapshot.executionPlan !== null, entry), ...(this.options.browserRepl && entry.snapshot.mode !== "plan" ? browserToolNames : [])];
+        return this.tools.active(entry);
       }),
       permission: this.options.mcpPermission ? { request: input => this.options.mcpPermission!.request({ ...input,
         conversationId: conversationId ?? undefined, sandboxMode: conversationId ? this.conversations.get(conversationId)?.scheduledSandboxMode : undefined }) } : undefined, openUrl: this.options.mcpOpenUrl, oauth: this.oauthMcp,
@@ -1681,9 +1729,7 @@ export class AgentRuntime {
         if (this.disposed || !bridge.session || !this.mcpBridges.has(bridge.session)) return;
         const entry = conversationId ? this.conversations.get(conversationId) : undefined;
         if (entry?.session === bridge.session) {
-          const native = this.nativeToolNames(entry.snapshot.mode, entry.snapshot.executionPlan !== null, entry);
-          if (this.options.browserRepl && entry.snapshot.mode !== "plan") native.push(...browserToolNames);
-          const tools = this.mcpActiveTools(bridge.session, native);
+          const tools = this.mcpActiveTools(bridge.session, this.tools.active(entry));
           bridge.session.setActiveToolsByName(tools);
           if (JSON.stringify(tools) !== JSON.stringify(entry.snapshot.tools)) this.patchEntry(entry, { tools });
         } else {
@@ -1697,7 +1743,7 @@ export class AgentRuntime {
 
   private mcpActiveTools(session: AgentSession, native: string[]): string[] {
     const entry = [...this.conversations.values()].find(e => e.session === session);
-    if (entry?.recipeStageSideEffect === "read_only") return ["read", "bash", "ask_user_question", ...this.memoryToolNamesFor(entry)];
+    if (entry?.recipeStageSideEffect === "read_only") return this.tools.readOnlyStage(entry);
     const registered = session.getAllTools();
     const active = new Set([...session.getActiveToolNames(), ...getCurrentTools(session.sessionManager.buildSessionContext().messages).map(tool => tool.name)]);
     const extra = registered.filter(tool => isMcpTool(tool.name) && tool.name !== "tool_search" && tool.exposure !== "hidden"
@@ -1810,7 +1856,7 @@ export class AgentRuntime {
     this.thinkingSummaries.dispose();
     this.textAssist.dispose();
     this.recipeGenerator.dispose();
-    for (const trace of this.traces.values()) trace.dispose();
+    this.traces.dispose();
     this.directory?.cancelLogin();
     this.questions.cancelAll();
     for (const entry of this.conversations.values()) closing.push(this.detachEntry(entry));
@@ -1875,7 +1921,7 @@ export class AgentRuntime {
           planRevisions: stored.plans.map((plan) => ({ ...plan })),
           executionPlan: cloneExecutionPlan(activeExecution),
           goal: stored.goal,
-          tools: this.nativeToolNames(stored.mode, activeExecution !== null),
+          tools: this.tools.native(stored.mode, activeExecution !== null),
         },
         titleGenerationStarted: stored.title !== "新对话",
         titleManuallySet: stored.titleManuallySet === true,
@@ -1991,7 +2037,7 @@ export class AgentRuntime {
       createdAt: Date.now(),
       updatedAt: Date.now(),
       instructions: options.instructions ?? this.directory?.getSettings().instructions ?? "",
-      skillsRevision: this.skillsRevision,
+      skillsRevision: this.skills.revision,
       stopRequested: false,
       pendingInstructions: [],
       rebuildingInstructions: false,
@@ -2045,15 +2091,15 @@ export class AgentRuntime {
         ?? (entry.sessionFile
           ? SessionManager.open(entry.sessionFile, this.sessionDir(), cwd)
           : createPersistedSession(cwd, this.sessionDir()));
-      const settingsManager = SettingsManager.inMemory({ defaultTools: [...defaultToolNames, ...modeToolNames, ...agentToolNames, ...memoryToolNames, ...(this.options.scheduledTasks ? scheduledTaskToolNames : []), ...(this.options.browserRepl ? browserToolNames : [])] });
+      const settingsManager = SettingsManager.inMemory({ defaultTools: this.tools.registered() });
       const instructions = entry.instructions.trim();
-      await this.loadDisabledSkills();
+      await this.skills.load();
       const mcp = this.createMcpBridge(cwd, entry.id, () => entry.snapshot.mode === "plan");
       const resourceLoader = new DefaultResourceLoader({
         cwd,
         agentDir: this.options.agentDir,
         settingsManager,
-        skillsOverride: (base) => this.withoutDisabledSkills(base),
+        skillsOverride: (base) => this.skills.withoutDisabled(base),
         extensionFactories: [{
           name: "vela-mode",
           hidden: true,
@@ -2061,21 +2107,20 @@ export class AgentRuntime {
             mode: entry.snapshot.mode,
             hasExecutionPlan: entry.snapshot.executionPlan !== null,
           }), {
-            availableTools: (mode, plan) => this.nativeToolNames(mode, plan, entry),
-            authorizeCall: call => {
-              if ((memoryToolNames as readonly string[]).includes(call.toolName) && !this.memorySettings.enabled) return { allowed: false, reason: memoryDisabledInstructions };
-              if (entry.recipeStageSideEffect && (agentToolNames as readonly string[]).includes(call.toolName)) return { allowed: false, reason: "结构化阶段不能启动或控制独立子任务；阶段证据限当前会话" };
-              if (call.toolName === memoryUpdateToolName && !this.canUpdateMemory(entry)) return { allowed: false, reason: "当前模式或执行环境不允许写入长期记忆（Plan、子代理、定时任务和配方执行只能读取）" };
-              if (entry.recipeStageSideEffect === "read_only") return defaultToolPolicy.authorizeCall({ ...call, mode: "plan" });
-              return isMcpTool(call.toolName) || (this.options.scheduledTasks && call.toolName === "list_scheduled_tasks") ? { allowed: true } : defaultToolPolicy.authorizeCall(call);
-            },
+            availableTools: (mode, plan) => this.tools.native(mode, plan, entry),
+            authorizeCall: call => this.tools.authorize(call, entry),
           }),
         }, { name: "vela-memory", hidden: true, factory: this.memoryExtension(entry, null) }, ...(this.options.scheduledTasks ? [{ name: "vela-scheduled-tasks-clock", hidden: true,
           factory: ((pi) => { pi.on("before_agent_start", event => {
             event.systemPromptOptions.appendSystemPrompt += `\n\n任务时间上下文：${new Date().toISOString()}；本机时区：${Intl.DateTimeFormat().resolvedOptions().timeZone}`;
           }); }) as ExtensionFactory,
         }] : []), ...mcp.factories()],
-        appendSystemPromptOverride: (base) => [...base, ...(instructions ? [instructions] : []), ...(this.options.scheduledTasks ? [scheduledTaskInstructions] : []), ...(this.options.browserRepl ? [browserUseInstructions] : [])],
+        appendSystemPromptOverride: (base) => [
+          ...base,
+          ...(instructions ? [instructions] : []),
+          ...(this.options.scheduledTasks ? [scheduledTaskInstructions] : []),
+          ...(this.options.browserRepl ? [browserUseInstructions] : []),
+        ],
       });
       await resourceLoader.reload();
       const control = new AgentControl({
@@ -2139,7 +2184,7 @@ export class AgentRuntime {
       await session.bindExtensions({ onError: event => { log.debug("extension error", event.event); } });
       if (this.disposed) { await this.closeSession(session); await control.dispose(); throw new Error("Vela runtime has closed"); }
       control.registerRoot(session);
-      entry.skillsRevision = this.skillsRevision;
+      entry.skillsRevision = this.skills.revision;
       this.syncFromSession(entry);
       this.applyActiveTools(entry);
       this.patchEntry(entry, {
@@ -2220,17 +2265,7 @@ export class AgentRuntime {
     entry.session = session;
     entry.sessionManager = sessionManager;
     entry.sessionFile = sessionManager.getSessionFile() ?? entry.sessionFile;
-    const recorder = this.trace(entry.id);
-    const originalStream = session.agent.streamFunction;
-    const tracedStream = recorder.wrapStream(originalStream);
-    session.agent.streamFunction = tracedStream;
-    entry.unsubscribe = session.subscribe((event) => {
-      // Pi compares the stream function identity for summarization authentication.
-      // Preserve its original function during compaction, then resume main-agent tracing.
-      if (event.type === "compaction_start") session.agent.streamFunction = originalStream;
-      if (event.type === "compaction_end") session.agent.streamFunction = tracedStream;
-      this.handlePiEvent(entry.id, event);
-    });
+    entry.unsubscribe = subscribeTracedSession(session, this.trace(entry.id), (event) => this.handlePiEvent(entry.id, event));
   }
 
   private async detachEntry(entry: Conversation): Promise<void> {
@@ -2794,7 +2829,7 @@ export class AgentRuntime {
       throw new Error("先选择一个已登录或已配置密钥的模型");
     }
     const cwd = entry.snapshot.cwd;
-    const childNativeTools = () => [...agentToolNamesFor(input.kind), ...(this.memorySettings.enabled ? [memoryReadToolName] : []), ...(this.options.browserRepl && input.kind === "general" ? browserToolNames : [])];
+    const childNativeTools = () => this.tools.child(input.kind);
     const settingsManager = SettingsManager.inMemory({ defaultTools: childNativeTools() });
     const instructions = entry.instructions.trim();
     const mcp = this.createMcpBridge(cwd, entry.id, () => input.kind === "explore" || entry.snapshot.mode === "plan", childNativeTools);
@@ -2844,7 +2879,12 @@ export class AgentRuntime {
       settingsManager,
       resourceLoader,
 
-      customTools: [...childSandboxTools, ...input.customTools, ...this.memoryTools(entry, input.agentId, false), ...(input.kind === "general" ? this.browserTools(entry, input.agentId, input.kind) : [])],
+      customTools: [
+        ...childSandboxTools,
+        ...input.customTools,
+        ...this.memoryTools(entry, input.agentId, false),
+        ...(input.kind === "general" ? this.browserTools(entry, input.agentId, input.kind) : []),
+      ],
     });
     mcp.attach(session);
     if (this.disposed) { await mcp.close(); session.dispose(); throw new Error("Vela runtime has closed"); }
@@ -2935,7 +2975,12 @@ export class AgentRuntime {
 
   private browserTools(entry: Conversation, agentId: string, kind?: SubagentKind): ToolDefinition[] {
     if (kind === "explore" || !this.options.browserRepl) return [];
-    return createBrowserTools({ service: this.options.browserRepl, permission: this.options.browserReplPermission ? { request: input => this.options.browserReplPermission!.request({ ...input, conversationId: entry.id, sandboxMode: entry.scheduledSandboxMode }) } : undefined,
+    const permission = this.options.browserReplPermission;
+    return createBrowserTools({
+      service: this.options.browserRepl,
+      permission: permission
+        ? { request: input => permission.request({ ...input, conversationId: entry.id, sandboxMode: entry.scheduledSandboxMode }) }
+        : undefined,
       conversationId: entry.id, agentId, cwd: entry.snapshot.cwd,
       turnId: () => `${entry.id}:${entry.activeTurn?.startedAt ?? entry.snapshot.turnStartedAt ?? "idle"}`,
       allowed: () => entry.snapshot.mode !== "plan",
@@ -2975,7 +3020,7 @@ export class AgentRuntime {
       service: this.memory,
       enabled: () => this.memorySettings.enabled,
       instructions: () => !this.memorySettings.enabled ? memoryDisabledInstructions
-        : agentId || !this.canUpdateMemory(entry) ? memoryReadOnlyInstructions : memoryInstructions,
+        : agentId || !this.tools.canUpdateMemory(entry) ? memoryReadOnlyInstructions : memoryInstructions,
       workspace: () => ({ cwd: entry.snapshot.cwd, hasWorkspace: entry.hasWorkspace }),
       onLoad: (sources) => {
         this.memoryLoads.set(key, sources);
@@ -2983,29 +3028,6 @@ export class AgentRuntime {
         if (!agentId) this.patchEntry(entry, { memory: sources });
       },
     });
-  }
-
-  private nativeToolNames(mode: InteractionMode, plan: boolean, entry?: Conversation): string[] {
-    const tools = [...defaultToolPolicy.availableTools(mode, plan), ...(this.options.scheduledTasks ? (mode === "plan" ? ["list_scheduled_tasks"] : scheduledTaskToolNames) : [])];
-    if (entry) tools.push(...this.memoryToolNamesFor(entry));
-    return tools;
-  }
-
-  /**
-   * 按权限矩阵决定激活哪些记忆工具：主代理的 Agent / Goal 模式读写都提供，
-   * Plan、子代理、定时任务和配方执行只提供 memory_read。工具始终注册（模式可切换），
-   * 这里只决定激活。
-   */
-  private memoryToolNamesFor(entry: Conversation): string[] {
-    if (!this.memorySettings.enabled) return [];
-    return this.canUpdateMemory(entry) ? [...memoryToolNames] : [memoryReadToolName];
-  }
-
-  /** 只有主代理在非 Plan 且非后台执行的环境里可以写入长期记忆。 */
-  private canUpdateMemory(entry: Conversation): boolean {
-    if (!this.memorySettings.enabled) return false;
-    if (entry.snapshot.mode === "plan" || entry.recipeExecution || entry.scheduledTaskConversation) return false;
-    return true;
   }
 
   /**
@@ -3018,7 +3040,7 @@ export class AgentRuntime {
       enabled: () => this.memorySettings.enabled,
       update,
       workspace: () => ({ cwd: entry.snapshot.cwd, hasWorkspace: entry.hasWorkspace }),
-      allowUpdate: () => this.canUpdateMemory(entry),
+      allowUpdate: () => this.tools.canUpdateMemory(entry),
       conversationId: agentId,
       sandboxMode: () => entry.scheduledSandboxMode,
       permission: this.options.memoryPermission
@@ -3028,8 +3050,7 @@ export class AgentRuntime {
   }
 
   private applyActiveTools(entry: Conversation): void {
-    const tools = entry.recipeStageSideEffect === "read_only" ? ["read", "bash", "ask_user_question", ...this.memoryToolNamesFor(entry)] : this.nativeToolNames(entry.snapshot.mode, entry.snapshot.executionPlan !== null, entry).filter(name => !entry.recipeStageSideEffect || !(agentToolNames as readonly string[]).includes(name));
-    if (this.options.browserRepl && entry.snapshot.mode !== "plan" && !entry.recipeStageSideEffect) tools.push(...browserToolNames);
+    const tools = this.tools.active(entry);
     const session = entry.session;
     const bridge = session ? this.mcpBridges.get(session) : undefined;
     bridge?.refresh();

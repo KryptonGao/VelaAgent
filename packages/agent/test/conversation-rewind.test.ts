@@ -98,3 +98,71 @@ it("automatically captures checkpoints around a prompt, including aborted or fai
   assert.equal(await readFile(file, "utf8"), "before model");
   assert.deepEqual(runtime.getMessages(id), []);
 });
+
+describe("checkpoint timeline", () => {
+  async function withReplies() {
+    const context = await fixture();
+    const reply = (text: string) => context.entry.sessionManager.appendMessage({
+      role: "assistant", content: [{ type: "text", text }], timestamp: Date.now(), stopReason: "stop",
+    } as never);
+    const turn = async (text: string, content: string) => { await context.turn(text, content); reply(`${text} reply`); };
+    return { ...context, turn };
+  }
+
+  it("previews each checkpoint and reports conflicts without changing files", async () => {
+    const { runtime, id, file, turn, cwd } = await withReplies();
+    await writeFile(file, "start");
+    await turn("first", "one"); await turn("second", "two"); await turn("third", "three");
+    const timeline = await runtime.getCheckpoints(id);
+    assert.deepEqual(timeline.turns.map(item => [item.turnIndex, item.text, item.changedFiles]),
+      [[0, "first", ["a.txt"]], [1, "second", ["a.txt"]], [2, "third", ["a.txt"]]]);
+    assert.deepEqual(timeline.start, { available: true, removedTurns: 3, files: ["a.txt"] });
+    assert.deepEqual(timeline.turns[0]!.restore, { available: true, removedTurns: 2, files: ["a.txt"] });
+    assert.equal(timeline.turns[2]!.restore, null);
+    await writeFile(join(cwd, "a.txt"), "manual edit");
+    const conflicted = await runtime.getCheckpoints(id);
+    assert.equal(conflicted.turns[0]!.restore?.available, false);
+    assert.match(conflicted.turns[0]!.restore?.reason ?? "", /a\.txt/);
+    assert.equal(await readFile(file, "utf8"), "manual edit");
+  });
+
+  it("returns to the end of a turn, or to the start of the chat", async () => {
+    const { runtime, id, file, turn, checkpoints } = await withReplies();
+    await writeFile(file, "start");
+    await turn("first", "one"); await turn("second", "two"); await turn("third", "three");
+    await assert.rejects(runtime.restoreCheckpoint(id, 2), /已经在这个检查点/);
+    await runtime.restoreCheckpoint(id, 0);
+    assert.deepEqual(runtime.getMessages(id).map(message => message.text), ["first", "first reply"]);
+    assert.equal(await readFile(file, "utf8"), "one");
+    assert.equal((await checkpoints.list()).length, 1);
+    await runtime.restoreCheckpoint(id, -1);
+    assert.deepEqual(runtime.getMessages(id), []);
+    assert.equal(await readFile(file, "utf8"), "start");
+  });
+
+  it("forks from a checkpoint with its checkpoints, optionally restoring files", async () => {
+    const { runtime, id, file, turn, agentDir, entry } = await withReplies();
+    entry.sessionManager.appendCustomEntry("probe", {}); // Ensure the session file is persisted.
+    await writeFile(file, "start");
+    await turn("first", "one"); await turn("second", "two"); await turn("third", "three");
+    await runtime.branchConversation(id, 0);
+    const plain = runtime.activeConversationId!;
+    assert.notEqual(plain, id);
+    assert.equal(await readFile(file, "utf8"), "three");
+    const copied = await new TurnCheckpoints(join(agentDir, "checkpoints", plain), "", agentDir).list();
+    assert.equal(copied.length, 1);
+    assert.deepEqual(copied[0]!.metadata, { plans: [], latestProposedPlanId: null, executionPlans: [], activeExecutionPlanId: null, goal: null, agents: [], agentLeaves: {} });
+
+    await runtime.switchConversation(id);
+    await runtime.branchConversation(id, 1, { restoreFiles: true });
+    const restored = runtime.activeConversationId!;
+    assert.equal(await readFile(file, "utf8"), "two");
+    // The original keeps its history; the fork can still rewind its own copied turns.
+    assert.deepEqual(runtime.getMessages(id).filter(message => message.role === "user").map(message => message.text), ["first", "second", "third"]);
+    const forkTimeline = await runtime.getCheckpoints(restored);
+    assert.deepEqual(forkTimeline.turns.map(item => item.text), ["first", "second"]);
+    assert.equal(forkTimeline.start?.available, true);
+    await runtime.restoreCheckpoint(restored, -1);
+    assert.equal(await readFile(file, "utf8"), "start");
+  });
+});

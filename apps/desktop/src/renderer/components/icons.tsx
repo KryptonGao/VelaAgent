@@ -6,6 +6,11 @@ export function ClockIcon({ size = 13 }: IconProps) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>;
 }
 
+/** 检查点：逆时针箭头绕着时钟，表示回到之前的某个时间点。 */
+export function HistoryIcon({ size = 13 }: IconProps) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 2.64-6.36L3 8.3" /><path d="M3 3.5v4.8h4.8" /><path d="M12 7.5V12l3 2" /></svg>;
+}
+
 export function GlobeIcon({ size = 13 }: IconProps) {
   return <svg {...base(size)} aria-hidden="true"><circle cx="12" cy="12" r="9" />
     <path d="M3 12h18M12 3a18 18 0 0 1 0 18 18 18 0 0 1 0-18" /></svg>;

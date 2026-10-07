@@ -12,6 +12,10 @@
     "build": "pnpm --filter @vela/desktop build",
     "package:mac": "pnpm --filter @vela/desktop dist:mac",
     "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm typecheck && pnpm test:unit",
+    "test:unit": "pnpm -r --if-present test",
+    "test:ui": "pnpm --filter @vela/desktop test:ui",
+    "test:smoke": "pnpm build && pnpm --filter @vela/desktop test:smoke",
     "test:mcp": "pnpm --filter @vela/agent test:mcp && pnpm --filter @vela/desktop test:mcp && pnpm --filter @vela/desktop test:mcp:ui && pnpm --filter @vela/desktop test:mcp:electron",
     "test:center": "pnpm --filter @vela/desktop test:center"
   },

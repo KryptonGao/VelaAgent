@@ -27,6 +27,8 @@ export const IpcChannel = {
   sessionUnarchive: "session:unarchive",
   sessionBranch: "session:branch",
   sessionRewind: "session:rewind",
+  sessionCheckpoints: "session:checkpoints",
+  sessionRestoreCheckpoint: "session:restore-checkpoint",
   sessionMessages: "session:messages",
   sessionSummarizeThinking: "session:summarize-thinking",
   sessionTrace: "session:trace",
@@ -750,6 +752,40 @@ export interface TranscriptMessage {
   /** 主进程记录并持久化的整轮处理时间。 */
   turnStartedAt?: number;
   turnCompletedAt?: number;
+}
+
+/** 回到某个检查点（撤销其后各轮）能否安全执行，以及会影响什么。 */
+export interface CheckpointRestorePreview {
+  available: boolean;
+  /** 不可用的原因，例如文件在之后被手动修改，或这轮没有完整的文件检查点。 */
+  reason?: string;
+  /** 会被移除的轮数。 */
+  removedTurns: number;
+  /** 会被恢复的工作区相对路径。 */
+  files: string[];
+}
+
+/** 检查点时间轴上的一轮；turnIndex 与 branchConversation / rewindConversation 一致。 */
+export interface ConversationCheckpoint {
+  turnIndex: number;
+  text: string;
+  timestamp: number | null;
+  /** 这一轮开始时记录的文件检查点改了哪些文件；排队消息与上一轮共用检查点时为 null。 */
+  changedFiles: string[] | null;
+  /** 回到这一轮之后；最后一轮就是当前状态，为 null。 */
+  restore: CheckpointRestorePreview | null;
+}
+
+export interface CheckpointTimeline {
+  conversationId: string;
+  /** 回到对话开始之前；还没有消息时为 null。 */
+  start: CheckpointRestorePreview | null;
+  turns: ConversationCheckpoint[];
+}
+
+/** 从检查点分叉；restoreFiles 会把工作区文件恢复到这一轮之后，原对话后续轮次的改动随之撤销。 */
+export interface BranchConversationOptions {
+  restoreFiles?: boolean;
 }
 
 export type AgentStreamEvent =
@@ -2552,8 +2588,12 @@ export interface VelaApi extends McpApi, PluginApi {
   /** 归档一个对话;侧边栏不再显示,历史保留,可在设置的归档列表里搜索恢复。 */
   archiveConversation(id: string): Promise<AppState>;
   /** 从某一轮回复处分支:复制该轮及之前的历史到新对话并切换过去。 */
-  branchConversation(conversationId: string, turnIndex: number): Promise<AppState>;
+  branchConversation(conversationId: string, turnIndex: number, options?: BranchConversationOptions): Promise<AppState>;
   rewindConversation(conversationId: string, turnIndex: number): Promise<{ state: AppState; messages: TranscriptMessage[] }>;
+  /** 读取检查点时间轴：每一轮能否回退、会恢复哪些文件。 */
+  getCheckpoints(conversationId: string): Promise<CheckpointTimeline>;
+  /** 回到第 turnIndex 轮之后（-1 表示对话开始），移除其后各轮并恢复文件。 */
+  restoreCheckpoint(conversationId: string, turnIndex: number): Promise<{ state: AppState; messages: TranscriptMessage[] }>;
   /** 取消归档,对话回到侧边栏。 */
   unarchiveConversation(id: string): Promise<AppState>;
   /** 读取某个对话的完整历史(用于应用重启后恢复界面消息)。 */

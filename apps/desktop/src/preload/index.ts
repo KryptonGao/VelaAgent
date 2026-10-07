@@ -267,10 +267,13 @@ const api: VelaApi = {
     ipcRenderer.invoke(IpcChannel.sessionArchive, id) as Promise<AppState>,
   unarchiveConversation: (id: string) =>
     ipcRenderer.invoke(IpcChannel.sessionUnarchive, id) as Promise<AppState>,
-  branchConversation: (conversationId: string, turnIndex: number) =>
-    ipcRenderer.invoke(IpcChannel.sessionBranch, conversationId, turnIndex) as Promise<AppState>,
+  branchConversation: (conversationId: string, turnIndex: number, options) =>
+    ipcRenderer.invoke(IpcChannel.sessionBranch, conversationId, turnIndex, options) as Promise<AppState>,
   rewindConversation: (conversationId, turnIndex) =>
     ipcRenderer.invoke(IpcChannel.sessionRewind, conversationId, turnIndex) as Promise<{ state: AppState; messages: TranscriptMessage[] }>,
+  getCheckpoints: (conversationId) => ipcRenderer.invoke(IpcChannel.sessionCheckpoints, conversationId),
+  restoreCheckpoint: (conversationId, turnIndex) =>
+    ipcRenderer.invoke(IpcChannel.sessionRestoreCheckpoint, conversationId, turnIndex) as Promise<{ state: AppState; messages: TranscriptMessage[] }>,
   getTrace: (conversationId) => ipcRenderer.invoke(IpcChannel.sessionTrace, conversationId),
   getTraceDetails: (conversationId, nodeId) => ipcRenderer.invoke(IpcChannel.sessionTraceDetails, conversationId, nodeId),
   getMessages: (conversationId: string) =>

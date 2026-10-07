@@ -5,6 +5,7 @@ import type {
   AgentStreamEvent,
   AppState,
   AskUserQuestionRequest,
+  BranchConversationOptions,
   ImageAttachment,
   InteractionMode,
   PlanExecutionContextStrategy,
@@ -416,32 +417,33 @@ export function useSession(notify: NotifySound = noSound) {
     }
   }, []);
 
-  /** 从某一轮回复处分支出新对话并切换过去;turnIndex 是可见用户消息的序号。 */
-  const branch = useCallback(async (turnIndex: number) => {
+  /** 从检查点分叉出新对话并切换过去；失败时抛出，由调用方展示。 */
+  const forkCheckpoint = useCallback(async (turnIndex: number, options?: BranchConversationOptions) => {
     const api = window.vela;
     const id = activeIdRef.current;
-    if (!api || !id) return;
+    if (!api || !id) throw new Error(tr("对话不存在或已结束", "Chat not found or already ended."));
+    const next = await api.branchConversation(id, turnIndex, options);
+    setState(next);
+    if (next.activeConversationId) void loadTranscript(next.activeConversationId);
+  }, [loadTranscript]);
+
+  /** 从某一轮回复处分支出新对话并切换过去;turnIndex 是可见用户消息的序号。 */
+  const branch = useCallback(async (turnIndex: number) => {
+    const id = activeIdRef.current;
+    if (!window.vela || !id) return;
     setErrors((current) => ({ ...current, [id]: "" }));
     try {
-      const next = await api.branchConversation(id, turnIndex);
-      setState(next);
-      if (next.activeConversationId) void loadTranscript(next.activeConversationId);
+      await forkCheckpoint(turnIndex);
     } catch (error) {
       const message = error instanceof Error
         ? localizeError(error.message)
         : tr("无法分支到新聊天", "Could not branch to a new chat");
       setErrors((current) => ({ ...current, [id]: message }));
     }
-  }, [loadTranscript]);
+  }, [forkCheckpoint]);
 
-  const edit = useCallback(async (turnIndex: number, text: string, images?: ImageAttachment[]) => {
-    const api = window.vela;
-    const id = activeIdRef.current;
-    if (!api || !id) throw new Error(tr("对话不存在或已结束", "Chat not found or already ended."));
-    if (!text.trim() && !images?.length) throw new Error(tr("消息不能为空", "Message cannot be empty."));
-    if (text.length > 100_000) throw new Error(tr("消息过长", "Message is too long."));
-    setErrors(current => ({ ...current, [id]: "" }));
-    const result = await api.rewindConversation(id, turnIndex);
+  /** 回退后用主进程返回的历史替换本地消息与子代理状态。 */
+  const applyRewind = useCallback((id: string, result: { state: AppState; messages: TranscriptMessage[] }) => {
     setState(result.state);
     const history = result.messages.map(toUiMessage);
     setAgentHistory(current => ({ ...current, [id]: history }));
@@ -451,6 +453,27 @@ export function useSession(notify: NotifySound = noSound) {
     setAgentBuckets(current => ({ ...current, [id]: {} }));
     setPlanDrafts(current => ({ ...current, [id]: null }));
     setPlanFocus(null);
+    return history;
+  }, []);
+
+  /** 回到第 turnIndex 轮之后（-1 为对话开始）；失败时抛出，由检查点面板展示。 */
+  const restoreCheckpoint = useCallback(async (turnIndex: number) => {
+    const api = window.vela;
+    const id = activeIdRef.current;
+    if (!api || !id) throw new Error(tr("对话不存在或已结束", "Chat not found or already ended."));
+    setErrors(current => ({ ...current, [id]: "" }));
+    const history = applyRewind(id, await api.restoreCheckpoint(id, turnIndex));
+    setBuckets(current => ({ ...current, [id]: history }));
+  }, [applyRewind]);
+
+  const edit = useCallback(async (turnIndex: number, text: string, images?: ImageAttachment[]) => {
+    const api = window.vela;
+    const id = activeIdRef.current;
+    if (!api || !id) throw new Error(tr("对话不存在或已结束", "Chat not found or already ended."));
+    if (!text.trim() && !images?.length) throw new Error(tr("消息不能为空", "Message cannot be empty."));
+    if (text.length > 100_000) throw new Error(tr("消息过长", "Message is too long."));
+    setErrors(current => ({ ...current, [id]: "" }));
+    const history = applyRewind(id, await api.rewindConversation(id, turnIndex));
     setBuckets(current => ({ ...current, [id]: [
       ...history,
       { id: crypto.randomUUID(), role: "user", text, images, thinking: "", tools: [], timestamp: Date.now() },
@@ -463,7 +486,7 @@ export function useSession(notify: NotifySound = noSound) {
       setErrors(current => ({ ...current, [id]: message }));
       setBuckets(current => appendAssistantError(current, id, message));
     });
-  }, []);
+  }, [applyRewind]);
 
   const sendError = activeConversationId ? errors[activeConversationId] || null : null;
   /** 按工具调用 id 找到对应的问题请求,消息流里的提问卡片用它判断是否可交互。 */
@@ -537,6 +560,8 @@ export function useSession(notify: NotifySound = noSound) {
     rename,
     unarchive,
     branch,
+    forkCheckpoint,
+    restoreCheckpoint,
     setAppState: setState,
   };
 }

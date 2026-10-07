@@ -1,0 +1,57 @@
+name: Electron smoke
+
+# 真实 Electron 的 UI 检查和冒烟测试慢且依赖桌面环境，不放在 PR 上：
+# 每晚跑一次 main，发版打 tag 时跑一次，也可以手动触发。
+on:
+  schedule:
+    - cron: "0 18 * * *" # 北京时间 02:00
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      filter:
+        description: "只跑名字包含这些关键词的检查（空格分隔，留空跑全部）"
+        required: false
+        default: ""
+
+concurrency:
+  group: electron-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  electron:
+    name: Electron UI and smoke tests
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Cache Electron binary
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/electron
+          key: electron-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck and unit tests
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      - name: Electron UI and smoke tests
+        working-directory: apps/desktop
+        env:
+          FILTER: ${{ inputs.filter }}
+        run: node test/run-electron-suite.mjs all $FILTER

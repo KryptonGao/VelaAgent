@@ -8,7 +8,7 @@ import type { AppState, AskUserQuestionRequest, InteractionMode } from "@vela/sh
 import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useAgentWorkspace } from "./AgentPanel";
 import { modKeyLabel } from "../platform";
-import { ArrowLeftIcon, BranchIcon, CheckIcon, CopyIcon, FolderIcon, PlusIcon, StackIcon } from "./icons";
+import { ArrowLeftIcon, BranchIcon, CheckIcon, CopyIcon, FolderIcon, HistoryIcon, PlusIcon, StackIcon } from "./icons";
 import { trackEnteredMessages, type EnterTrack } from "./message-motion";
 import type { useModels } from "../hooks/useModels";
 import type { ProjectApi } from "../hooks/useProject";
@@ -167,6 +167,8 @@ export interface ChatViewProps {
   onReplyQuestion: (id: string, answer: string | null) => void;
   /** 从某一轮回复处分支出新对话;参数是可见用户消息的序号。 */
   onBranch: (turnIndex: number) => void;
+  /** 打开检查点时间轴；传入轮次时选中那一轮。 */
+  onOpenCheckpoints?: (turnIndex?: number) => void;
   /** 顶栏的「新建标签页」入口:工作面板没开、或右侧栏收起时才显示,避免和标签栏的 + 重复。 */
   showNewTab: boolean;
   onExpandWorkbench?: () => void;
@@ -207,6 +209,7 @@ export function ChatView({
   getQuestion,
   onReplyQuestion,
   onBranch,
+  onOpenCheckpoints,
   showNewTab,
   onExpandWorkbench,
   onOpenWebLink,
@@ -550,6 +553,18 @@ export function ChatView({
               <PlusIcon size={15} />
             </button>
           ) : null}
+          {onOpenCheckpoints && state?.activeConversationId && messages.some(message => message.role === "user") ? (
+            <button
+              className="view-icon-btn"
+              type="button"
+              title={tr("检查点与回滚", "Checkpoints")}
+              aria-label={tr("检查点与回滚", "Checkpoints")}
+              aria-haspopup="dialog"
+              onClick={() => onOpenCheckpoints()}
+            >
+              <HistoryIcon size={15} />
+            </button>
+          ) : null}
           <ChatActionsMenu key={state?.activeConversationId ?? "empty"} messages={messages} streaming={Boolean(streaming)} />
           <button
             className={`view-icon-btn${rightCollapsed ? "" : " active"}`}
@@ -656,6 +671,7 @@ export function ChatView({
                     branchTurn={branchTurn}
                     replyTime={finalReply.timestamp ?? lastAssistant.timestamp ?? lastAssistant.turnCompletedAt ?? null}
                     onBranch={onBranch}
+                    onCheckpoints={onOpenCheckpoints}
                   />
                 ) : turn.assistants.length > 0 ? (
                   <div className="assistant-live-turn">
@@ -707,6 +723,7 @@ export function ChatView({
                         branchTurn={branchTurn}
                         branchDisabled={session?.status !== "ready"}
                         onBranch={onBranch}
+                        onCheckpoints={onOpenCheckpoints}
                       />
                     ) : null}
                   </div>
@@ -1073,6 +1090,7 @@ const CompletedAssistantTurn = memo(function CompletedAssistantTurn({
   branchTurn,
   replyTime,
   onBranch,
+  onCheckpoints,
 }: {
   messages: UiMessage[];
   finalReply: UiMessage;
@@ -1089,6 +1107,7 @@ const CompletedAssistantTurn = memo(function CompletedAssistantTurn({
   branchTurn: number | null;
   replyTime: number | null;
   onBranch: (turnIndex: number) => void;
+  onCheckpoints?: (turnIndex?: number) => void;
 }) {
   const [expanded, setExpanded] = useToolExpanded(foldSequenceId(messages[0]?.id ? `turn:${messages[0].id}` : undefined), toolDisplay === "compact");
   const details = useToolProcessDetails();
@@ -1176,6 +1195,7 @@ const CompletedAssistantTurn = memo(function CompletedAssistantTurn({
         branchTurn={branchTurn}
         branchDisabled={branchTurn === null}
         onBranch={onBranch}
+        onCheckpoints={onCheckpoints}
       />
       {changes ? <TurnChangesCard turnId={messages[messages.length - 1].id} changes={changes} onOpenChanges={onOpenChanges} onReviewTurn={onReviewTurn} canManageChanges={canManageChanges} /> : null}
     </article>
@@ -1189,12 +1209,14 @@ function ReplyActions({
   branchTurn,
   branchDisabled,
   onBranch,
+  onCheckpoints,
 }: {
   text: string;
   timestamp: number | null;
   branchTurn: number | null;
   branchDisabled: boolean;
   onBranch: (turnIndex: number) => void;
+  onCheckpoints?: (turnIndex?: number) => void;
 }) {
   const [copied, setCopied] = useState(false);
   const time = formatReplyTime(timestamp);
@@ -1233,6 +1255,19 @@ function ReplyActions({
         <BranchIcon size={13} />
         <span>{tr("分支到新聊天", "Branch to new chat")}</span>
       </button>
+      {onCheckpoints && branchTurn !== null ? (
+        <button
+          className="reply-action"
+          type="button"
+          title={tr("回到这一轮结束时，或从这里分叉并恢复文件", "Return to the end of this turn, or fork from here with its files")}
+          aria-label={tr("检查点", "Checkpoint")}
+          aria-haspopup="dialog"
+          onClick={() => onCheckpoints(branchTurn)}
+        >
+          <HistoryIcon size={13} />
+          <span>{tr("检查点", "Checkpoint")}</span>
+        </button>
+      ) : null}
       {time && timestamp !== null ? (
         <time className="reply-time" dateTime={new Date(timestamp).toISOString()} title={formatReplyTimeTitle(timestamp)}>
           {time}

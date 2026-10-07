@@ -8,6 +8,7 @@ import {
   type AppState,
   type AskUserQuestionEvent,
   type AuthMethodType,
+  type BranchConversationOptions,
   type CustomModelApi,
   type CustomModelInput,
   type ImageAttachment,
@@ -151,9 +152,19 @@ export class SessionHost {
       await this.runtime.unarchiveConversation(parseConversationId(rawId, "对话"));
       return this.currentState();
     });
-    ipcMain.handle(IpcChannel.sessionBranch, async (_event, rawId: unknown, rawTurn: unknown) => {
-      await this.runtime.branchConversation(parseConversationId(rawId, "对话"), parseTurnIndex(rawTurn));
+    ipcMain.handle(IpcChannel.sessionBranch, async (_event, rawId: unknown, rawTurn: unknown, rawOptions: unknown) => {
+      const options = parseBranchOptions(rawOptions);
+      await this.runtime.branchConversation(parseConversationId(rawId, "对话"), parseTurnIndex(rawTurn), options);
+      if (options.restoreFiles) this.hooks.onAgentMutation?.();
       return this.currentState();
+    });
+    ipcMain.handle(IpcChannel.sessionCheckpoints, (_event, rawId: unknown) => this.runtime.getCheckpoints(parseConversationId(rawId, "对话")));
+    ipcMain.handle(IpcChannel.sessionRestoreCheckpoint, async (_event, rawId: unknown, rawTurn: unknown) => {
+      const id = parseConversationId(rawId, "对话");
+      // -1 回到对话开始之前。
+      await this.runtime.restoreCheckpoint(id, rawTurn === -1 ? -1 : parseTurnIndex(rawTurn));
+      this.hooks.onAgentMutation?.();
+      return { state: this.currentState(), messages: this.runtime.getMessages(id) };
     });
     ipcMain.handle(IpcChannel.sessionRewind, async (_event, rawId: unknown, rawTurn: unknown) => {
       const id = parseConversationId(rawId, "对话");
@@ -452,6 +463,14 @@ function parseQuestionAnswer(value: unknown): string | null {
   const answer = value.trim();
   if (!answer || answer.length > 4000) throw new Error("回答不正确");
   return answer;
+}
+
+function parseBranchOptions(value: unknown): BranchConversationOptions {
+  if (value === undefined) return {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("分支参数不正确");
+  const { restoreFiles } = value as Record<string, unknown>;
+  if (restoreFiles !== undefined && typeof restoreFiles !== "boolean") throw new Error("分支参数不正确");
+  return { restoreFiles: restoreFiles === true };
 }
 
 function parseTurnIndex(value: unknown): number {

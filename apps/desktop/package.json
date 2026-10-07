@@ -1,7 +1,7 @@
 {
   "name": "@vela/desktop",
-  "version": "1.0.2",
-  "shortVersion": "1.0.2",
+  "version": "1.0.3",
+  "shortVersion": "1.0.3",
   "private": true,
   "main": "./out/main/index.mjs",
   "scripts": {
@@ -33,6 +33,9 @@
     "dist:mac": "electron-vite build && electron-builder --mac --arm64",
     "dist:mac:signed": "electron-vite build && node ../../scripts/package-mac-signed.mjs",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "test": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --experimental-test-module-mocks --test 'test/*.test.ts' 'test/*.test.mjs'",
+    "test:ui": "node test/run-electron-suite.mjs ui",
+    "test:smoke": "node test/run-electron-suite.mjs smoke",
     "test:browser-repl": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --experimental-test-module-mocks --test test/browser-repl-manager.test.ts test/browser-repl-worker.test.ts",
     "test:browser:electron": "electron test/browser-electron-smoke.mjs",
     "test:browser-auth:electron": "node test/browser-auth-electron-smoke.mjs",

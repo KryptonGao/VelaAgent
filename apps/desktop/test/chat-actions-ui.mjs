@@ -54,7 +54,7 @@ if (!process.versions.electron) {
               {recipesOpen ? <TaskRecipesPage catalog={null} workspace={null} workspaces={[]} locale="zh-CN"
                 sidebarCollapsed={false} onToggleSidebar={() => {}} onOpenConversation={() => {}}
                 seed={seed} onConsumeSeed={() => setSeed(null)} registerLeaveGuard={() => {}} /> :
-                <header className="main-chat-header"><div className="chat-header-actions">
+                <header className="main-chat-header"><span className="chat-active-title">Hello</span><div className="chat-header-actions">
                   <ChatActionsMenu messages={fixture.messages} streaming={false} />
                 </div></header>}
             </RecipeActionsContext.Provider>;

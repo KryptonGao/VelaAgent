@@ -114,6 +114,37 @@ it("runtime activates browser tools only with a host in execution mode and inval
   entry.session = null;
 });
 
+it("MCP changes during a recipe stage keep browser and subagent tools out of the loadout and the guard", async t => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { AgentRuntime } = await import("../src/runtime.ts");
+  const { spawnAgentToolName } = await import("../src/subagent.ts");
+  const root = await mkdtemp(join(tmpdir(), "vela-browser-stage-"));
+  const runtime = new AgentRuntime({ cwd: root, agentDir: root, browserRepl: harness().service });
+  t.after(async () => { await runtime.dispose(); await rm(root, { recursive: true, force: true }); });
+  await runtime.createConversation(root);
+  type Session = import("@earendil-works/pi-coding-agent").AgentSession;
+  type Bridge = { options: { nativeTools(): string[]; onChange?: () => void } };
+  type Entry = { session: Session; recipeStageSideEffect?: "read_only" | "workspace" | "external" };
+  const internals = runtime as unknown as { conversations: Map<string, Entry>; mcpBridges: Map<Session, Bridge> };
+  const entry = internals.conversations.get(runtime.activeConversationId!)!;
+  const bridge = internals.mcpBridges.get(entry.session)!;
+  const mcpChanged = async () => { bridge.options.onChange?.(); await new Promise(resolve => setImmediate(resolve)); };
+
+  entry.recipeStageSideEffect = "workspace";
+  await mcpChanged();
+  for (const name of ["browser_repl", spawnAgentToolName]) {
+    assert.equal(entry.session.getActiveToolNames().includes(name), false, `${name} stays inactive`);
+    assert.equal(bridge.options.nativeTools().includes(name), false, `${name} is blocked by the MCP guard`);
+  }
+
+  entry.recipeStageSideEffect = undefined;
+  await mcpChanged();
+  assert.ok(entry.session.getActiveToolNames().includes("browser_repl"));
+  assert.ok(bridge.options.nativeTools().includes("browser_repl"));
+});
+
 
 it("marks normalized host failures as failed tools", async () => {
   const h = harness();

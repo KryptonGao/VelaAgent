@@ -16,6 +16,7 @@ import { RecipeActionsContext } from "./components/recipe-actions-context";
 import { ScheduledTasksPage } from "./components/ScheduledTasksPage";
 import { Sidebar } from "./components/Sidebar";
 import { RenameConversationDialog } from "./components/RenameConversationDialog";
+import { CheckpointTimelineDialog } from "./components/CheckpointTimelineDialog";
 import { FilePreviewProvider, type PreviewFileDescriptor } from "./components/preview/FilePreviewContext";
 import type { StartTabAction } from "./components/StartView";
 import { WorkbenchPanel, type WorkbenchTab } from "./components/WorkbenchPanel";
@@ -114,6 +115,14 @@ export function App() {
     const conversation = session.conversations.find(item => item.id === id);
     if (conversation) setRenamingConversation({ id, title: conversation.title });
   }, [session.conversations]);
+  /** 检查点时间轴：打开时记录对话和预先选中的轮次。 */
+  const [checkpoints, setCheckpoints] = useState<{ conversationId: string; turnIndex: number | null } | null>(null);
+  const openCheckpoints = useCallback((turnIndex?: number) => {
+    const id = session.activeConversationId;
+    if (id) setCheckpoints({ conversationId: id, turnIndex: turnIndex ?? null });
+  }, [session.activeConversationId]);
+  const forkCheckpoint = useCallback((turnIndex: number, restoreFiles: boolean) =>
+    session.forkCheckpoint(turnIndex, { restoreFiles }), [session.forkCheckpoint]);
   const models = useModels(session.setAppState);
   const project = useProject(sounds.notify);
   setActiveLocale(preferences.locale);
@@ -695,6 +704,7 @@ export function App() {
                           getQuestion={session.getQuestion}
                           onReplyQuestion={replyQuestion}
                           onBranch={branchTurn}
+                          onOpenCheckpoints={openCheckpoints}
                           // 工作面板自己没开(没有标签页)时,或右侧栏收起时,顶栏补一个新建标签页入口;
                           // 工作面板和右侧栏都在时它自己标签栏里的 + 已经够用,不再重复。
                           showNewTab={workbenchTabs.length === 0 || workbenchCollapsed || !contextSidebarOpen}
@@ -808,6 +818,15 @@ export function App() {
             </div>
           </ScreenPresence>
         </div>
+        {checkpoints && checkpoints.conversationId === session.activeConversationId ? <CheckpointTimelineDialog
+          key={checkpoints.conversationId}
+          conversationId={checkpoints.conversationId}
+          initialTurn={checkpoints.turnIndex}
+          busy={session.state?.session.status === "streaming"}
+          onRestore={session.restoreCheckpoint}
+          onFork={forkCheckpoint}
+          onClose={() => setCheckpoints(null)}
+        /> : null}
         {renamingConversation ? <RenameConversationDialog
           key={renamingConversation.id}
           conversation={renamingConversation}

@@ -1,8 +1,8 @@
 // Real Electron lock regression: installed + development coexist, duplicate profiles quit.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createRequire, stripTypeScriptTypes } from "node:module";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,7 +12,12 @@ const require = createRequire(join(here, "../package.json"));
 const electron = require("electron");
 const temporary = mkdtempSync(join(tmpdir(), "vela-profile-electron-"));
 const children = new Set();
-writeFileSync(join(temporary, "vela-home.mjs"), stripTypeScriptTypes(readFileSync(join(here, "../src/main/vela-home.ts"), "utf8")));
+// 打包而不是只剥类型：vela-home.ts 依赖工作区包 @vela/shared，临时目录里解析不到。
+const { build } = await import("esbuild");
+await build({
+  entryPoints: [join(here, "../src/main/vela-home.ts")], outfile: join(temporary, "vela-home.mjs"),
+  bundle: true, platform: "node", format: "esm", logLevel: "warning",
+});
 writeFileSync(join(temporary, "entry.mjs"), `
 import { app } from "electron";
 import { mkdirSync } from "node:fs";

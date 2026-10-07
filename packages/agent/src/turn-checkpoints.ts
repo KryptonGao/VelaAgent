@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, readdir, readlink, rename, rm, symlink, writeFile, chmod } from "node:fs/promises";
+import { copyFile, link, lstat, mkdir, readFile, readdir, readlink, rename, rm, symlink, writeFile, chmod } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
@@ -19,6 +19,11 @@ export interface TurnCheckpoint<T> {
 const omitted = new Set([".git", "node_modules", ".pnpm-store", ".venv", "venv", "__pycache__", ".next", "dist", "out", "build", "target"]);
 const same = (a: FileState | undefined, b: FileState | undefined) =>
   a?.hash === b?.hash && a?.mode === b?.mode && a?.link === b?.link;
+/** Paths a finished turn changed; an unfinished point reports none. */
+export const changedPaths = (point: Pick<TurnCheckpoint<unknown>, "before" | "after">) => {
+  if (!point.after) return [];
+  return [...new Set([...Object.keys(point.before), ...Object.keys(point.after)])].filter(path => !same(point.before[path], point.after![path])).sort();
+};
 const inside = (root: string, path: string) => {
   const rel = relative(root, path);
   return rel === "" || (!rel.startsWith(`..${sep}`) && rel !== ".." && !isAbsolute(rel));
@@ -54,6 +59,25 @@ export class TurnCheckpoints<T> {
   }
   async remove(points: TurnCheckpoint<T>[]) {
     for (const point of points) await rm(this.file(point.id), { force: true });
+  }
+  /** Copy points and the blobs their changed files need into another store, e.g. a forked chat. */
+  async copyTo(target: TurnCheckpoints<T>, points: TurnCheckpoint<T>[], metadata: (value: T) => T) {
+    for (const point of points) {
+      for (const path of changedPaths(point)) {
+        for (const state of [point.before[path], point.after?.[path]]) {
+          if (!state || state.link !== undefined || !/^[a-f0-9]{64}$/.test(state.hash)) continue;
+          const from = join(this.directory, "blobs", state.hash), to = join(target.directory, "blobs", state.hash);
+          await mkdir(dirname(to), { recursive: true, mode: 0o700 });
+          // Blobs are content-addressed and never rewritten, so a hard link is a safe copy.
+          await link(from, to).catch(async error => {
+            if (error.code === "EEXIST") return;
+            if (error.code === "ENOENT") throw new Error("文件检查点损坏");
+            await copyFile(from, to);
+          });
+        }
+      }
+      await target.save({ ...structuredClone(point), metadata: metadata(structuredClone(point.metadata)) });
+    }
   }
 
   private async paths(): Promise<string[]> {
@@ -93,7 +117,7 @@ export class TurnCheckpoints<T> {
     }
     return absolute;
   }
-  private async read(path: string, capturing = false): Promise<FileState | undefined> {
+  private async read(path: string, capturing = false, store = true): Promise<FileState | undefined> {
     const absolute = await this.safePath(path);
     let stat;
     try { stat = await lstat(absolute); }
@@ -108,6 +132,7 @@ export class TurnCheckpoints<T> {
     }
     const bytes = await readFile(absolute);
     const hash = createHash("sha256").update(bytes).digest("hex");
+    if (!store) return { hash, mode: stat.mode & 0o777 };
     const blob = join(this.directory, "blobs", hash);
     await mkdir(dirname(blob), { recursive: true, mode: 0o700 });
     await writeFile(blob, bytes, { flag: "wx", mode: 0o600 }).catch(error => { if (error.code !== "EEXIST") throw error; });
@@ -122,21 +147,42 @@ export class TurnCheckpoints<T> {
     return files;
   }
 
+  /** Validate one point against the state the later points will leave behind. */
+  private async stage(point: TurnCheckpoint<T>, desired: Map<string, FileState | undefined>, original: Map<string, FileState | undefined>, store: boolean) {
+    if (point.unavailableReason) throw new Error(point.unavailableReason);
+    if (!point.after) throw new Error("这轮消息的文件检查点未完成，无法安全回退");
+    for (const path of changedPaths(point)) {
+      const current = desired.has(path) ? desired.get(path) : await this.read(path, false, store);
+      if (!same(current, point.after[path])) throw new Error(`文件在这轮之后又被修改，请先处理冲突再重新发送：${path}`);
+      if (!original.has(path)) original.set(path, current);
+      desired.set(path, point.before[path]);
+    }
+  }
+
+  /**
+   * Dry run of restore for every suffix of `points` (oldest first) without writing anything.
+   * Entry i is the reason restoring points[i..] would fail, or null when it is safe.
+   */
+  async check(points: TurnCheckpoint<T>[]): Promise<(string | null)[]> {
+    const desired = new Map<string, FileState | undefined>();
+    const original = new Map<string, FileState | undefined>();
+    const result: (string | null)[] = [];
+    let failure: string | null = null;
+    for (let index = points.length - 1; index >= 0; index -= 1) {
+      if (failure === null) {
+        try { await this.stage(points[index]!, desired, original, false); }
+        catch (error) { failure = error instanceof Error ? error.message : String(error); }
+      }
+      result[index] = failure;
+    }
+    return result;
+  }
+
   /** Preflight every affected file and every blob before writing anything. Preserve unrelated edits. */
   async restore(points: TurnCheckpoint<T>[]) {
     const original = new Map<string, FileState | undefined>();
     const desired = new Map<string, FileState | undefined>();
-    for (const point of [...points].reverse()) {
-      if (point.unavailableReason) throw new Error(point.unavailableReason);
-      if (!point.after) throw new Error("这轮消息的文件检查点未完成，无法安全回退");
-      for (const path of new Set([...Object.keys(point.before), ...Object.keys(point.after)])) {
-        if (same(point.before[path], point.after[path])) continue;
-        const current = desired.has(path) ? desired.get(path) : await this.read(path);
-        if (!same(current, point.after[path])) throw new Error(`文件在这轮之后又被修改，请先处理冲突再重新发送：${path}`);
-        if (!original.has(path)) original.set(path, current);
-        desired.set(path, point.before[path]);
-      }
-    }
+    for (const point of [...points].reverse()) await this.stage(point, desired, original, true);
     const buffers = new Map<string, Buffer>();
     for (const state of [...desired.values(), ...original.values()]) {
       if (!state || state.link !== undefined || buffers.has(state.hash)) continue;

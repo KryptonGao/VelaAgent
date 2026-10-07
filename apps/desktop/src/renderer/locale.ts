@@ -135,6 +135,16 @@ const knownErrors: Record<string, string> = {
   "上下文长度需要是正整数": "Context window must be a positive integer.",
   "用户拒绝了命令执行": "Command execution was denied",
   "用户拒绝了工作区外的文件修改": "File changes outside the workspace were denied",
+  "这一轮与上一轮在同一次运行中，没有单独的文件检查点": "This turn ran together with the previous one and has no checkpoint of its own.",
+  "这轮执行时有其他对话同时更改工作区，无法安全回退": "Another chat changed the workspace during this turn, so it cannot be safely rewound.",
+  "这轮消息的文件检查点未完成，无法安全回退": "This turn's file checkpoint is incomplete, so it cannot be safely rewound.",
+  "这条历史消息没有文件检查点，无法回退更改": "This message has no file checkpoint, so its changes cannot be rewound.",
+  "下一轮没有单独的文件检查点，无法把文件恢复到这一轮之后": "The next turn has no checkpoint of its own, so files cannot be restored to this point.",
+  "工作区还有任务运行中，请停止或等待完成后修改消息": "A task is still running in this workspace. Stop it or wait for it to finish.",
+  "工作区正在回退消息，请稍后再发送": "The workspace is being rewound. Send again in a moment.",
+  "找不到要回到的检查点": "Checkpoint not found.",
+  "已经在这个检查点": "The chat is already at this checkpoint.",
+  "文件检查点损坏": "The file checkpoint is damaged.",
 };
 
 export function localizeError(message: string): string {
@@ -149,6 +159,8 @@ export function localizeError(message: string): string {
   if (commandDenied) return `${knownErrors["用户拒绝了命令执行"]}: ${commandDenied[1]}`;
   const fileDenied = /^用户拒绝了工作区外的文件修改[:：](.*)$/.exec(cleaned);
   if (fileDenied) return `${knownErrors["用户拒绝了工作区外的文件修改"]}: ${fileDenied[1]}`;
+  const conflict = /^文件在这轮之后又被修改，请先处理冲突再重新发送[:：](.*)$/.exec(cleaned);
+  if (conflict) return `This file was changed after the turn. Resolve the conflict first: ${conflict[1]}`;
   const tooLong = /^(.+)过长$/.exec(cleaned);
   if (tooLong?.[1]) {
     const labels: Record<string, string> = {
