@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="440" viewBox="0 0 1200 440" role="img" aria-labelledby="t d" xml:lang="zh-TW" font-family="-apple-system,BlinkMacSystemFont,'PingFang TC','Microsoft JhengHei','Noto Sans CJK TC',sans-serif">
+  <title id="t">Vela</title>
+  <desc id="d">Vela，在本機程式碼儲存庫中運作的桌面 AI 程式設計助理. The board on the right shows compact tool rows, a SubAgents path tree and a trace timeline.</desc>
+  <rect width="1200" height="440" rx="26" fill="#f5f8ff"/>
+  <rect x=".5" y=".5" width="1199" height="439" rx="25.5" fill="none" stroke="#d9e4f7"/>
+
+  <g id="title-block">
+    <path transform="translate(80 82) scale(15)" d="M0,-1 C.1,-.45 .45,-.1 1,0 C.45,.1 .1,.45 0,1 C-.1,.45 -.45,.1 -1,0 C-.45,-.1 -.1,-.45 0,-1Z" fill="#2563eb"/>
+    <text x="108" y="89" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="20" font-weight="600" letter-spacing="3" fill="#6b7a99">VELAHARNESS</text>
+    <text x="60" y="226" font-size="132" font-weight="800" letter-spacing="-4" fill="#12224a">Vela</text>
+    <text x="64" y="284" font-size="32" font-weight="600" fill="#2b3a5c">在本機程式碼儲存庫中運作的</text>
+    <text x="64" y="327" font-size="32" font-weight="600" fill="#2b3a5c">桌面 AI 程式設計助理</text>
+    <rect x="64" y="356" width="116" height="40" rx="20" fill="#ffffff" stroke="#d9e4f7"/><text x="122.0" y="383" text-anchor="middle" font-size="20" font-weight="600" fill="#2b3a5c">緊湊模式</text><rect x="192" y="356" width="137" height="40" rx="20" fill="#ffffff" stroke="#d9e4f7"/><text x="260.5" y="383" text-anchor="middle" font-size="20" font-weight="600" fill="#2b3a5c">SubAgents</text><rect x="341" y="356" width="116" height="40" rx="20" fill="#ffffff" stroke="#d9e4f7"/><text x="399.0" y="383" text-anchor="middle" font-size="20" font-weight="600" fill="#2b3a5c">軌跡介面</text>
+  </g>
+
+  <g id="project-board">
+    <rect x="648" y="40" width="488" height="360" rx="20" fill="#ffffff" stroke="#d9e4f7"/>
+
+    <g font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="20" fill="#2b3a5c">
+      <text x="676" y="88"><tspan fill="#2563eb" font-weight="700">read</tspan>  callback.ts guards.ts <tspan fill="#6b7a99">+1</tspan></text>
+      <text x="676" y="126"><tspan fill="#2563eb" font-weight="700">edit</tspan>  redirect.ts <tspan fill="#12a36b" font-weight="700">+2</tspan> <tspan fill="#e0432f" font-weight="700">−1</tspan></text>
+      <text x="676" y="164"><tspan fill="#2563eb" font-weight="700">bash</tspan>  pnpm test</text>
+    </g>
+    <path d="M1086 154 l5 5 l10 -11" fill="none" stroke="#12a36b" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M676 192 H1108" stroke="#d9e4f7"/>
+
+    <g font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="20" fill="#2b3a5c">
+      <text x="676" y="228" fill="#6b7a99">spawn_agent ×3</text>
+      <path d="M690 244 V326 M690 258 H706 M690 291 H706 M690 326 H706" fill="none" stroke="#93c5fd" stroke-width="2" stroke-linecap="round" transform="translate(0 0)"/>
+      <text x="716" y="264">/root/routing</text>
+      <rect x="708" y="274" width="392" height="34" rx="9" fill="#e8f0ff"/>
+      <circle cx="728" cy="291" r="6" fill="#2563eb"/>
+      <text x="744" y="298" font-weight="700" fill="#12224a">/root/auth</text>
+      <text x="716" y="332">/root/review</text>
+    </g>
+    <path d="M1086 254 l5 5 l10 -11" fill="none" stroke="#12a36b" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M1086 322 l5 5 l10 -11" fill="none" stroke="#12a36b" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <path d="M676 378 H1108" stroke="#93c5fd" stroke-width="2"/>
+    <circle cx="676.0" cy="378" r="6" fill="#93c5fd"/><circle cx="724.0" cy="378" r="6" fill="#2563eb"/><circle cx="772.0" cy="378" r="6" fill="#93c5fd"/><circle cx="820.0" cy="378" r="6" fill="#2563eb"/><circle cx="868.0" cy="378" r="6" fill="#2563eb"/><circle cx="916.0" cy="378" r="6" fill="#93c5fd"/><circle cx="964.0" cy="378" r="11" fill="#ffffff" stroke="#2563eb" stroke-width="3"/><circle cx="964.0" cy="378" r="5" fill="#2563eb"/><circle cx="1012.0" cy="378" r="6" fill="#2563eb"/><circle cx="1060.0" cy="378" r="6" fill="#93c5fd"/><circle cx="1108.0" cy="378" r="6" fill="#2563eb"/>
+  </g>
+</svg>
