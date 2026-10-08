@@ -66,7 +66,7 @@ import {
 } from "@vela/workspace";
 import { BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { getApplicationLocale } from "./menu";
-import { createLogger } from "@vela/shared";
+import { createLogger, localizeZh } from "@vela/shared";
 
 const log = createLogger("project");
 
@@ -116,10 +116,10 @@ export class ProjectHost {
   register(): void {
     ipcMain.handle(IpcChannel.workspaceOpenDialog, async (event) => {
       const win = BrowserWindow.fromWebContents(event.sender);
-      const english = getApplicationLocale() === "en";
+      const locale = getApplicationLocale();
       const dialogOptions = {
-        title: english ? "Choose a workspace folder" : "选择工作区文件夹",
-        buttonLabel: english ? "Choose" : "选择",
+        title: localizeZh(locale, "选择工作区文件夹", "Choose a workspace folder"),
+        buttonLabel: localizeZh(locale, "选择", "Choose"),
         properties: ["openDirectory", "createDirectory"] as ("openDirectory" | "createDirectory")[],
       };
       const result = win
@@ -852,12 +852,12 @@ export class ProjectHost {
       const kind: AttachmentPickKind = rawKind === "image" ? "image" : "file";
       const win = BrowserWindow.fromWebContents(event.sender);
       const options = {
-        title: getApplicationLocale() === "en"
-          ? kind === "image" ? "Choose an image" : "Choose a file"
-          : kind === "image" ? "选择图片" : "选择文件",
+        title: kind === "image"
+          ? localizeZh(getApplicationLocale(), "选择图片", "Choose an image")
+          : localizeZh(getApplicationLocale(), "选择文件", "Choose a file"),
         properties: ["openFile", "multiSelections"] as ("openFile" | "multiSelections")[],
         ...(kind === "image"
-          ? { filters: [{ name: getApplicationLocale() === "en" ? "Images" : "图片", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }] }
+          ? { filters: [{ name: localizeZh(getApplicationLocale(), "图片", "Images"), extensions: ["png", "jpg", "jpeg", "gif", "webp"] }] }
           : {}),
       };
       const result = win

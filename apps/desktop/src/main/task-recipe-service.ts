@@ -10,7 +10,7 @@ import { expandRecipe, expandStageInstructions, recipeStageSelected, canRetryRec
 import { builtinRecipes } from './task-recipe-builtins';
 import { ProjectRecipeLibrary } from './task-recipe-library';
 import { TeamRecipeLibraries } from './task-recipe-team';
-import { createLogger } from "@vela/shared";
+import { createLogger, isAppLocale, type AppLocale } from "@vela/shared";
 
 const log = createLogger("recipes");
 
@@ -88,8 +88,8 @@ export class TaskRecipeService {
       });
     } catch (error) { this.loaded = false; this.error = error instanceof Error ? error.message : String(error); }
   }
-  list(locale: 'zh-CN' | 'en' = 'zh-CN'): TaskRecipesState {
-    if (locale !== 'en' && locale !== 'zh-CN') throw new Error('语言不正确');
+  list(locale: AppLocale = 'zh-CN'): TaskRecipesState {
+    if (!isAppLocale(locale)) throw new Error('语言不正确');
     if (!this.loaded) this.load();
     const projectRecipes: TaskRecipe[] = []; const projectErrors: Record<string, string> = {};
     const seen = new Set<string>();

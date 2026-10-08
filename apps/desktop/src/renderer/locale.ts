@@ -1,4 +1,4 @@
-import type { AppLocale } from "@vela/shared";
+import { intlLocale, localizeTemplate, localizeZh, localizeZhTemplate, type AppLocale } from "@vela/shared";
 import { createContext, createElement, useContext, type ReactNode } from "react";
 
 export type { AppLocale };
@@ -18,8 +18,22 @@ export function setActiveLocale(locale: AppLocale): void {
   activeLocale = locale;
 }
 
+export function getActiveLocale(): AppLocale {
+  return activeLocale;
+}
+
+/** 日期、数字格式化使用的 BCP 47 标签，跟随当前界面语言。 */
+export function activeIntlLocale(): string {
+  return intlLocale(activeLocale);
+}
+
 export function tr(chinese: string, english: string): string {
-  return activeLocale === "en" ? english : chinese;
+  return localizeZh(activeLocale, chinese, english);
+}
+
+/** 带 {0}、{1} 占位符的文案，参数顺序在中英文里保持一致。 */
+export function trf(chinese: string, english: string, ...args: unknown[]): string {
+  return localizeTemplate(activeLocale, chinese, english, ...args);
 }
 
 export function isEnglish(): boolean {
@@ -76,6 +90,19 @@ const knownErrors: Record<string, string> = {
   "正式版会话索引损坏，请在正式版确认会话可以正常读取后重试": "The production conversation index is corrupted. Check that conversations open in the production app, then retry.",
   "目标已有同名历史文件，请检查开发版资料目录后重试": "Matching history files already exist. Check the development data directory, then retry.",
   "仅开发版支持同步正式版会话": "Production conversation sync is available only in the development app.",
+  "没有找到正式版资料目录，请先运行一次正式版": "No production data folder found. Run the production app once first.",
+  "同步范围不正确": "Invalid sync selection.",
+  "请至少选择一项同步范围": "Select at least one thing to sync.",
+  "仅开发版支持同步正式版资料": "Production data sync is available only in the development app.",
+  "仅开发版支持开发工具": "Developer tools are available only in the development app.",
+  "同步批次不存在": "Sync batch not found.",
+  "同步批次记录已损坏，无法撤销": "The sync batch record is corrupted and cannot be undone.",
+  "当前会话属于这批同步，请先切换到其他会话再撤销": "The current conversation belongs to this batch. Switch to another conversation, then undo.",
+  "这批同步的会话仍在运行，请先停止后再撤销": "Conversations from this batch are still running. Stop them, then undo.",
+  "应用正在退出，请重新启动后撤销": "The app is closing. Restart it before undoing.",
+  "只能从应用窗口使用开发工具": "Developer tools can only be used from the app window.",
+  "找不到 main 入口源码，无法触发重启，请在终端重新运行 pnpm dev": "Could not find the main entry source to trigger a restart. Run pnpm dev again in a terminal.",
+  "没有检测到 electron-vite 的 --watch 重启，请在终端重新运行 pnpm dev": "No electron-vite --watch restart was detected. Run pnpm dev again in a terminal.",
   "应用正在退出，请重新启动后同步": "The app is closing. Restart it before syncing.",
   "对话名称必须是文本": "Chat name must be text.",
   "对话名称不能为空": "Chat name cannot be empty.",
@@ -147,35 +174,58 @@ const knownErrors: Record<string, string> = {
   "文件检查点损坏": "The file checkpoint is damaged.",
 };
 
+const errorLabels: Record<string, string> = {
+  "额外指令": "Additional instructions",
+  "输入": "Input",
+  "密钥": "API key",
+  "提供方名称": "Provider name",
+  "模型名称": "Model name",
+};
+
+const requiredLabels: Record<string, string> = { "提供方 ID": "a provider ID", "模型 ID": "a model ID", "接口地址": "an API URL" };
+
+const conflictPrefix = "文件在这轮之后又被修改，请先处理冲突再重新发送";
+
+function localizeErrorFor(locale: AppLocale, cleaned: string): string {
+  const known = (zh: string) => localizeZh(locale, zh, knownErrors[zh] ?? zh);
+  if (knownErrors[cleaned]) return known(cleaned);
+  const commandDenied = /^用户拒绝了命令执行[:：](.*)$/.exec(cleaned);
+  if (commandDenied) return `${known("用户拒绝了命令执行")}: ${commandDenied[1]}`;
+  const fileDenied = /^用户拒绝了工作区外的文件修改[:：](.*)$/.exec(cleaned);
+  if (fileDenied) return `${known("用户拒绝了工作区外的文件修改")}: ${fileDenied[1]}`;
+  const conflict = new RegExp(`^${conflictPrefix}[:：](.*)$`).exec(cleaned);
+  if (conflict) return `${localizeZh(locale, conflictPrefix, "This file was changed after the turn. Resolve the conflict first")}: ${conflict[1]}`;
+  const tooLong = /^(.+)过长$/.exec(cleaned);
+  if (tooLong?.[1]) {
+    const label = localizeZh(locale, tooLong[1], errorLabels[tooLong[1]] ?? tooLong[1]);
+    return localizeTemplate(locale, "{0}过长", "{0} is too long.", label);
+  }
+  const required = /^需要填写(.+)$/.exec(cleaned);
+  if (required?.[1]) {
+    const label = localizeZh(locale, required[1], `${requiredLabels[required[1]] ?? required[1]}`);
+    return localizeTemplate(locale, "需要填写{0}", "Enter {0}.", label);
+  }
+  return localizeZhTemplate(locale, cleaned) ?? cleaned;
+}
+
 export function localizeError(message: string): string {
-  if (activeLocale !== "en") return message;
+  if (activeLocale === "zh-CN") return message;
   const cleaned = message
     .replace(/^Error invoking remote method '[^']+':\s*/i, "")
     .replace(/^Error:\s*/i, "")
     .trim();
+  if (activeLocale !== "en") return localizeErrorFor(activeLocale, cleaned);
   const exact = knownErrors[cleaned];
   if (exact) return exact;
   const commandDenied = /^用户拒绝了命令执行[:：](.*)$/.exec(cleaned);
   if (commandDenied) return `${knownErrors["用户拒绝了命令执行"]}: ${commandDenied[1]}`;
   const fileDenied = /^用户拒绝了工作区外的文件修改[:：](.*)$/.exec(cleaned);
   if (fileDenied) return `${knownErrors["用户拒绝了工作区外的文件修改"]}: ${fileDenied[1]}`;
-  const conflict = /^文件在这轮之后又被修改，请先处理冲突再重新发送[:：](.*)$/.exec(cleaned);
+  const conflict = new RegExp(`^${conflictPrefix}[:：](.*)$`).exec(cleaned);
   if (conflict) return `This file was changed after the turn. Resolve the conflict first: ${conflict[1]}`;
   const tooLong = /^(.+)过长$/.exec(cleaned);
-  if (tooLong?.[1]) {
-    const labels: Record<string, string> = {
-      "额外指令": "Additional instructions",
-      "输入": "Input",
-      "密钥": "API key",
-      "提供方名称": "Provider name",
-      "模型名称": "Model name",
-    };
-    return `${labels[tooLong[1]] ?? tooLong[1]} is too long.`;
-  }
+  if (tooLong?.[1]) return `${errorLabels[tooLong[1]] ?? tooLong[1]} is too long.`;
   const required = /^需要填写(.+)$/.exec(cleaned);
-  if (required?.[1]) {
-    const labels: Record<string, string> = { "提供方 ID": "a provider ID", "模型 ID": "a model ID", "接口地址": "an API URL" };
-    return `Enter ${labels[required[1]] ?? required[1]}.`;
-  }
+  if (required?.[1]) return `Enter ${requiredLabels[required[1]] ?? required[1]}.`;
   return cleaned;
 }

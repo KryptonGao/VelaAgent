@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { AppLocale, GitRemote, GitRemoteChange } from "@vela/shared";
-import { tr } from "../../locale";
+import { tr, trf } from "../../locale";
 import { useDismissable } from "../../hooks/useDismissable";
 import { AlertIcon, CheckIcon, PencilIcon, PlusIcon, TrashIcon } from "../icons";
 
@@ -16,7 +16,6 @@ export function RemotePanel({
   onSetUrl,
   onRemove,
   onRename,
-  locale,
 }: {
   open: boolean;
   onClose(): void;
@@ -171,7 +170,7 @@ export function RemotePanel({
       {mode ? (
         <div className="vc-remote-form">
           <div className="vc-stage-all-head">
-            <b>{mode.kind === "add" ? tr("添加远程", "Add remote") : tr(`编辑远程 ${mode.name}`, `Edit remote ${mode.name}`)}</b>
+            <b>{mode.kind === "add" ? tr("添加远程", "Add remote") : trf("编辑远程 {0}", "Edit remote {0}", mode.name)}</b>
           </div>
           {mode.kind === "add" ? (
             <input
@@ -211,7 +210,7 @@ export function RemotePanel({
         </div>
       ) : null}
       <p className="vc-hint">
-        {locale === "en" ? "Only repository-level config is changed." : "只写入仓库级配置，不修改全局 Git 配置。"}
+        {tr("只写入仓库级配置，不修改全局 Git 配置。", "Only repository-level config is changed.")}
       </p>
     </div>
   );

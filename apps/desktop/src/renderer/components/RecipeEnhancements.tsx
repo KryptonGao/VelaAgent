@@ -1,9 +1,10 @@
+import type { AppLocale } from "@vela/shared";
 import { useEffect, useRef, useState } from 'react';
 import type { ModelCatalog, RecipeGenerateResult, RecipeUseDraft, TaskRecipeInput, TaskSchedule } from '@vela/shared';
 import { tr } from '../locale';
 
 export function RecipeGeneratePanel({ text: initial, sourceReference, catalog, locale, onGenerated, onClose }: {
-  text: string; sourceReference?: TaskRecipeInput['sourceReference']; catalog: ModelCatalog | null; locale: 'zh-CN' | 'en';
+  text: string; sourceReference?: TaskRecipeInput['sourceReference']; catalog: ModelCatalog | null; locale: AppLocale;
   onGenerated: (result: RecipeGenerateResult) => void; onClose: () => void;
 }) {
   const [text, setText] = useState(initial); const [model, setModel] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState('');

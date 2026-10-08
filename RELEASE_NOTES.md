@@ -1,27 +1,31 @@
-# Vela 1.0.3
+# Vela 1.0.4
 
-Vela 1.0.3 adds a **checkpoint timeline**. A new dialog lists every turn of a chat with the files it changed, previews whether you can safely return to it, and lets you either rewind the chat and its workspace files to the end of any turn or fork a new chat from there, optionally with the files restored. This release also splits the agent runtime into smaller modules and adds automated test runs on GitHub.
+Vela 1.0.4 adds **three more interface languages** (Traditional Chinese, Japanese, Korean) and a **redesigned Settings page** with search. The development build gains a fuller **sync from the installed app** with preview and one-click undo, plus a Developer tools page.
 
 ## New
 
-- **Checkpoint timeline**: open it from the clock-arrow button in the chat header or from the **Checkpoint** action under any reply. The dialog shows the start of the chat and the end of every turn, marks the current position, and lists the files each turn changed. A turn that was queued while the previous one was running shows that it shares the previous checkpoint.
-  - **Return here**: removes every later turn from the chat and restores the files those turns changed. Use *Start of chat* to go back before the first message. A confirmation step shows how many turns will be removed and which files will be restored.
-  - **Safe by default**: before offering a return, Vela dry-runs the restore against the real workspace and nothing is written until you confirm. If a file was edited by hand after the turn, another chat changed the workspace during it, or the turn has no complete file checkpoint, the point is marked unavailable and the reason (including the conflicting path) is shown instead of overwriting your work.
-  - **Fork from here**: keeps the chat up to that turn and continues in a new chat; the original is untouched. Tick **Also restore workspace files to this point** to undo the later turns' file changes as well. The fork carries its own copy of the checkpoints for the turns it kept, so it can be rewound again, including back to its start. Checkpoint file contents are hard-linked rather than duplicated where the file system allows.
-  - Restoring and forking are disabled while a reply is streaming, and every message is available in Chinese and English.
+- **More languages**: the interface now supports Simplified Chinese, Traditional Chinese (Taiwan), English, Japanese, and Korean. Pick one in **Settings → Interface → Language**; it applies to menus, dialogs, dates and numbers, and the text Vela asks models to write for you (commit messages, pull request descriptions, thinking summaries) follows the same language. Each language shows its own name in the picker.
+- **Settings redesign**: settings are now grouped by purpose in a left navigation (General, Agent, Models & extensions, Data & workspace, and Development in the development build) instead of one long page.
+  - **Search**: type in the search box at the top of the navigation to find any setting by name, hint, or keyword in either Chinese or English. Use the arrow keys and Enter to pick a result; Vela jumps to the page, scrolls to the setting, and briefly highlights it.
+  - **Smaller pages**: Appearance, Interface, Shortcuts, Agent defaults, Conversation display, Skills, Models, Workspace, Archived chats, and Logs each have their own page. Some paths changed, for example tool-call display is now under **Settings → Conversation display** and the language under **Settings → Interface**.
+  - Scrollbars in the settings navigation and pages appear only while scrolling.
+- **Sync from the installed app (development build)**: **Settings → Developer tools → Sync production data** can now copy more than chats, and you choose what to import:
+  - **Chats** (messages, plans, sub-agent history, traces, file checkpoints), **settings** (sandbox mode, thinking effort, global instructions), **models and accounts** (default model and custom endpoint structure; API keys and OAuth tokens are never copied), **Skills** (including disabled state), **MCP configuration** (secret values in environment variables and headers are cleared and servers missing them are disabled), and **memory**.
+  - **Preview** shows how many items each category will import and writes nothing.
+  - Each sync is a batch recorded under the profile folder. **Sync history** can undo a whole batch: it removes the imported chats, Skills, and memory and restores changed settings, leaving settings you edited afterwards alone. A chat that is open or still running must be left first.
+  - Set `VELA_PRODUCTION_HOME` if your installed app uses a custom `VELA_USER_DATA`.
+- **Developer tools (development build)**: open the Renderer DevTools, reload the window, or restart the main process, and copy the Vela, commit, Electron, Chromium, Node, and V8 versions for an issue report.
 
 ## Improved
 
-- **Structured recipe stages**: when a task recipe stage runs, the browser tool and the sub-agent tools stay out of the loadout and the tool guard even if an MCP server connects or changes mid-stage, and they come back once the stage ends.
-- **Runtime structure**: the agent runtime's tool selection, skills handling, tracing, and recipe-stage logic moved out of the large `runtime.ts` into `runtime-tools.ts`, `runtime-skills.ts`, `runtime-tracing.ts`, and `recipe-stage.ts`. Behaviour is unchanged.
-- **Automated tests**: `pnpm test` now runs the type checks plus every unit test in the agent, workspace, and desktop packages (each package runs all of its `test/*.test.*` files instead of a hand-kept list), and `pnpm test:ui` and `pnpm test:smoke` run the real-Electron UI checks and smoke tests. Two existing Electron checks were hardened: the Scheduled Tasks smoke test finds sidebar shortcuts by name instead of position, and the profile-lock test bundles its helper so it resolves workspace packages.
-- **GitHub Actions**: a `CI` workflow runs the type check and unit tests on every pull request and push to `main`; an `Electron smoke` workflow runs the UI and smoke tests nightly, on version tags, and on demand.
+- **Shared translation layer**: all text now goes through one lookup, so remaining Chinese-or-English-only strings in menus, file pickers, error messages, the version-control panels, usage, task recipes, and the checkpoint timeline follow the selected language, with consistent date, time and number formats.
+- **Development restart**: restarting the main process under `pnpm dev` waits for the old process to release the single-instance lock instead of failing to start, and the old process now exits reliably.
 
 ## Upgrade
 
-Quit Vela completely, replace the application with this version, and reopen it. Keep your existing `~/.vela` directory (or the directory specified by `VELA_USER_DATA`); no data reset is needed. Existing sessions, model accounts, workspaces, browser cookies and site storage, MCP servers, scheduled tasks, task recipes, the Pull Request Inbox, and logs continue to work.
+Quit Vela completely, replace the application with this version, and reopen it. Keep your existing `~/.vela` directory (or the directory specified by `VELA_USER_DATA`); no data reset is needed. Existing sessions, model accounts, workspaces, browser cookies and site storage, MCP servers, scheduled tasks, task recipes, the Pull Request Inbox, checkpoints, and logs continue to work.
 
-Turns recorded without a complete file checkpoint, such as those from older chats, are shown as unavailable for file restore rather than being restored incorrectly.
+Your language choice is kept; the default is still Simplified Chinese. Settings you had changed keep their values; only their location in the Settings page is different.
 
 The macOS build is not notarized. If macOS blocks first launch, use **Open Anyway** in System Settings → Privacy & Security.
 
@@ -29,13 +33,13 @@ The macOS build is not notarized. If macOS blocks first launch, use **Open Anywa
 
 | File | Platform |
 | --- | --- |
-| `Vela-1.0.3-arm64.dmg` | macOS Apple Silicon installer |
-| `Vela-1.0.3-arm64.zip` | macOS Apple Silicon application bundle (`.app`) |
+| `Vela-1.0.4-arm64.dmg` | macOS Apple Silicon installer |
+| `Vela-1.0.4-arm64.zip` | macOS Apple Silicon application bundle (`.app`) |
 | `SHA256SUMS.txt` | SHA-256 checksums for both packages |
 
-Package version: `1.0.3`. macOS bundle and download version: `1.0.3`.
+Package version: `1.0.4`. macOS bundle and download version: `1.0.4`.
 
 ## Validation
 
-- Type checks and unit tests for all workspace packages (`pnpm test`) passed; new tests cover checkpoint previews and conflict reporting, returning to a turn or the chat start, forking with and without file restore, and the browser and sub-agent tools staying out of recipe stages.
+- Type checks and unit tests for all workspace packages (`pnpm test`) passed; new tests cover production sync preview, import, and undo, the Developer tools, and that every settings-search entry points at a real setting.
 - The production DMG and ZIP builds, packaged-app startup, bundle and packaged version metadata, DMG mounting, archive integrity, and SHA-256 checksums were verified.

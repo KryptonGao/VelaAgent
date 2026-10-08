@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AppLocale, GitCommitDetail, GitCommitSummary, GitRefLabel } from "@vela/shared";
-import { tr } from "../../locale";
+import { tr, trf } from "../../locale";
 import { AlertIcon, BranchIcon, CheckIcon, CommitIcon, CopyIcon, ExternalIcon, RefreshIcon, SearchIcon, TagIcon } from "../icons";
 import { DiffPane } from "../DiffPane";
 import { CommitGraph, useCommitGraphGeometry } from "./CommitGraph";
@@ -256,7 +256,7 @@ export function HistoryPage({
 
         {api.searchResult ? (
           <div className="vc-search-note" role="status">
-            <span>{tr(`搜索到 ${api.searchResult.commits.length} 条提交 · 结果列表不代表完整拓扑图`, `${api.searchResult.commits.length} commits found · this list is not the full graph`)}</span>
+            <span>{trf("搜索到 {0} 条提交 · 结果列表不代表完整拓扑图", "{0} commits found · this list is not the full graph", api.searchResult.commits.length)}</span>
             <button type="button" className="vc-link" onClick={() => { setSearchInput(""); api.clearSearch(); }}>
               {tr("返回完整历史", "Back to full history")}
             </button>
@@ -297,7 +297,7 @@ export function HistoryPage({
 
         <div className="vc-history-foot">
           <span>
-            {tr(`已加载 ${commits.length} 条提交`, `${commits.length} commits loaded`)}
+            {trf("已加载 {0} 条提交", "{0} commits loaded", commits.length)}
             {api.graph?.pendingParents.length ? ` · ${tr("仍有父提交未加载", "more parents available")}` : ""}
             {api.graph?.shallowBoundary.length ? ` · ${tr("浅克隆历史边界", "shallow clone boundary")}` : ""}
           </span>
@@ -428,7 +428,7 @@ function CommitDetailPane({
       </div>
 
       <div className="vc-changed-title">
-        <span>{tr(`变更文件 ${detail.files.length}`, `${detail.files.length} changed files`)}</span>
+        <span>{trf("变更文件 {0}", "{0} changed files", detail.files.length)}</span>
         <span className="vc-stats">
           <b className="vc-plus">+{detail.files.reduce((sum, file) => sum + file.addedLines, 0)}</b>
           <b className="vc-minus">−{detail.files.reduce((sum, file) => sum + file.deletedLines, 0)}</b>

@@ -38,7 +38,7 @@ import {
   type PlanDocumentAction,
   type PlanDocumentState,
 } from "./plan-draft";
-import { AppLocaleProvider, setActiveLocale, tr } from "./locale";
+import { AppLocaleProvider, setActiveLocale, tr, trf } from "./locale";
 import { createLogger } from "./logger";
 
 const log = createLogger("app");
@@ -307,7 +307,7 @@ export function App() {
     const id = `terminal:${sessionId}`;
     setTerminalTabState((current) => [
       ...current,
-      { id, sessionId, label: tr(`终端 ${current.length + 1}`, `Terminal ${current.length + 1}`) },
+      { id, sessionId, label: trf("终端 {0}", "Terminal {0}", current.length + 1) },
     ]);
     setActiveWorkbenchTabId(id);
   }, []);

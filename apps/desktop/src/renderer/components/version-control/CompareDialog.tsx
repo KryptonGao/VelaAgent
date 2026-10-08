@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { BranchSummary, GitCompareResult, GitCompareFile, GitCommitSummary } from "@vela/shared";
-import { tr } from "../../locale";
+import { tr, trf } from "../../locale";
 import type { VersionControlApi } from "../../hooks/useVersionControl";
 import { AlertIcon, ArrowRightIcon, RefreshIcon } from "../icons";
 import { DiffPane } from "../DiffPane";
@@ -137,13 +137,10 @@ export function CompareDialog({
 
         <div className="vc-compare-direction">
           {tr("方向", "Direction")} <code>{base || "?"}</code> → <code>{head || "?"}</code>
-          {result?.mergeBase ? <span className="vc-hint">{tr(`共同祖先 ${result.mergeBase.slice(0, 7)}`, `merge base ${result.mergeBase.slice(0, 7)}`)}</span> : null}
+          {result?.mergeBase ? <span className="vc-hint">{trf("共同祖先 {0}", "merge base {0}", result.mergeBase.slice(0, 7))}</span> : null}
           {result ? (
             <span className="vc-hint">
-              {tr(
-                `${result.commits.length} 个提交 · ${result.fileCount} 个文件 · +${result.addedLines} −${result.deletedLines}`,
-                `${result.commits.length} commits · ${result.fileCount} files · +${result.addedLines} −${result.deletedLines}`,
-              )}
+              {trf("{0} 个提交 · {1} 个文件 · +{2} −{3}", "{0} commits · {1} files · +{2} −{3}", result.commits.length, result.fileCount, result.addedLines, result.deletedLines)}
             </span>
           ) : null}
         </div>
@@ -168,7 +165,7 @@ export function CompareDialog({
                   </div>
                 ))}
                 {result.commits.length === 0 ? <div className="vc-hint">{tr("没有额外提交", "No extra commits")}</div> : null}
-                {result.commits.length > 50 ? <div className="vc-hint">{tr(`还有 ${result.commits.length - 50} 个提交`, `${result.commits.length - 50} more commits`)}</div> : null}
+                {result.commits.length > 50 ? <div className="vc-hint">{trf("还有 {0} 个提交", "{0} more commits", result.commits.length - 50)}</div> : null}
               </div>
               <div className="vc-scope-label">{tr("文件", "Files")}</div>
               <div className="vc-changed-files">
@@ -193,7 +190,7 @@ export function CompareDialog({
               <div className="vc-changed-title vc-diff-title">
                 <span>{selectedFile ?? result.files[0]?.path ?? tr("差异", "Diff")}</span>
                 {result.commits[0] ? (
-                  <span className="vc-hint">{tr(`最早 ${formatRelativeTime(result.commits[0].authorAt, locale)}`, `oldest ${formatRelativeTime(result.commits[0].authorAt, locale)}`)}</span>
+                  <span className="vc-hint">{trf("最早 {0}", "oldest {0}", formatRelativeTime(result.commits[0].authorAt, locale))}</span>
                 ) : null}
               </div>
               <div className="vc-detail-diff">

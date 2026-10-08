@@ -36,7 +36,7 @@ import { shouldFoldRun } from "./tool-sequence";
 import { foldRowId, foldSequenceId } from "./tool-fold-state";
 import { DurationLabel, ToolDurationLabel, useToolExpanded, useToolProcessDetails, useToolsDuration } from "./ToolProcessContext";
 import type { ToolDisplay } from "../hooks/usePreferences";
-import { localizeError, tr } from "../locale";
+import { localizeError, tr, trf } from "../locale";
 
 type ToolKind = "browser" | "bash" | "read" | "edit" | "write" | "other";
 
@@ -257,7 +257,7 @@ function AgentToolCard({ tool, compact = false }: { tool: ToolTrace; compact?: b
             className="agent-compact-name"
             type="button"
             disabled={!targetId}
-            title={canOpen ? tr(`在右侧查看 ${title}`, `Open ${title} in pane`) : titleText}
+            title={canOpen ? trf("在右侧查看 {0}", "Open {0} in pane", title) : titleText}
             onClick={openInPane}
           >
             {title}
@@ -397,14 +397,14 @@ function GenericToolCard({ tool, compact = false }: ToolCardProps) {
             </span>
             {subject.dir ? <span className="tool-card-dir">{subject.dir}</span> : null}
           </span>
-          {mcp ? <span className="tool-mcp-source" aria-label={tr(`MCP 服务器：${mcp.server}`, `MCP server: ${mcp.server}`)}>{mcp.server}</span> : null}
+          {mcp ? <span className="tool-mcp-source" aria-label={trf("MCP 服务器：{0}", "MCP server: {0}", mcp.server)}>{mcp.server}</span> : null}
           {stat ? (
             <span className="tool-stat">
               {stat.added > 0 ? <span className="tool-stat-add">+{stat.added}</span> : null}
               {stat.removed > 0 ? <span className="tool-stat-del">−{stat.removed}</span> : null}
             </span>
           ) : lines !== null ? (
-            <span className="tool-lines">{tr(`${lines} 行`, `${lines} lines`)}</span>
+            <span className="tool-lines">{trf("{0} 行", "{0} lines", lines)}</span>
           ) : null}
           {compact ? null : <StatusMark status={tool.status} />}
           <svg className="tool-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
@@ -479,7 +479,7 @@ export function ToolRunGroup({ tools }: { tools: ToolTrace[] }) {
         <span className="tool-kind-label">{uniform ? toolKindLabel(uniform) : tr("工具", "Tools")}</span>
         <span className="tool-run-count">×{tools.length}</span>
         <span className="tool-run-subject">{subject.name}</span>
-        {failed > 0 ? <span className="tool-run-failed">{tr(`${failed} 失败`, `${failed} failed`)}</span> : null}
+        {failed > 0 ? <span className="tool-run-failed">{trf("{0} 失败", "{0} failed", failed)}</span> : null}
         {stat ? (
           <span className="tool-stat">
             {stat.added > 0 ? <span className="tool-stat-add">+{stat.added}</span> : null}
@@ -558,7 +558,7 @@ export function CompactToolGroup({ tools, sequenceId = tools[0]?.id }: { tools: 
         </span>
         <span className="tool-compact-label">{label}</span>
         {sampleLabel && !(open && fileDiffGroup) ? <span className="tool-compact-sample">{sampleLabel}</span> : null}
-        {failed > 0 ? <span className="tool-compact-failed">{tr(`${failed} 失败`, `${failed} failed`)}</span> : null}
+        {failed > 0 ? <span className="tool-compact-failed">{trf("{0} 失败", "{0} failed", failed)}</span> : null}
         {stat && !(open && fileDiffGroup) ? (
           <span className="tool-compact-stat">
             {stat.added > 0 ? <span className="tool-stat-add">+{stat.added}</span> : null}
@@ -579,7 +579,7 @@ export function CompactToolGroup({ tools, sequenceId = tools[0]?.id }: { tools: 
         </svg>
         {details ? (
           <span className="tool-compact-steps">
-            {tr(`${tools.length} 步`, `${tools.length} steps`)}<DurationLabel duration={duration} />
+            {trf("{0} 步", "{0} steps", tools.length)}<DurationLabel duration={duration} />
           </span>
         ) : null}
         {running ? <ActivityIndicator /> : null}
@@ -598,10 +598,10 @@ export function CompactToolGroup({ tools, sequenceId = tools[0]?.id }: { tools: 
 }
 
 function compactPartLabel({ kind, count }: CompactSummaryPart): string {
-  if (kind === "edit") return tr(`已编辑 ${count} 个文件`, `Edited ${count} ${count === 1 ? "file" : "files"}`);
-  if (kind === "write") return tr(`已创建 ${count} 个文件`, `Created ${count} ${count === 1 ? "file" : "files"}`);
-  if (kind === "read") return tr(`已读取 ${count} 个文件`, `Read ${count} ${count === 1 ? "file" : "files"}`);
-  return tr(`已运行 ${count} 条命令`, `Ran ${count} ${count === 1 ? "command" : "commands"}`);
+  if (kind === "edit") return trf("已编辑 {0} 个文件", count === 1 ? "Edited {0} file" : "Edited {0} files", count);
+  if (kind === "write") return trf("已创建 {0} 个文件", count === 1 ? "Created {0} file" : "Created {0} files", count);
+  if (kind === "read") return trf("已读取 {0} 个文件", count === 1 ? "Read {0} file" : "Read {0} files", count);
+  return trf("已运行 {0} 条命令", count === 1 ? "Ran {0} command" : "Ran {0} commands", count);
 }
 
 /** 紧凑模式的一行:文件类点击文件名在右侧预览,bash 点击整行内联展开输出。 */
@@ -823,7 +823,7 @@ function CompactDiffCard({ fileName, filePath, diff, note }: { fileName: string;
   const stat = diffStat(diff);
 
   return (
-    <section className="compact-diff-card" aria-label={tr(`${fileName} 的文件差异`, `${fileName} file diff`)}>
+    <section className="compact-diff-card" aria-label={trf("{0} 的文件差异", "{0} file diff", fileName)}>
       <header className="compact-diff-card-head">
         <span className="compact-diff-card-name" title={fileName}>{fileName}</span>
         {stat ? (

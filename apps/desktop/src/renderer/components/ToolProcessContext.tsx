@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode, type SetStateAction } from "react";
 import type { ToolTrace } from "@vela/shared";
 import { useTrace } from "../hooks/useTrace";
-import { tr } from "../locale";
+import { trf } from "../locale";
 import { formatDuration, indexToolDurations, readToolDuration, readTurnDuration, type ToolDurationSource } from "./tool-duration";
 import type { ToolFoldStore } from "./tool-fold-state";
 
@@ -64,7 +64,7 @@ export function useToolProcessDetails(): boolean {
 
 export function DurationLabel({ duration }: { duration: number | null }) {
   const label = duration === null ? null : formatDuration(duration);
-  return <span className="tool-duration" aria-hidden={label === null} aria-label={label ? tr(`耗时 ${label}`, `Duration ${label}`) : undefined}>
+  return <span className="tool-duration" aria-hidden={label === null} aria-label={label ? trf("耗时 {0}", "Duration {0}", label) : undefined}>
     {label ? `· ${label}` : null}
   </span>;
 }

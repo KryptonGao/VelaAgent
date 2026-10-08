@@ -6,7 +6,7 @@ import type {
   GitPullStrategy,
   GitStatusSnapshot,
 } from "@vela/shared";
-import { tr } from "../../locale";
+import { tr, trf } from "../../locale";
 import type { VersionControlApi } from "../../hooks/useVersionControl";
 import { AlertIcon } from "../icons";
 import { formatAbsoluteTime, formatRelativeTime } from "./time-format";
@@ -169,7 +169,7 @@ export function SyncDialog({
               {status.upstream ?? tr("尚未发布分支", "Not published yet")}
             </div>
             <div className="vc-p2-meta">
-              {tr(`领先 ${status.ahead} 个提交，落后 ${status.behind} 个提交`, `${status.ahead} ahead, ${status.behind} behind`)}
+              {trf("领先 {0} 个提交，落后 {1} 个提交", "{0} ahead, {1} behind", status.ahead, status.behind)}
             </div>
             {hasTrackedChanges ? (
               <div className="vc-p2-warn" role="status">
@@ -309,7 +309,7 @@ export function SyncDialog({
                   {preview.ahead.length > 0 ? (
                     <>
                       <div className="vc-p2-label">
-                        {tr(`推送后新增的提交（${preview.ahead.length}）`, `Commits added to the remote (${preview.ahead.length})`)}
+                        {trf("推送后新增的提交（{0}）", "Commits added to the remote ({0})", preview.ahead.length)}
                       </div>
                       {preview.ahead.slice(0, 10).map((commit) => (
                         <div key={commit.sha} className="vc-p2-commit">
@@ -323,10 +323,7 @@ export function SyncDialog({
                   {preview.overwritten.length > 0 ? (
                     <div className="vc-p2-danger" role="alert">
                       <div className="vc-p2-label">
-                        {tr(
-                          `远程 ${preview.remote}/${preview.branch} 上这 ${preview.overwritten.length} 个提交会被移除：`,
-                          `${preview.overwritten.length} commits on ${preview.remote}/${preview.branch} will be removed:`,
-                        )}
+                        {trf("远程 {0}/{1} 上这 {2} 个提交会被移除：", "{2} commits on {0}/{1} will be removed:", preview.remote, preview.branch, preview.overwritten.length)}
                       </div>
                       {preview.overwritten.slice(0, 10).map((commit) => (
                         <div key={commit.sha} className="vc-p2-commit">
@@ -340,7 +337,7 @@ export function SyncDialog({
                       ))}
                       {preview.overwritten.length > 10 ? (
                         <div className="vc-p2-meta">
-                          {tr(`另有 ${preview.overwritten.length - 10} 个提交未列出。`, `${preview.overwritten.length - 10} more commits are not listed.`)}
+                          {trf("另有 {0} 个提交未列出。", "{0} more commits are not listed.", preview.overwritten.length - 10)}
                         </div>
                       ) : null}
                     </div>

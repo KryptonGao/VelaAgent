@@ -12,7 +12,7 @@ import {
 } from "@vela/workspace";
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, session, shell, webContents } from "electron";
 import type { BrowserWindowConstructorOptions } from "electron";
-import { createLogger, IpcChannel } from "@vela/shared";
+import { createLogger, IpcChannel, isAppLocale, localizeZh } from "@vela/shared";
 import { writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -51,8 +51,11 @@ const logService = new LogService({ home, console: !app.isPackaged || !!process.
 installCrashHandlers(logService);
 const log = createLogger("main");
 // Only one Main Process per profile may claim its persisted task queue.
-const primaryInstance = app.requestSingleInstanceLock();
-if (!primaryInstance) app.quit();
+// electron-vite 重启 main process 时，旧进程还在退出并持有锁。请求失败后 Electron 不再发出 ready，
+// 所以开发服务器托管下推迟到 ready 之后再请求，并等旧进程释放。
+const managedByDevServer = !app.isPackaged && !!process.env.ELECTRON_RENDERER_URL;
+let primaryInstance = managedByDevServer ? false : app.requestSingleInstanceLock();
+if (!primaryInstance && !managedByDevServer) app.quit();
 app.on("second-instance", () => {
   const window = BrowserWindow.getAllWindows()[0];
   if (window) { if (window.isMinimized()) window.restore(); window.show(); window.focus(); }
@@ -60,7 +63,7 @@ app.on("second-instance", () => {
 
 // 与 Electron 启动并行解析登录 shell 的 PATH,避免 GUI 进程只拿到 launchd
 // 的最小 PATH 而找不到 Homebrew 里的 gh、pnpm、node。start() 里再 await。
-const loginShellPathReady = primaryInstance ? ensureLoginShellPath() : Promise.resolve(null);
+const loginShellPathReady = primaryInstance || managedByDevServer ? ensureLoginShellPath() : Promise.resolve(null);
 
 const rootDir = dirname(fileURLToPath(import.meta.url));
 const preloadPath = join(rootDir, "../preload/index.js");
@@ -364,14 +367,21 @@ async function start(): Promise<void> {
   log.info(`session ${snapshot.status}: ${detail}`, { cwd: workspace.current ?? fallbackCwd });
 }
 
-app.whenReady().then(() => {
-  if (!primaryInstance) return;
+app.whenReady().then(async () => {
+  for (let attempt = 0; managedByDevServer && !primaryInstance && attempt < 24; attempt++) {
+    primaryInstance = app.requestSingleInstanceLock();
+    if (!primaryInstance) await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  if (!primaryInstance) {
+    if (managedByDevServer) app.quit();
+    return;
+  }
   // dev 模式下 Dock 显示的是 Electron 二进制自带的图标,手动指到项目图标;打包后由 bundle 提供。
   if (process.platform === "darwin" && app.dock && !app.isPackaged) {
     app.dock.setIcon(nativeImage.createFromPath(appIconPath));
   }
   ipcMain.on(IpcChannel.appSetLocale, (_event, locale: unknown) => {
-    if (locale === "en" || locale === "zh-CN") setApplicationLocale(locale);
+    if (isAppLocale(locale)) setApplicationLocale(locale);
   });
   setApplicationLocale("zh-CN");
 
@@ -381,7 +391,7 @@ app.whenReady().then(() => {
       const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null;
       void logHost?.exportBundle(win, { includeTrace: false }).catch(error => {
         log.error("diagnostics export failed", error);
-        dialog.showErrorBox(getApplicationLocale() === "en" ? "Export failed" : "导出失败", String((error as Error)?.message ?? error));
+        dialog.showErrorBox(localizeZh(getApplicationLocale(), "导出失败", "Export failed"), String((error as Error)?.message ?? error));
       });
     },
     openLogsFolder: () => { void logHost?.openFolder().catch(error => log.error("open logs folder failed", error)); },
@@ -427,5 +437,10 @@ app.on("before-quit", (event) => {
   project = null;
   terminals?.dispose();
   terminals = null;
-  void Promise.allSettled([Promise.resolve(closing), taskScheduler?.drain(), taskRecipes?.drain()]).finally(() => { logService.dispose(); shutdownComplete = true; app.quit(); });
+  void Promise.allSettled([Promise.resolve(closing), taskScheduler?.drain(), taskRecipes?.drain()]).finally(() => {
+    logService.dispose(); shutdownComplete = true; app.quit();
+    // 开发服务器托管时 app.quit() 会卡在收尾；资源此时已全部释放，兜底强制退出，
+    // 否则 electron-vite 重启 main process 时旧进程一直占着单实例锁。
+    if (process.env.ELECTRON_RENDERER_URL) setTimeout(() => app.exit(0), 1500).unref();
+  });
 });

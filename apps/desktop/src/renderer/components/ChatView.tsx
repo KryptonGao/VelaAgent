@@ -42,7 +42,7 @@ import { RecipeChatCard } from "./RecipeChatContext";
 import { ChatActionsMenu } from "./ChatActionsMenu";
 import { UserMessageFrame } from "./UserMessageFrame";
 import { ImageViewer, type ImageViewerRequest } from "./ImageViewer";
-import { isEnglish, localizeError, tr } from "../locale";
+import { localizeError, tr, trf, activeIntlLocale } from "../locale";
 
 interface FollowState {
   pinned: boolean;
@@ -110,9 +110,9 @@ function formatElapsedTime(startedAt: number | undefined, completedAt: number | 
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
-  if (hours > 0) return tr(`${hours}小时${minutes}分${seconds}秒`, `${hours}h ${minutes}m ${seconds}s`);
-  if (minutes > 0) return tr(`${minutes}分${seconds}秒`, `${minutes}m ${seconds}s`);
-  return tr(`${seconds}秒`, `${seconds}s`);
+  if (hours > 0) return trf("{0}小时{1}分{2}秒", "{0}h {1}m {2}s", hours, minutes, seconds);
+  if (minutes > 0) return trf("{0}分{1}秒", "{0}m {1}s", minutes, seconds);
+  return trf("{0}秒", "{0}s", seconds);
 }
 
 /**
@@ -130,7 +130,7 @@ function TurnProgressHeader({ startedAt }: { startedAt: number }) {
   if (!elapsed) return null;
   return (
     <span className="time-spent-trigger assistant-turn-trigger">
-      {tr(`已处理 ${elapsed}`, `Worked ${elapsed}`)}
+      {trf("已处理 {0}", "Worked {0}", elapsed)}
     </span>
   );
 }
@@ -531,8 +531,8 @@ export function ChatView({
               <StackIcon size={13} />
               <span>
                 {runningSubagents > 0
-                  ? tr(`${runningSubagents} 运行中`, `${runningSubagents} running`)
-                  : tr(`${subagents.length} 个子代理`, `${subagents.length} subagents`)}
+                  ? trf("{0} 运行中", "{0} running", runningSubagents)
+                  : trf("{0} 个子代理", "{0} subagents", subagents.length)}
               </span>
             </button>
           ) : null}
@@ -876,14 +876,14 @@ const Message = memo(function Message({
                 key={index}
                 className="user-attachment-thumb"
                 type="button"
-                aria-label={tr(`全屏查看图片 ${index + 1}`, `View image ${index + 1} full screen`)}
+                aria-label={trf("全屏查看图片 {0}", "View image {0} full screen", index + 1)}
                 title={tr("全屏查看", "View full screen")}
                 onClick={(event) => {
                   const rect = event.currentTarget.getBoundingClientRect();
                   onOpenImage?.({
                     images: images.map((item, position) => ({
                       src: `data:${item.mimeType};base64,${item.data}`,
-                      alt: tr(`图片 ${position + 1}`, `Image ${position + 1}`),
+                      alt: trf("图片 {0}", "Image {0}", position + 1),
                     })),
                     index,
                     origin: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
@@ -893,7 +893,7 @@ const Message = memo(function Message({
               >
                 <img
                   src={`data:${image.mimeType};base64,${image.data}`}
-                  alt={tr(`图片 ${index + 1}`, `Image ${index + 1}`)}
+                  alt={trf("图片 {0}", "Image {0}", index + 1)}
                   draggable={false}
                 />
               </button>
@@ -1123,7 +1123,7 @@ const CompletedAssistantTurn = memo(function CompletedAssistantTurn({
   const enterClass = entering ? " message-enter" : "";
   const triggerContent = (
     <>
-      <span>{displayedElapsed ? tr(`用时 ${displayedElapsed}`, `Took ${displayedElapsed}`) : hasProcess ? tr("查看过程", "View process") : tr("耗时未记录", "Duration unavailable")}</span>
+      <span>{displayedElapsed ? trf("用时 {0}", "Took {0}", displayedElapsed) : hasProcess ? tr("查看过程", "View process") : tr("耗时未记录", "Duration unavailable")}</span>
       {hasProcess ? (
         <svg className="time-spent-trigger-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
           <polyline points="9 18 15 12 9 6" />
@@ -1281,7 +1281,7 @@ function formatReplyTime(timestamp: number | null): string | null {
   if (timestamp === null) return null;
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return null;
-  const locale = isEnglish() ? "en-US" : "zh-CN";
+  const locale = activeIntlLocale();
   if (date.toDateString() === new Date().toDateString()) {
     return date.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
   }
@@ -1289,7 +1289,7 @@ function formatReplyTime(timestamp: number | null): string | null {
 }
 
 function formatReplyTimeTitle(timestamp: number): string {
-  return new Date(timestamp).toLocaleString(isEnglish() ? "en-US" : "zh-CN");
+  return new Date(timestamp).toLocaleString(activeIntlLocale());
 }
 
 /** 本轮完成后展示文件统计；审查读取保存的工具差异，不受后续工作区改动影响。 */
@@ -1310,7 +1310,7 @@ function TurnChangesCard({ turnId, changes, onOpenChanges, onReviewTurn, canMana
       <header className="turn-changes-header">
         <span className="turn-changes-icon" aria-hidden="true"><FileChangeIcon /></span>
         <div className="turn-changes-summary">
-          <strong>{tr(`已编辑 ${changes.files.length} 个文件`, `Edited ${changes.files.length} files`)}</strong>
+          <strong>{trf("已编辑 {0} 个文件", "Edited {0} files", changes.files.length)}</strong>
           <span className="turn-changes-total">
             <span className="turn-changes-added">+{changes.added}</span>
             <span className="turn-changes-removed">−{changes.removed}</span>
@@ -1346,7 +1346,7 @@ function TurnChangesCard({ turnId, changes, onOpenChanges, onReviewTurn, canMana
             ) : (
               <span className="turn-changes-path" title={file.path}>{file.path}</span>
             )}
-            <span className="turn-changes-file-stat" aria-label={tr(`增加 ${file.added} 行，删除 ${file.removed} 行`, `${file.added} lines added, ${file.removed} removed`)}>
+            <span className="turn-changes-file-stat" aria-label={trf("增加 {0} 行，删除 {1} 行", "{0} lines added, {1} removed", file.added, file.removed)}>
               <span className="turn-changes-added">+{file.added}</span>
               <span className="turn-changes-removed">−{file.removed}</span>
             </span>
@@ -1354,7 +1354,7 @@ function TurnChangesCard({ turnId, changes, onOpenChanges, onReviewTurn, canMana
         ))}
         {remaining > 0 ? (
           <button className="turn-changes-more" type="button" aria-expanded={showAll} onClick={() => setShowAll((value) => !value)}>
-            {showAll ? tr("收起文件", "Show fewer files") : tr(`再显示 ${remaining} 个文件`, `Show ${remaining} more files`)}
+            {showAll ? tr("收起文件", "Show fewer files") : trf("再显示 {0} 个文件", "Show {0} more files", remaining)}
             <ChevronIcon up={showAll} />
           </button>
         ) : null}

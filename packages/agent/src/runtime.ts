@@ -424,6 +424,34 @@ export class AgentRuntime {
     });
   }
 
+  /** 撤销批量导入：从索引和内存里移除指定对话，不删除磁盘文件（由调用方清理）。运行中或当前激活的对话不能移除。 */
+  async removeConversations(ids: readonly string[]): Promise<number> {
+    return this.exclusive(async () => {
+      await this.ready();
+      if (this.disposed) throw new Error("应用正在退出，请重新启动后撤销");
+      const entries = ids.flatMap(id => {
+        const entry = this.conversations.get(id);
+        return entry ? [entry] : [];
+      });
+      if (entries.some(entry => entry.id === this.activeId)) throw new Error("当前会话属于这批同步，请先切换到其他会话再撤销");
+      if (entries.some(entry => entry.driving || entry.session?.isStreaming
+        || entry.control?.list().some(agent => agent.kind !== "root" && agent.status === "running"))) {
+        throw new Error("这批同步的会话仍在运行，请先停止后再撤销");
+      }
+      await Promise.all(entries.map(entry => this.detachEntry(entry)));
+      for (const entry of entries) this.conversations.delete(entry.id);
+      const count = this.store.remove(ids);
+      const active = this.activeConversation();
+      if (active) this.emitStatus(active);
+      return count;
+    });
+  }
+
+  /** 把待写入的会话索引立即落盘；开发版重启 main process 之前使用。 */
+  flushPersistence(): void {
+    this.store.flushSync();
+  }
+
   subscribe(listener: (event: RuntimeEvent) => void): () => void {
     this.listeners.add(listener);
     return () => {

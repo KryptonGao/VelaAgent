@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { AppLocale, GitWorktreeInfo } from "@vela/shared";
-import { tr } from "../../locale";
+import { tr, trf } from "../../locale";
 import type { VersionControlApi } from "../../hooks/useVersionControl";
 import { AlertIcon, CheckIcon, FolderIcon, MonitorIcon, PlusIcon, RefreshIcon, TrashIcon } from "../icons";
 
@@ -13,7 +13,6 @@ export function WorktreePanel({
   onClose,
   api,
   workspace,
-  locale,
   onSwitch,
 }: {
   open: boolean;
@@ -160,7 +159,7 @@ export function WorktreePanel({
                   <span className="vc-hint">{tr("没有未保存改动", "No unsaved changes")}</span>
                 ) : (
                   <span className="vc-badge vc-badge-pending">
-                    {tr(`${entry.changeCount} 个文件未保存（含 ${entry.untrackedCount ?? 0} 个未跟踪）`, `${entry.changeCount} unsaved files (${entry.untrackedCount ?? 0} untracked)`)}
+                    {trf("{0} 个文件未保存（含 {1} 个未跟踪）", "{0} unsaved files ({1} untracked)", entry.changeCount, entry.untrackedCount ?? 0)}
                   </span>
                 )}
               </div>
@@ -192,18 +191,12 @@ export function WorktreePanel({
                 <p>
                   {entry.missing
                     ? tr("目录已不存在，删除会清理该 worktree 的记录。", "The directory is gone; removing cleans up its record.")
-                    : tr(
-                        `将删除目录 ${entry.path} 及其中的未保存内容（提交与分支会保留）。`,
-                        `Deletes ${entry.path} including unsaved content (commits and branches stay).`,
-                      )}
+                    : trf("将删除目录 {0} 及其中的未保存内容（提交与分支会保留）。", "Deletes {0} including unsaved content (commits and branches stay).", entry.path)}
                 </p>
                 {(entry.changeCount ?? 0) > 0 ? (
                   <label className="vc-radio">
                     <input type="checkbox" checked={force} onChange={(event) => setForce(event.target.checked)} />
-                    {tr(
-                      `确认删除 ${entry.changeCount} 个未保存文件（含 ${entry.untrackedCount ?? 0} 个未跟踪）`,
-                      `Delete ${entry.changeCount} unsaved files (${entry.untrackedCount ?? 0} untracked)`,
-                    )}
+                    {trf("确认删除 {0} 个未保存文件（含 {1} 个未跟踪）", "Delete {0} unsaved files ({1} untracked)", entry.changeCount, entry.untrackedCount ?? 0)}
                   </label>
                 ) : null}
                 {error ? <div className="vc-error-banner" role="alert"><AlertIcon size={12} />{error}</div> : null}
@@ -235,11 +228,11 @@ export function WorktreePanel({
           {tr("清理失效记录", "Prune stale records")}
         </button>
         <span className="vc-hint">
-          {workspace ? tr(`当前工作区：${workspace}`, `Current workspace: ${workspace}`) : ""}
+          {workspace ? trf("当前工作区：{0}", "Current workspace: {0}", workspace) : ""}
         </span>
       </div>
       <p className="vc-hint">
-        {locale === "en" ? "Removing a worktree never deletes commits or branches." : "删除 worktree 不会删除提交或分支。"}
+        {tr("删除 worktree 不会删除提交或分支。", "Removing a worktree never deletes commits or branches.")}
       </p>
     </div>
   );

@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { tr } from "../locale";
+import { tr, trf } from "../locale";
 import { useReducedMotion } from "../hooks/useMotionPresence";
 import { CloseIcon } from "./icons";
 import {
@@ -649,7 +649,7 @@ export function ImageViewer({ request, onClose }: { request: ImageViewerRequest;
           {count > 1 ? (
             <>
               <span className="image-viewer-divider" aria-hidden="true" />
-              <span className="image-viewer-counter">{tr(`${index + 1} / ${count}`, `${index + 1} / ${count}`)}</span>
+              <span className="image-viewer-counter">{trf("{0} / {1}", "{0} / {1}", index + 1, count)}</span>
             </>
           ) : null}
         </div>

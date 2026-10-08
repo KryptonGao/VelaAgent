@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AppLocale, GitOperationQuery, GitOperationRecord, GitOperationType } from "@vela/shared";
-import { tr } from "../../locale";
+import { tr, trf } from "../../locale";
 import { useDismissable } from "../../hooks/useDismissable";
 import { AlertIcon, CheckIcon, CommitIcon, ExternalIcon, PrIcon, RefreshIcon, SearchIcon } from "../icons";
 import { formatRelativeTime } from "./time-format";
@@ -175,7 +175,7 @@ export function OperationLogPanel({
       </div>
       {filtered ? (
         <div className="vc-ops-summary">
-          {tr(`匹配 ${operations?.total ?? records.length} 条记录`, `${operations?.total ?? records.length} matching records`)}
+          {trf("匹配 {0} 条记录", "{0} matching records", operations?.total ?? records.length)}
           <button
             type="button"
             className="vc-link"

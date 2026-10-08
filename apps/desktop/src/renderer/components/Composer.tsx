@@ -32,7 +32,7 @@ import { applySkillPick, composeSkillPrompt, slashTokenAt } from "./composer/ski
 import { modKeyLabel } from "../platform";
 import { slashMenuItems, type SlashMenuItem } from "./composer/slash-picker";
 import { RecipeActionsContext } from "./recipe-actions-context";
-import { localizeError, tr, useAppLocale } from "../locale";
+import { localizeError, tr, useAppLocale, trf } from "../locale";
 
 export interface ComposerProps {
   sandboxMode?: import("@vela/shared").SandboxMode;
@@ -323,7 +323,7 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
         : streaming
           ? tr("排队发送 (Enter)", "Queue (Enter)")
           : tr("发送 (Enter)", "Send (Enter)");
-  const steerHint = tr(`调整当前任务 (${modifier}Enter)`, `Steer current task (${modifier}Enter)`);
+  const steerHint = trf("调整当前任务 ({0}Enter)", "Steer current task ({0}Enter)", modifier);
 
   return (
     <div className="chat-dock-wrapper" ref={ref}>

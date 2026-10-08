@@ -1,6 +1,6 @@
 import type { CheckpointRestorePreview, CheckpointTimeline } from "@vela/shared";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { isEnglish, localizeError, tr } from "../locale";
+import { localizeError, tr, trf, activeIntlLocale } from "../locale";
 import { BranchIcon, HistoryIcon } from "./icons";
 import "../checkpoints.css";
 
@@ -90,7 +90,7 @@ export function CheckpointTimelineDialog({ conversationId, busy, initialTurn, on
     }] : []),
     ...timeline.turns.map((turn, index) => ({
       turnIndex: turn.turnIndex,
-      label: tr(`第 ${turn.turnIndex + 1} 轮`, `Turn ${turn.turnIndex + 1}`),
+      label: trf("第 {0} 轮", "Turn {0}", turn.turnIndex + 1),
       text: turn.text.trim() || tr("[图片]", "[Image]"),
       timestamp: turn.timestamp,
       changedFiles: turn.changedFiles,
@@ -184,7 +184,7 @@ export function CheckpointTimelineDialog({ conversationId, busy, initialTurn, on
                             ? tr("与上一轮共用检查点", "Shares the previous checkpoint")
                             : item.changedFiles.length === 0
                               ? tr("没有改动文件", "No file changes")
-                              : tr(`改动 ${item.changedFiles.length} 个文件`, item.changedFiles.length === 1 ? "Changed 1 file" : `Changed ${item.changedFiles.length} files`)}
+                              : trf("改动 {0} 个文件", item.changedFiles.length === 1 ? "Changed {0} file" : "Changed {0} files", item.changedFiles.length)}
                         </span>
                       ) : null}
                     </span>
@@ -195,7 +195,7 @@ export function CheckpointTimelineDialog({ conversationId, busy, initialTurn, on
 
             {node ? (
               <section id={detailId} className="checkpoint-detail" aria-live="polite">
-                <h3>{node.turnIndex < 0 ? tr("回到对话开始", "Back to the start") : tr(`${node.label}结束时`, `End of ${node.label.toLowerCase()}`)}</h3>
+                <h3>{node.turnIndex < 0 ? tr("回到对话开始", "Back to the start") : trf("{0}结束时", "End of {0}", node.label)}</h3>
 
                 <div className="checkpoint-action">
                   <div className="checkpoint-action-copy">
@@ -235,10 +235,7 @@ export function CheckpointTimelineDialog({ conversationId, busy, initialTurn, on
                             onChange={event => { setRestoreFiles(event.target.checked); setConfirming(null); }} />
                           <span>
                             {tr("同时把工作区文件恢复到这里", "Also restore workspace files to this point")}
-                            {restoreFiles ? <em>{tr(
-                              `原对话之后 ${restore?.removedTurns ?? 0} 轮的文件改动会从工作区撤销，原对话里不能再回退这些轮次。`,
-                              `File changes from the original chat's ${restore?.removedTurns === 1 ? "later turn are" : `${restore?.removedTurns ?? 0} later turns are`} removed from the workspace and can no longer be rewound there.`,
-                            )}</em> : null}
+                            {restoreFiles ? <em>{trf("原对话之后 {0} 轮的文件改动会从工作区撤销，原对话里不能再回退这些轮次。", restore?.removedTurns === 1 ? "File changes from the original chat's later turn are removed from the workspace and can no longer be rewound there." : "File changes from the original chat's {0} later turns are removed from the workspace and can no longer be rewound there.", restore?.removedTurns ?? 0)}</em> : null}
                           </span>
                         </label>
                       ) : null}
@@ -278,10 +275,8 @@ export function CheckpointTimelineDialog({ conversationId, busy, initialTurn, on
 function restoreSummary(preview: CheckpointRestorePreview): string {
   const turns = preview.removedTurns;
   const files = preview.files.length;
-  const later = turns === 1 ? "the later turn" : `the ${turns} later turns`;
-  if (files === 0) return tr(`移除之后的 ${turns} 轮对话，没有文件需要恢复。`, `Removes ${later}. No files need restoring.`);
-  return tr(`移除之后的 ${turns} 轮对话，并把 ${files} 个文件恢复到当时的内容。期间你手动做的其他改动会保留。`,
-    `Removes ${later} and restores ${files === 1 ? "1 file" : `${files} files`} to how they were. Your other manual edits are kept.`);
+  if (files === 0) return trf("移除之后的 {0} 轮对话，没有文件需要恢复。", turns === 1 ? "Removes the later turn. No files need restoring." : "Removes the {0} later turns. No files need restoring.", turns);
+  return trf("移除之后的 {0} 轮对话，并把 {1} 个文件恢复到当时的内容。期间你手动做的其他改动会保留。", `${turns === 1 ? "Removes the later turn" : "Removes the {0} later turns"} and restores ${files === 1 ? "1 file" : "{1} files"} to how they were. Your other manual edits are kept.`, turns, files);
 }
 
 function FileList({ files }: { files: string[] }) {
@@ -291,7 +286,7 @@ function FileList({ files }: { files: string[] }) {
     <ul className="checkpoint-files">
       {shown.map(file => <li key={file} title={file}>{file}</li>)}
       {files.length > shown.length ? (
-        <li><button type="button" onClick={() => setAll(true)}>{tr(`还有 ${files.length - shown.length} 个`, `${files.length - shown.length} more`)}</button></li>
+        <li><button type="button" onClick={() => setAll(true)}>{trf("还有 {0} 个", "{0} more", files.length - shown.length)}</button></li>
       ) : null}
     </ul>
   );
@@ -299,7 +294,7 @@ function FileList({ files }: { files: string[] }) {
 
 function formatTime(timestamp: number): string {
   const date = new Date(timestamp);
-  const locale = isEnglish() ? "en-US" : "zh-CN";
+  const locale = activeIntlLocale();
   if (date.toDateString() === new Date().toDateString()) return date.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
   return date.toLocaleString(locale, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }

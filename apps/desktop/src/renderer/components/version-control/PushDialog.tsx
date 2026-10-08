@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { GitPushInput } from "@vela/shared";
-import { tr } from "../../locale";
+import { tr, trf } from "../../locale";
 
 /** 首次发布分支:显式选择远程与目标分支,并建立 upstream。 */
 export function PushDialog({
@@ -61,7 +61,7 @@ export function PushDialog({
               <input className="vc-input" value={branch} onChange={(event) => setBranch(event.target.value)} />
             </label>
             <p className="vc-hint">
-              {tr(`将把本地 ${defaultBranch} 推送到 ${remote}/${branch}，并建立跟踪关系。`, `Pushes local ${defaultBranch} to ${remote}/${branch} and sets the upstream.`)}
+              {trf("将把本地 {0} 推送到 {1}/{2}，并建立跟踪关系。", "Pushes local {0} to {1}/{2} and sets the upstream.", defaultBranch, remote, branch)}
             </p>
           </>
         )}

@@ -1,11 +1,11 @@
 import type { Api, Model } from '@earendil-works/pi-ai';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
-import { parseRecipeInput, type RecipeGenerateInput, type RecipeGenerateResult } from '@vela/shared';
+import { isAppLocale, modelLanguageName, parseRecipeInput, type RecipeGenerateInput, type RecipeGenerateResult } from '@vela/shared';
 import { openCodeSessionHeaders } from './provider-headers';
 
 export function parseRecipeGenerateInput(raw: unknown): RecipeGenerateInput {
   const input = raw as RecipeGenerateInput;
-  if (!input || typeof input.requestId !== 'string' || !/^[0-9a-f-]{36}$/i.test(input.requestId) || typeof input.text !== 'string' || !input.text.trim() || input.text.length > 40000 || !['zh-CN', 'en'].includes(input.locale) ||
+  if (!input || typeof input.requestId !== 'string' || !/^[0-9a-f-]{36}$/i.test(input.requestId) || typeof input.text !== 'string' || !input.text.trim() || input.text.length > 40000 || !isAppLocale(input.locale) ||
     !input.model || typeof input.model.provider !== 'string' || !input.model.provider.trim() || input.model.provider.length > 200 || typeof input.model.id !== 'string' || !input.model.id.trim() || input.model.id.length > 200) throw new Error('AI 配方请求不正确，原文最多 40,000 字符');
   if (input.sourceReference) {
     const source = input.sourceReference;
@@ -36,7 +36,7 @@ export class RecipeGenerator {
           'Name 1-80 chars, description <=300, <=5 tags of <=30 chars, defaultMode agent or plan, <=20 parameters; three nonempty body fields total <=40000 chars.',
           'Identify reusable concrete values as parameters, preserve original defaults if appropriate, and use {{parameter_id}} in the body. IDs must match [a-z][a-z0-9_]{0,39}, unique, never workspace. Parameter: {id,label,type,required,help?,defaultValue?,options?,pathKind?}. Types text, multiline, select (2-20 unique {value,label} options), boolean, path (pathKind file/directory/any). Use only declared placeholders or {{workspace.name}}, {{workspace.path}}. No scripts or recursive substitution.',
           'Preserve intent and uncertainty. Never convert planning into automatic implementation or publishing. Leave required values without defaults if the source does not provide them.',
-          input.locale === 'en' ? 'Write labels and prose in English.' : '名称、说明、参数标签和正文使用简体中文。',
+          input.locale === 'zh-CN' ? '名称、说明、参数标签和正文使用简体中文。' : `Write labels and prose in ${modelLanguageName(input.locale)}.`,
         ].join('\n'),
         messages: [{ role: 'user', content: input.text, timestamp: Date.now() }],
       }, { signal: controller.signal, maxTokens: 12000, reasoning: 'minimal', sessionId: input.requestId, headers: openCodeSessionHeaders(model, input.requestId) }), aborted]);

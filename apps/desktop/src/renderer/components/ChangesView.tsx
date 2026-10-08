@@ -7,7 +7,7 @@ import { DiffPane } from "./DiffPane";
 import { useFilePreview } from "./preview/FilePreviewContext";
 import { MarkdownPane } from "./preview/MarkdownPane";
 import { isMarkdownPath } from "./preview/markdown-path";
-import { tr } from "../locale";
+import { tr, trf } from "../locale";
 
 const statusLetters: Record<GitFileStatus, string> = {
   modified: "M",
@@ -176,7 +176,7 @@ export function ChangesView({
           <div className="changes-header-title">
             <FileIcon size={14} />
             <span id="changes-sheet-title">{tr("工作区变更", "Workspace changes")}</span>
-            <span className="changes-count">{files.length > 0 ? tr(`${files.length} 个文件`, `${files.length} files`) : tr("无变更", "No changes")}</span>
+            <span className="changes-count">{files.length > 0 ? trf("{0} 个文件", "{0} files", files.length) : tr("无变更", "No changes")}</span>
           </div>
           <div className="changes-header-actions">
             <button

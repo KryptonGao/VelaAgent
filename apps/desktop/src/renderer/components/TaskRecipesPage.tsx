@@ -1,3 +1,4 @@
+import type { AppLocale } from "@vela/shared";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { ModelCatalog, RecipeParameter, RecipePreview, RecipeRun, RecipeUseDraft, RecipeValue, TaskRecipe, TaskRecipeInput, TaskRecipesState } from '@vela/shared';
 import { parseRecipeInput, recipeDefaults, validateRecipe, validateRecipeValues } from '@vela/shared';
@@ -9,7 +10,7 @@ import { CloseIcon, PlusIcon, SparkIcon } from './icons';
 
 export interface RecipeMessageSeed { text: string; conversationId: string; messageId?: string; planId?: string }
 export interface TaskRecipesPageProps {
-  catalog: ModelCatalog | null; workspace: string | null; workspaces: string[]; locale: 'zh-CN' | 'en';
+  catalog: ModelCatalog | null; workspace: string | null; workspaces: string[]; locale: AppLocale;
   sidebarCollapsed: boolean; onToggleSidebar: () => void; onOpenConversation: (id: string) => void;
   selectedRecipe?: TaskRecipe | null; onConsumeSelection?: () => void;
   seed?: RecipeMessageSeed | null; onConsumeSeed: () => void;

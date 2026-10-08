@@ -7,7 +7,7 @@ import { useFrameTask } from "../hooks/useFrameTask";
 import { emptyMessages, type MessageStore } from "../hooks/message-store";
 import { useMessages } from "../hooks/useMessages";
 import type { UiMessage } from "../hooks/useSession";
-import { tr } from "../locale";
+import { tr, trf } from "../locale";
 import { ActivityIndicator } from "./ActivityIndicator";
 import { AgentStatusMark, agentKindLabel, agentStatusLabel } from "./AgentPanel";
 import { Markdown } from "./Markdown";
@@ -190,7 +190,7 @@ function AgentBreadcrumb({
           key={accumulated}
           className="agent-breadcrumb-segment is-link"
           type="button"
-          title={tr(`切换到 ${accumulated}`, `Switch to ${accumulated}`)}
+          title={trf("切换到 {0}", "Switch to {0}", accumulated)}
           onClick={() => onSwitch(target.id)}
         >
           {part}

@@ -1,3 +1,4 @@
+import { localizeCopy } from "@vela/shared";
 import { useEffect, useRef, useState } from "react";
 import type { PluginCatalog, PluginSnapshot } from "@vela/shared";
 import type { AppLocale } from "../hooks/usePreferences";
@@ -13,7 +14,7 @@ function PluginIcon({ plugin }: { plugin: PluginSnapshot }) {
 }
 
 export function IntegrationsSection({ locale, workspacePath, conversationId }: { locale: AppLocale; workspacePath: string | null; conversationId?: string | null }) {
-  const text = locale === "zh-CN" ? copy.zh : copy.en;
+  const text = localizeCopy(locale, copy.zh, copy.en);
   const [catalog, setCatalog] = useState<PluginCatalog | null>(null);
   const [error, setError] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -61,7 +62,7 @@ export function IntegrationsSection({ locale, workspacePath, conversationId }: {
   }
 
   return <section className="settings-section integrations-section" aria-label={text.title}>
-    <div className="settings-block"><h2>{text.title}</h2><p className="settings-hint">{text.hint}</p></div>
+    <div className="settings-block" data-setting-id="integrations"><h2>{text.title}</h2><p className="settings-hint">{text.hint}</p></div>
     {error ? <div className="settings-block"><p role="alert">{text.failed}</p><button className="settings-secondary" onClick={() => setReload(value => value + 1)}>{text.retry}</button></div> : null}
     {!catalog && !error ? <p role="status" className="settings-hint">{text.loading}</p> : null}
     {catalog?.plugins.map(plugin => <article className="integration-card" key={plugin.id}>

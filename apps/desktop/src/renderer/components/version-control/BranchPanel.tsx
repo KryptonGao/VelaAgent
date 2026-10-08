@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AppLocale, BranchSummary, GitBranchDeleteInput, GitBranchDetail } from "@vela/shared";
-import { tr } from "../../locale";
+import { tr, trf } from "../../locale";
 import type { VersionControlApi } from "../../hooks/useVersionControl";
 import { AlertIcon, BranchIcon, CheckIcon, RefreshIcon, SearchIcon, TrashIcon } from "../icons";
 
@@ -14,7 +14,6 @@ export function BranchPanel({
   branches,
   current,
   api,
-  locale,
   onSwitch,
   onCompare,
 }: {
@@ -140,14 +139,14 @@ export function BranchPanel({
                 <h3>{detail.name}</h3>
                 <div className="vc-branch-flags">
                   {detail.current ? <span className="vc-badge vc-badge-ok">{tr("当前分支", "Current")}</span> : null}
-                  {detail.worktreePath ? <span className="vc-badge vc-badge-pending">{tr(`worktree：${detail.worktreePath}`, `Worktree: ${detail.worktreePath}`)}</span> : null}
+                  {detail.worktreePath ? <span className="vc-badge vc-badge-pending">{trf("worktree：{0}", "Worktree: {0}", detail.worktreePath)}</span> : null}
                   {detail.mergedInto ? (
-                    <span className="vc-badge vc-badge-ok">{tr(`已合入 ${detail.mergedInto}`, `Merged into ${detail.mergedInto}`)}</span>
+                    <span className="vc-badge vc-badge-ok">{trf("已合入 {0}", "Merged into {0}", detail.mergedInto)}</span>
                   ) : (
                     <span className="vc-badge vc-badge-pending">{tr("尚未合入", "Not merged")}</span>
                   )}
                   {detail.unpushedCount === null ? null : detail.unpushedCount > 0 ? (
-                    <span className="vc-badge vc-badge-pending">{tr(`${detail.unpushedCount} 个未推送提交`, `${detail.unpushedCount} unpushed`)}</span>
+                    <span className="vc-badge vc-badge-pending">{trf("{0} 个未推送提交", "{0} unpushed", detail.unpushedCount)}</span>
                   ) : (
                     <span className="vc-badge vc-badge-muted">{tr("无未推送提交", "Nothing unpushed")}</span>
                   )}
@@ -198,10 +197,7 @@ export function BranchPanel({
               {deleting ? (
                 <div className="vc-branch-delete" role="alertdialog" aria-label={tr("确认删除分支", "Confirm branch deletion")}>
                   <p>
-                    {tr(
-                      `将删除本地分支 ${deleting.detail.name}。分支上的提交仍会保留在对象库中，除非被清理。`,
-                      `Deletes local branch ${deleting.detail.name}. Its commits stay in the object database unless pruned.`,
-                    )}
+                    {trf("将删除本地分支 {0}。分支上的提交仍会保留在对象库中，除非被清理。", "Deletes local branch {0}. Its commits stay in the object database unless pruned.", deleting.detail.name)}
                   </p>
                   {!deleting.detail.mergedInto ? (
                     <label className="vc-radio">
@@ -222,10 +218,7 @@ export function BranchPanel({
                           setDeleting({ ...deleting, remote: event.target.checked ? deleting.detail.remoteBranch!.remote : null })
                         }
                       />
-                      {tr(
-                        `同时删除远程分支 ${deleting.detail.remoteBranch.remote}/${deleting.detail.remoteBranch.branch}`,
-                        `Also delete remote branch ${deleting.detail.remoteBranch.remote}/${deleting.detail.remoteBranch.branch}`,
-                      )}
+                      {trf("同时删除远程分支 {0}/{1}", "Also delete remote branch {0}/{1}", deleting.detail.remoteBranch.remote, deleting.detail.remoteBranch.branch)}
                     </label>
                   ) : null}
                   <div className="vc-dialog-actions">
@@ -342,7 +335,7 @@ export function BranchPanel({
           ) : null}
         </div>
       </div>
-      <p className="vc-hint">{locale === "en" ? "Only local branches are listed for maintenance." : "这里只维护本地分支；远程分支的删除在确认框里单独勾选。"}</p>
+      <p className="vc-hint">{tr("这里只维护本地分支；远程分支的删除在确认框里单独勾选。", "Only local branches are listed for maintenance.")}</p>
     </div>
   );
 }

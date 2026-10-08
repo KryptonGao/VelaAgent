@@ -8,7 +8,7 @@ import type {
 } from "@vela/shared";
 import { highlightSnippet, type ThemedToken } from "../preview/highlighter";
 import { Markdown } from "../Markdown";
-import { tr } from "../../locale";
+import { tr, trf } from "../../locale";
 import { useSlidingTabIndicator } from "../useSlidingTabIndicator";
 
 export const kindLabel = (kind: TraceKind) =>
@@ -592,10 +592,7 @@ export function TraceInspector({
                       {images.map((image, index) => (
                         <img
                           key={index}
-                          alt={tr(
-                            `用户附件 ${index + 1}`,
-                            `User attachment ${index + 1}`,
-                          )}
+                          alt={trf("用户附件 {0}", "User attachment {0}", index + 1)}
                           src={`data:${image.mimeType};base64,${image.data}`}
                         />
                       ))}

@@ -7,7 +7,7 @@ import type {
   GitRecoveryResult,
   GitReflogEntry,
 } from "@vela/shared";
-import { tr } from "../../locale";
+import { tr, trf } from "../../locale";
 import type { VersionControlApi } from "../../hooks/useVersionControl";
 import { AlertIcon, RefreshIcon } from "../icons";
 import { formatAbsoluteTime, formatRelativeTime } from "./time-format";
@@ -189,7 +189,7 @@ export function ReflogPanel({
         ) : null}
         {reflog?.truncated ? (
           <div className="vc-p2-note">
-            {tr(`共 ${reflog.total} 条记录，这里显示前 ${entries.length} 条。`, `${reflog.total} entries matched; showing the first ${entries.length}.`)}
+            {trf("共 {0} 条记录，这里显示前 {1} 条。", "{0} entries matched; showing the first {1}.", reflog.total, entries.length)}
           </div>
         ) : null}
 
@@ -293,12 +293,12 @@ export function ReflogPanel({
                   </div>
                   <p className="vc-p2-note">{preview.keepNote}</p>
                   <p className="vc-p2-meta">
-                    {tr(`未提交改动 ${preview.changeCount} 个文件。`, `${preview.changeCount} files with uncommitted changes.`)}
+                    {trf("未提交改动 {0} 个文件。", "{0} files with uncommitted changes.", preview.changeCount)}
                   </p>
                   {preview.discarded.length > 0 ? (
                     <>
                       <div className="vc-p2-label">
-                        {tr(`会被丢弃的提交（${preview.discarded.length}）`, `Commits that will be dropped (${preview.discarded.length})`)}
+                        {trf("会被丢弃的提交（{0}）", "Commits that will be dropped ({0})", preview.discarded.length)}
                       </div>
                       {preview.discarded.slice(0, 10).map((commit) => (
                         <div key={commit.sha} className="vc-p2-commit">
@@ -308,7 +308,7 @@ export function ReflogPanel({
                       ))}
                       {preview.discarded.length > 10 ? (
                         <div className="vc-p2-meta">
-                          {tr(`另有 ${preview.discarded.length - 10} 个提交未列出。`, `${preview.discarded.length - 10} more commits are not listed.`)}
+                          {trf("另有 {0} 个提交未列出。", "{0} more commits are not listed.", preview.discarded.length - 10)}
                         </div>
                       ) : null}
                     </>

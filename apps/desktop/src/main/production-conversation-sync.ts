@@ -12,11 +12,21 @@ const inside = (root: string, file: string) => {
 };
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT";
 
+export interface ConversationSyncOptions {
+  /** 批次目录名；同步后的历史文件放在 sessions/production-sync/<batch>。 */
+  batch?: string;
+  /** 只校验并统计将导入的会话，不复制 trace / 检查点，也不写入目标。 */
+  dryRun?: boolean;
+  /** 导入完成后报告新增的会话 ID，供批次记录使用。 */
+  onImported?: (ids: string[]) => void;
+}
+
 /** 从正式版读取一次历史快照，目标索引由 Runtime 合并；源资料始终只读。 */
 export async function syncProductionConversations(
   runtime: Pick<AgentRuntime, "importConversations">,
   sourceHome: string,
   destinationHome: string,
+  options: ConversationSyncOptions = {},
 ): Promise<ConversationSyncResult> {
   await mkdir(destinationHome, { recursive: true });
   let source: string;
@@ -24,7 +34,10 @@ export async function syncProductionConversations(
   catch (error) { if (missing(error)) throw new Error("没有找到正式版会话，请先在正式版创建会话"); throw error; }
   const destination = resolve(destinationHome);
   if (source === await realpath(destination)) throw new Error("开发版正在使用正式版资料目录，无需同步");
-  const batch = randomUUID();
+  const batch = options.batch ?? randomUUID();
+  const dryRun = options.dryRun === true;
+  let planned = 0;
+  const importedIds: string[] = [];
   const stage = join(destination, `.conversation-sync-${batch}`);
   const sessionRoot = join(destination, "sessions", "production-sync", batch);
   const published: string[] = [];
@@ -120,7 +133,7 @@ export async function syncProductionConversations(
             SessionManager.open(file.staged, dirname(file.staged), entry.cwd).buildSessionProjection();
           }
           const entryMoves: Array<[string, string]> = [];
-          for (const [from, to] of [
+          for (const [from, to] of dryRun ? [] : [
             [join(source, "traces", `${id}.jsonl`), join(destination, "traces", `${id}.jsonl`)],
             [join(source, "checkpoints", id), join(destination, "checkpoints", id)],
           ]) {
@@ -142,7 +155,8 @@ export async function syncProductionConversations(
           await rm(ancillary, { recursive: true, force: true });
         }
       }
-      if (!entries.length) return [];
+      planned = entries.length;
+      if (!entries.length || dryRun) return [];
       moves.unshift([join(stage, "sessions"), sessionRoot]);
       for (const [, to] of moves) {
         try { await lstat(to); throw new Error("目标已有同名历史文件，请检查开发版资料目录后重试"); }
@@ -153,7 +167,12 @@ export async function syncProductionConversations(
         await rename(from, to);
         published.push(to);
       }
+      importedIds.push(...entries.map(entry => (entry as { id: string }).id));
       return entries;
+    }).then(count => {
+      if (dryRun) return planned;
+      options.onImported?.(importedIds);
+      return count;
     });
     return result;
   } catch (error) {

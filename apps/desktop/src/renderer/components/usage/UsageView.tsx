@@ -1,7 +1,7 @@
 import { useId, useMemo, useState } from "react";
 import type { ProviderSummary, TraceRequest, TraceSummaryRequest } from "@vela/shared";
 import { useTrace } from "../../hooks/useTrace";
-import { isEnglish, localizeError, tr } from "../../locale";
+import { localizeError, tr, trf, activeIntlLocale, getActiveLocale } from "../../locale";
 import { useSlidingTabIndicator } from "../useSlidingTabIndicator";
 import {
   formatUsageNumber, formatUsagePercent, summarizeUsage, usageCacheHitRate,
@@ -12,8 +12,8 @@ import "./usage.css";
 type UsageTab = "overview" | "models" | "summaries" | "providers" | "coverage";
 
 function TokenValue({ value, metered }: { value: number; metered: number }) {
-  return <span title={metered > 0 ? value.toLocaleString(isEnglish() ? "en-US" : "zh-CN") : undefined}>
-    {metered > 0 ? formatUsageNumber(value, isEnglish()) : "—"}
+  return <span title={metered > 0 ? value.toLocaleString(activeIntlLocale()) : undefined}>
+    {metered > 0 ? formatUsageNumber(value, getActiveLocale()) : "—"}
   </span>;
 }
 
@@ -27,8 +27,8 @@ function UsageShare({ value, total }: { value: number; total: number }) {
 
 function UsageOverview({ totals, activeDays, undated, settings }: { totals: UsageTotals; activeDays: number; undated: number; settings: boolean }) {
   const cards = [
-    [tr("请求数", "Requests"), formatUsageNumber(totals.requests, isEnglish())],
-    [tr("已计量", "Metered"), formatUsageNumber(totals.metered, isEnglish())],
+    [tr("请求数", "Requests"), formatUsageNumber(totals.requests, getActiveLocale())],
+    [tr("已计量", "Metered"), formatUsageNumber(totals.metered, getActiveLocale())],
     [tr("Token 总数", "Total tokens"), <TokenValue value={totals.totalTokens} metered={totals.metered} />],
     [tr("缓存命中 Token", "Cache read tokens"), <TokenValue value={totals.cacheRead} metered={totals.metered} />],
     [tr("覆盖率", "Coverage"), formatUsagePercent(usageCoverage(totals))],
@@ -43,7 +43,7 @@ function UsageOverview({ totals, activeDays, undated, settings }: { totals: Usag
     <p className="usage-note">{settings
       ? tr("已计量表示提供方返回了 Token 用量；覆盖率 = 已计量请求数 / 请求总数。分支对话复制的历史请求只计一次。", "Metered requests have token usage reported by the provider; coverage = metered requests / all requests. History copied into conversation branches is counted once.")
       : tr("统计当前对话中的模型请求。已计量表示提供方返回了 Token 用量；覆盖率 = 已计量请求数 / 请求总数。", "Model requests in this conversation. Metered requests have token usage reported by the provider; coverage = metered requests / all requests.")}
-      {undated > 0 ? ` ${tr(`${undated} 个请求缺少日期，未计入活跃天数。`, `${undated} requests have no date and are excluded from active days.`)}` : ""}
+      {undated > 0 ? ` ${trf("{0} 个请求缺少日期，未计入活跃天数。", "{0} requests have no date and are excluded from active days.", undated)}` : ""}
     </p>
   </>;
 }
@@ -149,8 +149,8 @@ export function UsageReport({ requests, summaries = [], providers, loading = fal
               <h2 id={`${id}-summaries-title`}>{tr("思考内容总结模型", "Thinking summary model")}</h2>
               <div className="usage-summary-grid">
                 {([
-                  [tr("请求数", "Requests"), formatUsageNumber(summaryStats.totals.requests, isEnglish())],
-                  [tr("已计量", "Metered"), formatUsageNumber(summaryStats.totals.metered, isEnglish())],
+                  [tr("请求数", "Requests"), formatUsageNumber(summaryStats.totals.requests, getActiveLocale())],
+                  [tr("已计量", "Metered"), formatUsageNumber(summaryStats.totals.metered, getActiveLocale())],
                   [tr("Token 总数", "Total tokens"), <TokenValue value={summaryStats.totals.totalTokens} metered={summaryStats.totals.metered} />],
                   [tr("缓存命中 Token", "Cache read tokens"), <TokenValue value={summaryStats.totals.cacheRead} metered={summaryStats.totals.metered} />],
                   [tr("覆盖率", "Coverage"), formatUsagePercent(usageCoverage(summaryStats.totals))],
@@ -241,7 +241,7 @@ function UsageActivity({ days, start, end }: { days: Map<string, UsageTotals>; s
   const offset = new Date(`${calendar[0]}T12:00:00`).getDay();
   const cells = [...Array.from({ length: offset }, () => null), ...calendar];
   const maximum = Math.max(1, ...[...days.values()].map(day => day.requests));
-  const locale = isEnglish() ? "en-US" : "zh-CN";
+  const locale = activeIntlLocale();
   const gridTemplateColumns = `repeat(${Math.ceil(cells.length / 7)}, minmax(10px, 1fr))`;
   return <section className="usage-activity" aria-label={tr("每日活动", "Daily activity")}>
     <h2>{tr("每日活动", "Daily activity")}</h2>
@@ -259,8 +259,8 @@ function UsageActivity({ days, start, end }: { days: Map<string, UsageTotals>; s
           const count = days.get(day)?.requests ?? 0;
           const excluded = Boolean((start && day < start) || (end && day > end));
           const level = count === 0 ? 0 : Math.max(1, Math.ceil(count / maximum * 4));
-          const label = excluded ? tr(`${day}：不在所选范围`, `${day}: outside selected range`)
-            : tr(`${day}：${count} 次请求`, `${day}: ${count} requests`);
+          const label = excluded ? trf("{0}：不在所选范围", "{0}: outside selected range", day)
+            : trf("{0}：{1} 次请求", "{0}: {1} requests", day, count);
           return <span key={day} className={`usage-heatmap-cell level-${level}${excluded ? " excluded" : ""}`}
             role="img" aria-label={label} title={label} />;
         })}

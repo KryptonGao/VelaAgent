@@ -1,3 +1,4 @@
+import { intlLocale, type AppLocale } from "@vela/shared";
 import type { TraceRequest, TraceUsage } from "@vela/shared";
 
 /** Minimal shape shared by turn requests and standalone summary requests. */
@@ -142,12 +143,14 @@ export function summarizeUsage(requests: UsageRecord[]) {
   };
 }
 
-export function formatUsageNumber(value: number, english = false): string {
-  const units: [number, string][] = english
+export function formatUsageNumber(value: number, locale: AppLocale = "zh-CN"): string {
+  const units: [number, string][] = locale === "en"
     ? [[1e9, "B"], [1e6, "M"], [1e3, "K"]]
+    : locale === "zh-TW" || locale === "ja" ? [[1e8, "億"], [1e4, "萬"]]
+    : locale === "ko" ? [[1e8, "억"], [1e4, "만"]]
     : [[1e8, "亿"], [1e4, "万"]];
   const unit = units.find(([threshold]) => value >= threshold);
-  if (!unit) return value.toLocaleString(english ? "en-US" : "zh-CN");
+  if (!unit) return value.toLocaleString(intlLocale(locale));
   return `${Number((value / unit[0]).toFixed(1))}${unit[1]}`;
 }
 

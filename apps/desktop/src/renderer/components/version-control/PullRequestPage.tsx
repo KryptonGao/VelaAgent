@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppLocale, ConversationGoal, GitStatusSnapshot, PrCheckDetail, PrCompareScope, PrEditOptions, PrIssueLinkMode, PrState, PrSummary, PullRequestInfo } from "@vela/shared";
-import { tr } from "../../locale";
+import { tr, trf } from "../../locale";
 import type { VersionControlApi } from "../../hooks/useVersionControl";
 import { Markdown } from "../Markdown";
 import { AlertIcon, BranchIcon, CheckIcon, CloudIcon, ExternalIcon, GithubIcon, PencilIcon, PrIcon, RefreshIcon, SendIcon } from "../icons";
@@ -310,7 +310,7 @@ export function PullRequestPage({
         {pushTarget ? (
           <p className="vc-compare-note">
             <CloudIcon size={11} />
-            {tr(`推送只发生在 ${pushTarget.remote}（${pushTarget.repo ?? "非 GitHub"}）`, `Pushes only go to ${pushTarget.remote} (${pushTarget.repo ?? "not GitHub"})`)}
+            {trf("推送只发生在 {0}（{1}）", "Pushes only go to {0} ({1})", pushTarget.remote, pushTarget.repo ?? tr("非 GitHub", "not GitHub"))}
           </p>
         ) : null}
 
@@ -318,10 +318,7 @@ export function PullRequestPage({
           <div className="vc-pr-fork-note" role="status">
             <span className="vc-badge vc-badge-pending">{tr("Fork 工作流", "Fork workflow")}</span>
             <span>
-              {tr(
-                `来源是你 fork 的 ${headRepo}，目标是 ${baseRepo}；推送只发生在 ${pushTarget?.remote ?? "来源远程"}。`,
-                `Head is your fork ${headRepo}, base is ${baseRepo}; pushes only go to ${pushTarget?.remote ?? "the head remote"}.`,
-              )}
+              {trf("来源是你 fork 的 {0}，目标是 {1}；推送只发生在 {2}。", "Head is your fork {0}, base is {1}; pushes only go to {2}.", headRepo, baseRepo, pushTarget?.remote ?? tr("来源远程", "the head remote"))}
             </span>
           </div>
         ) : null}
@@ -338,7 +335,7 @@ export function PullRequestPage({
         <label className="vc-field-label" htmlFor="vc-pr-body">{tr("描述", "Description")} <small>{tr("Markdown · 可编辑", "Markdown · editable")}</small></label>
         <div className="vc-description-wrap">
           <div className="vc-md-bar">
-            <span className="vc-hint">{template ? tr(`模板：${template.name}`, `Template: ${template.name}`) : ""}</span>
+            <span className="vc-hint">{template ? trf("模板：{0}", "Template: {0}", template.name) : ""}</span>
             <button type="button" className="vc-btn vc-btn-ghost" aria-pressed={preview} onClick={() => setPreview((value) => !value)}>
               {preview ? tr("编辑", "Edit") : tr("预览", "Preview")}
             </button>
@@ -380,7 +377,7 @@ export function PullRequestPage({
             compact
             state={ai.state}
             disabled={!scope || scope.empty}
-            hint={scope && !scope.empty ? tr(`依据 ${branch} → ${base} 的 ${scope.commits.length} 个提交`, `${scope.commits.length} commits from ${branch} to ${base}`) : tr("没有可比对的提交", "No commits to compare")}
+            hint={scope && !scope.empty ? trf("依据 {0} → {1} 的 {2} 个提交", "{2} commits from {0} to {1}", branch, base, scope.commits.length) : tr("没有可比对的提交", "No commits to compare")}
             hasText={Boolean(title.trim() || body.trim())}
             onGenerate={(action, instruction) => void onGenerate(action, instruction)}
             onApply={(generated) => {
@@ -404,7 +401,7 @@ export function PullRequestPage({
                 : !title.trim()
                   ? tr("填写标题后即可创建。", "Add a title to create the pull request.")
                   : scope.unpushedCount > 0
-                    ? tr(`创建时会先把 ${scope.unpushedCount} 个未推送提交推送到 ${scope.pushTarget?.remote ?? "远程"}再创建。`, `${scope.unpushedCount} unpushed commits will be pushed to ${scope.pushTarget?.remote ?? "the remote"} first.`)
+                    ? trf("创建时会先把 {0} 个未推送提交推送到 {1}再创建。", "{0} unpushed commits will be pushed to {1} first.", scope.unpushedCount, scope.pushTarget?.remote ?? tr("远程", "the remote"))
                     : tr("创建前会再次核对 base、head 与提交范围。", "Base, head and the commit range are re-checked before creation.")}
           </span>
           <button
@@ -442,7 +439,7 @@ export function PullRequestPage({
                 <AlertIcon size={12} />
                 <span>
                   <b>{tr("没有可创建的提交", "Nothing to create")}</b>
-                  {tr(`当前分支与 ${base || "base"} 没有差异；先提交并推送改动后再回来。`, `No difference between this branch and ${base || "base"}; commit and push first.`)}
+                  {trf("当前分支与 {0} 没有差异；先提交并推送改动后再回来。", "No difference between this branch and {0}; commit and push first.", base || "base")}
                 </span>
               </div>
             ) : null}
@@ -458,7 +455,7 @@ export function PullRequestPage({
               <div className="vc-scope-block">
                 <div className="vc-scope-label">
                   <span>{tr("提交", "Commits")}</span>
-                  <em>{tr(`${branch ?? "head"} → ${base || "base"}`, `${branch ?? "head"} → ${base || "base"}`)}</em>
+                  <em>{trf("{0} → {1}", "{0} → {1}", branch ?? "head", base || "base")}</em>
                 </div>
                 <div className="vc-scope-commits">
                   {scope.commits.slice(0, 30).map((commit) => (
@@ -468,7 +465,7 @@ export function PullRequestPage({
                       <code className="vc-sha">{commit.sha.slice(0, 7)}</code>
                     </div>
                   ))}
-                  {scope.commits.length > 30 ? <div className="vc-hint">{tr(`还有 ${scope.commits.length - 30} 个提交`, `${scope.commits.length - 30} more commits`)}</div> : null}
+                  {scope.commits.length > 30 ? <div className="vc-hint">{trf("还有 {0} 个提交", "{0} more commits", scope.commits.length - 30)}</div> : null}
                 </div>
               </div>
             ) : null}
@@ -666,7 +663,7 @@ function PrEditPanel({
         disabled={!scope}
         hint={
           scope
-            ? tr(`依据 ${summary.headRefName} → ${summary.baseRefName} 的 ${scope.commits.length} 个提交 · 结果可编辑`, `Based on ${scope.commits.length} commits from ${summary.headRefName} to ${summary.baseRefName} · editable`)
+            ? trf("依据 {0} → {1} 的 {2} 个提交 · 结果可编辑", "Based on {2} commits from {0} to {1} · editable", summary.headRefName, summary.baseRefName, scope.commits.length)
             : tr("正在读取变更范围…", "Loading the change range…")
         }
         hasText={Boolean(title.trim() || body.trim())}
@@ -898,7 +895,7 @@ function PrDetail({
           <span>{tr("分支", "Branches")} <b>{summary.baseRefName} ← {summary.headRefName}</b></span>
           <span>{tr("作者", "Author")} <b>{summary.author ?? "—"}</b></span>
           {summary.updatedAt ? <span>{tr("更新于", "Updated")} {formatRelativeTime(summary.updatedAt, locale)}</span> : null}
-          <span className="vc-stats"><b className="vc-plus">+{summary.additions}</b> <b className="vc-minus">−{summary.deletions}</b> · {tr(`${summary.changedFiles} 个文件`, `${summary.changedFiles} files`)}</span>
+          <span className="vc-stats"><b className="vc-plus">+{summary.additions}</b> <b className="vc-minus">−{summary.deletions}</b> · {trf("{0} 个文件", "{0} files", summary.changedFiles)}</span>
         </div>
         <div className="vc-pr-detail-actions">
           <button type="button" className="vc-btn vc-btn-primary" onClick={() => void window.vela?.openPullRequest(summary.url)}>
@@ -1034,7 +1031,7 @@ function PrDetail({
 
       <footer className="vc-pr-detail-foot">
         <span>{tr("当前分支", "Current branch")} <code>{status.branch ?? "—"}</code></span>
-        <span>{pr.checkedAt ? tr(`查询于 ${formatRelativeTime(pr.checkedAt, locale)}`, `Checked ${formatRelativeTime(pr.checkedAt, locale)}`) : ""}</span>
+        <span>{pr.checkedAt ? trf("查询于 {0}", "Checked {0}", formatRelativeTime(pr.checkedAt, locale)) : ""}</span>
       </footer>
     </div>
   );

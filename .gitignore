@@ -10,3 +10,7 @@ out/
 .scratch-logo/chrome-profile/
 apps/desktop/test-center/.runs/
 output/
+
+# Private planning docs
+docs/marketing-plan.md
+docs/marketing-plan-personal.md

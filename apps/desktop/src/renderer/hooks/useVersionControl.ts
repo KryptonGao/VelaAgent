@@ -86,7 +86,7 @@ import type {
   PrUpdateResult,
   PullRequestInfo,
 } from "@vela/shared";
-import { tr } from "../locale";
+import { tr, trf } from "../locale";
 import { cleanErrorMessage, type ProjectApi } from "./useProject";
 import type { DiffViewMode } from "../components/DiffPane";
 
@@ -614,7 +614,7 @@ export function useVersionControl(project: ProjectApi, agentStreaming: boolean):
         if (!api) return null;
         const result = await api.commit(input);
         if (result.ok) {
-          setNotice(tr(`已提交 ${result.shortSha ?? ""}`, `Committed ${result.shortSha ?? ""}`));
+          setNotice(trf("已提交 {0}", "Committed {0}", result.shortSha ?? ""));
           setSelectedSha(result.sha);
           refreshGraph();
           refreshOperations();
@@ -642,10 +642,7 @@ export function useVersionControl(project: ProjectApi, agentStreaming: boolean):
         if (!result.commit.ok) {
           setError(result.commit.message || tr("提交失败", "Commit failed"));
         } else if (result.push && !result.push.ok) {
-          setError(tr(
-            `提交成功，但推送未完成：${result.push.message}`,
-            `Committed, but push did not finish: ${result.push.message}`,
-          ));
+          setError(trf("提交成功，但推送未完成：{0}", "Committed, but push did not finish: {0}", result.push.message));
         } else {
           setNotice(tr("提交并推送完成", "Committed and pushed"));
         }
@@ -663,7 +660,7 @@ export function useVersionControl(project: ProjectApi, agentStreaming: boolean):
         const api = window.vela;
         if (!api) return null;
         const result = await api.fetchRemote(remote);
-        setNotice(result.ok ? tr(`已 Fetch ${result.remote}`, `Fetched ${result.remote}`) : result.message);
+        setNotice(result.ok ? trf("已 Fetch {0}", "Fetched {0}", result.remote) : result.message);
         refreshOperations();
         refreshGraph();
         return result;
@@ -691,7 +688,7 @@ export function useVersionControl(project: ProjectApi, agentStreaming: boolean):
         const api = window.vela;
         if (!api) return null;
         const result = await api.pushBranch(target);
-        if (result.ok) setNotice(tr(`已推送到 ${result.remote}/${result.branch}`, `Pushed to ${result.remote}/${result.branch}`));
+        if (result.ok) setNotice(trf("已推送到 {0}/{1}", "Pushed to {0}/{1}", result.remote, result.branch));
         else setError(result.message);
         refreshOperations();
         refreshGraph();
@@ -709,7 +706,7 @@ export function useVersionControl(project: ProjectApi, agentStreaming: boolean):
         if (!api) return null;
         const result = await api.createPullRequestNative(input);
         if (result.ok) {
-          setNotice(result.message || tr(`已创建 PR #${result.number ?? ""}`, `Created PR #${result.number ?? ""}`));
+          setNotice(result.message || trf("已创建 PR #{0}", "Created PR #{0}", result.number ?? ""));
         } else {
           setError(result.message || tr("创建 PR 失败", "Could not create the pull request"));
         }
@@ -809,7 +806,7 @@ export function useVersionControl(project: ProjectApi, agentStreaming: boolean):
         return true;
       });
       if (done === true) {
-        setNotice(tr(`已重命名分支 ${name} → ${nextName}`, `Renamed ${name} → ${nextName}`));
+        setNotice(trf("已重命名分支 {0} → {1}", "Renamed {0} → {1}", name, nextName));
         await refreshBranchList();
         refreshGraph();
         refreshOperations();
@@ -848,8 +845,8 @@ export function useVersionControl(project: ProjectApi, agentStreaming: boolean):
       if (done === true) {
         setNotice(
           input.upstream
-            ? tr(`已设置 ${input.branch} 跟踪 ${input.upstream}`, `${input.branch} now tracks ${input.upstream}`)
-            : tr(`已清除 ${input.branch} 的跟踪关系`, `Cleared tracking for ${input.branch}`),
+            ? trf("已设置 {0} 跟踪 {1}", "{0} now tracks {1}", input.branch, input.upstream)
+            : trf("已清除 {0} 的跟踪关系", "Cleared tracking for {0}", input.branch),
         );
         await refreshBranchList();
         refreshOperations();
@@ -888,22 +885,22 @@ export function useVersionControl(project: ProjectApi, agentStreaming: boolean):
 
   const addRemote = useCallback(
     (input: GitRemoteInput) =>
-      remoteMutation(tr(`已添加远程 ${input.name}`, `Added remote ${input.name}`), (api) => api.addRemote(input)),
+      remoteMutation(trf("已添加远程 {0}", "Added remote {0}", input.name), (api) => api.addRemote(input)),
     [remoteMutation],
   );
   const setRemoteUrl = useCallback(
     (name: string, url: string, pushUrl?: string | null) =>
-      remoteMutation(tr(`已更新远程 ${name}`, `Updated remote ${name}`), (api) => api.setRemoteUrl(name, url, pushUrl)),
+      remoteMutation(trf("已更新远程 {0}", "Updated remote {0}", name), (api) => api.setRemoteUrl(name, url, pushUrl)),
     [remoteMutation],
   );
   const removeRemote = useCallback(
-    (name: string) => remoteMutation(tr(`已删除远程 ${name}`, `Removed remote ${name}`), (api) => api.removeRemote(name)),
+    (name: string) => remoteMutation(trf("已删除远程 {0}", "Removed remote {0}", name), (api) => api.removeRemote(name)),
     [remoteMutation],
   );
   const renameRemote = useCallback(
     (name: string, nextName: string) =>
       remoteMutation(
-        tr(`已重命名远程 ${name} → ${nextName}`, `Renamed remote ${name} → ${nextName}`),
+        trf("已重命名远程 {0} → {1}", "Renamed remote {0} → {1}", name, nextName),
         (api) => api.renameRemote(name, nextName),
       ),
     [remoteMutation],

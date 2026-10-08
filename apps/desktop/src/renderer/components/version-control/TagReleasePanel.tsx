@@ -6,7 +6,7 @@ import type {
   GitReleaseNotesScope,
   GitStatusSnapshot,
 } from "@vela/shared";
-import { tr } from "../../locale";
+import { tr, trf } from "../../locale";
 import type { VersionControlApi } from "../../hooks/useVersionControl";
 import { AlertIcon, CopyIcon, RefreshIcon, SparkIcon, TagIcon, TrashIcon } from "../icons";
 import { AiAssist } from "./AiAssist";
@@ -449,7 +449,7 @@ export function TagReleasePanel({
               const pushLabel = tag.pushed === null
                 ? tr("推送状态未知", "Push state unknown")
                 : tag.pushed
-                  ? tr(`已推送到 ${tag.remotes.join("、")}`, `Pushed to ${tag.remotes.join(", ")}`)
+                  ? trf("已推送到 {0}", "Pushed to {0}", tag.remotes.join(tr("、", ", ")))
                   : tr("未推送", "Not pushed");
               const pushClass = tag.pushed === null
                 ? "vc-badge vc-badge-muted"
@@ -500,7 +500,7 @@ export function TagReleasePanel({
                           disabled={api.busy !== null}
                           onClick={() => void removeTag(tag.name, selectedRemote || null)}
                         >
-                          {tr(`同时删除远程 ${selectedRemote}`, `Also delete on ${selectedRemote}`)}
+                          {trf("同时删除远程 {0}", "Also delete on {0}", selectedRemote)}
                         </button>
                       ) : null}
                       <button type="button" className="vc-btn vc-btn-ghost" onClick={() => setConfirmTag(null)}>
@@ -546,9 +546,9 @@ export function TagReleasePanel({
               const body = release.body ?? "";
               const preview = body.length > releasePreviewLength ? `${body.slice(0, releasePreviewLength)}…` : body;
               const published = release.publishedAt !== null
-                ? tr(`发布于 ${formatRelativeTime(release.publishedAt, locale)}`, `Published ${formatRelativeTime(release.publishedAt, locale)}`)
+                ? trf("发布于 {0}", "Published {0}", formatRelativeTime(release.publishedAt, locale))
                 : release.createdAt !== null
-                  ? tr(`创建于 ${formatRelativeTime(release.createdAt, locale)}`, `Created ${formatRelativeTime(release.createdAt, locale)}`)
+                  ? trf("创建于 {0}", "Created {0}", formatRelativeTime(release.createdAt, locale))
                   : tr("发布时间未知", "Publish time unknown");
               return (
                 <div key={release.tagName} className="vc-p2-release">
@@ -696,10 +696,7 @@ export function TagReleasePanel({
             </select>
             {defaultBase && !suggestedBase && !api.tagsLoading ? (
               <div className="vc-p2-note">
-                {tr(
-                  `建议的上一版本 ${defaultBase} 不在本地标签中，请手动确认区间起点。`,
-                  `The suggested previous version ${defaultBase} is not among the local tags; confirm the range start manually.`,
-                )}
+                {trf("建议的上一版本 {0} 不在本地标签中，请手动确认区间起点。", "The suggested previous version {0} is not among the local tags; confirm the range start manually.", defaultBase)}
               </div>
             ) : null}
             <input
@@ -711,10 +708,7 @@ export function TagReleasePanel({
             />
             {suggestedTarget && suggestedTarget === targetTag ? (
               <p className="vc-hint">
-                {tr(
-                  `本次版本按上一版本 ${suggestedTarget} 递增 patch 得出，请按实际发布核对。`,
-                  `The version ${suggestedTarget} bumps the patch of the previous version; verify it against the actual release.`,
-                )}
+                {trf("本次版本按上一版本 {0} 递增 patch 得出，请按实际发布核对。", "The version {0} bumps the patch of the previous version; verify it against the actual release.", suggestedTarget)}
               </p>
             ) : null}
             <textarea
@@ -765,7 +759,7 @@ export function TagReleasePanel({
                 {scope.contributors.length > 0 ? (
                   <span>
                     {tr("贡献者", "Contributors")}{" "}
-                    <b>{scope.contributors.join(locale === "en" ? ", " : "、")}</b>
+                    <b>{scope.contributors.join(tr("、", ", "))}</b>
                   </span>
                 ) : null}
               </div>
@@ -778,10 +772,7 @@ export function TagReleasePanel({
                   ))}
                   {scope.pullRequests.length > releasePullPreviewCount ? (
                     <span className="vc-hint">
-                      {tr(
-                        `还有 ${scope.pullRequests.length - releasePullPreviewCount} 个 PR`,
-                        `${scope.pullRequests.length - releasePullPreviewCount} more pull requests`,
-                      )}
+                      {trf("还有 {0} 个 PR", "{0} more pull requests", scope.pullRequests.length - releasePullPreviewCount)}
                     </span>
                   ) : null}
                 </div>
@@ -824,10 +815,7 @@ export function TagReleasePanel({
               disabled={!scope || Boolean(scope.error)}
               hint={
                 scope && !scope.error
-                  ? tr(
-                    `依据 ${scope.baseTag ?? tr("首次发布", "the first release")} → ${scope.targetTag} 的 ${scope.commitCount} 个提交 · 结果可编辑`,
-                    `Based on ${scope.commitCount} commits from ${scope.baseTag ?? "the first release"} to ${scope.targetTag} · editable`,
-                  )
+                  ? trf("依据 {0} → {1} 的 {2} 个提交 · 结果可编辑", "Based on {2} commits from {0} to {1} · editable", scope.baseTag ?? tr("首次发布", "the first release"), scope.targetTag, scope.commitCount)
                   : tr("先读取版本区间", "Load the version range first")
               }
               hasText={Boolean(draftTitle.trim() || draftBody.trim())}

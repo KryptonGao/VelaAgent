@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppLocale, ConversationGoal, GitPushInput, GitStatusSnapshot } from "@vela/shared";
-import { tr } from "../../locale";
+import { tr, trf } from "../../locale";
 import type { VersionControlApi } from "../../hooks/useVersionControl";
 import { AlertIcon, SparkIcon } from "../icons";
 import { AiAssist } from "./AiAssist";
@@ -142,7 +142,7 @@ export function CommitComposer({
       setResult({
         kind: "ok",
         sha: result.shortSha ?? undefined,
-        message: tr(`已撤销提交 ${result.shortSha ?? ""}：${result.subject ?? ""}`, `Undid commit ${result.shortSha ?? ""}: ${result.subject ?? ""}`),
+        message: trf("已撤销提交 {0}：{1}", "Undid commit {0}: {1}", result.shortSha ?? "", result.subject ?? ""),
         output: "",
       });
       setTitle("");
@@ -258,8 +258,8 @@ export function CommitComposer({
           kind: outcome.push?.ok === false ? "fail" : "ok",
           sha: outcome.commit.shortSha ?? undefined,
           message: outcome.push?.ok === false
-            ? tr(`提交成功，推送失败：${outcome.push.message}`, `Committed, push failed: ${outcome.push.message}`)
-            : tr(`已提交并推送 ${outcome.commit.shortSha ?? ""}`, `Committed and pushed ${outcome.commit.shortSha ?? ""}`),
+            ? trf("提交成功，推送失败：{0}", "Committed, push failed: {0}", outcome.push.message)
+            : trf("已提交并推送 {0}", "Committed and pushed {0}", outcome.commit.shortSha ?? ""),
           output: outcome.push?.message ?? "",
           retryPush: outcome.push?.ok === false,
         });
@@ -280,8 +280,8 @@ export function CommitComposer({
         kind: "ok",
         sha: committed.shortSha ?? undefined,
         message: committed.amendedSha
-          ? tr(`已修正提交 ${committed.shortSha ?? ""}`, `Amended ${committed.shortSha ?? ""}`)
-          : tr(`已提交 ${committed.shortSha ?? ""}`, `Committed ${committed.shortSha ?? ""}`),
+          ? trf("已修正提交 {0}", "Amended {0}", committed.shortSha ?? "")
+          : trf("已提交 {0}", "Committed {0}", committed.shortSha ?? ""),
         output: committed.output,
       });
       onCommitted(committed.sha ?? "");
@@ -310,7 +310,7 @@ export function CommitComposer({
       <div className="vc-composer-meta">
         <SparkIcon size={13} />
         <b>{tr("提交已暂存改动", "Commit staged changes")}</b>
-        <span>{tr(`${stagedRows.length} 个文件`, `${stagedRows.length} files`)}</span>
+        <span>{trf("{0} 个文件", "{0} files", stagedRows.length)}</span>
         <span className="vc-stats"><b className="vc-plus">+{stats.added}</b> <b className="vc-minus">−{stats.deleted}</b></span>
         <span className="vc-composer-author">
           {status.identity.configured
@@ -369,7 +369,7 @@ export function CommitComposer({
         <AiAssist
           state={ai.state}
           disabled={stagedRows.length === 0 || status.detached || Boolean(status.operation)}
-          hint={tr(`依据已暂存的 ${stagedRows.length} 个文件 · 结果可编辑`, `Based on ${stagedRows.length} staged files · editable`)}
+          hint={trf("依据已暂存的 {0} 个文件 · 结果可编辑", "Based on {0} staged files · editable", stagedRows.length)}
           hasText={Boolean(title.trim() || body.trim())}
           onGenerate={(action, instruction) => void onGenerate(action, instruction)}
           onApply={(generated) => {
@@ -513,7 +513,7 @@ export function CommitComposer({
                     clearCommitDraft(draftKey);
                     setTitle("");
                     setBody("");
-                    setResult({ kind: "ok", sha: committed.shortSha ?? undefined, message: tr(`已提交 ${committed.shortSha ?? ""}`, `Committed ${committed.shortSha ?? ""}`), output: committed.output });
+                    setResult({ kind: "ok", sha: committed.shortSha ?? undefined, message: trf("已提交 {0}", "Committed {0}", committed.shortSha ?? ""), output: committed.output });
                     onCommitted(committed.sha ?? "");
                   } else {
                     setResult({ kind: "fail", message: committed.message, output: committed.output });
@@ -579,8 +579,8 @@ export function CommitComposer({
                 kind: outcome.push?.ok === false ? "fail" : "ok",
                 sha: outcome.commit.shortSha ?? undefined,
                 message: outcome.push?.ok === false
-                  ? tr(`提交成功，推送失败：${outcome.push.message}`, `Committed, push failed: ${outcome.push.message}`)
-                  : tr(`已提交并推送 ${outcome.commit.shortSha ?? ""}`, `Committed and pushed ${outcome.commit.shortSha ?? ""}`),
+                  ? trf("提交成功，推送失败：{0}", "Committed, push failed: {0}", outcome.push.message)
+                  : trf("已提交并推送 {0}", "Committed and pushed {0}", outcome.commit.shortSha ?? ""),
                 output: outcome.push?.message ?? "",
                 retryPush: outcome.push?.ok === false,
               });

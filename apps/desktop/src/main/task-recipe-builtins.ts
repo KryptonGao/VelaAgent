@@ -1,8 +1,7 @@
-import type { RecipeParameter, TaskRecipe } from '@vela/shared';
+import { localizeZh, type AppLocale, type RecipeParameter, type TaskRecipe } from '@vela/shared';
 
-export function builtinRecipes(locale: 'zh-CN' | 'en' = 'zh-CN'): TaskRecipe[] {
-  const en = locale === 'en';
-  const text = (zh: string, english: string) => en ? english : zh;
+export function builtinRecipes(locale: AppLocale = 'zh-CN'): TaskRecipe[] {
+  const text = (zh: string, english: string) => localizeZh(locale, zh, english);
   const parameter = (id: string, zh: string, english: string, type: RecipeParameter['type'], required = false): RecipeParameter => ({ id, label: text(zh, english), type, required });
   const base = { origin: 'builtin' as const, revision: 1, builtinVersion: 1, createdAt: 0, updatedAt: 0, locale, tags: [] };
   return [

@@ -12,7 +12,7 @@ import type {
   GitRewritePreview,
   GitRewriteResult,
 } from "@vela/shared";
-import { tr } from "../../locale";
+import { tr, trf } from "../../locale";
 import type { VersionControlApi } from "../../hooks/useVersionControl";
 import { AlertIcon, BranchIcon, CheckIcon, CommitIcon, DiffIcon, RefreshIcon } from "../icons";
 import { formatAbsoluteTime, formatRelativeTime } from "./time-format";
@@ -385,10 +385,7 @@ export function HistoryOpsPanel({
                       })}
                     </select>
                     <p className="vc-hint">
-                      {tr(
-                        `这是合并提交，共有 ${parentCount} 个父提交，必须选定一个作为对比依据。`,
-                        `This is a merge commit with ${parentCount} parents; choose the one to compare against.`,
-                      )}
+                      {trf("这是合并提交，共有 {0} 个父提交，必须选定一个作为对比依据。", "This is a merge commit with {0} parents; choose the one to compare against.", parentCount)}
                     </p>
                   </div>
                 ) : null}
@@ -532,10 +529,7 @@ export function HistoryOpsPanel({
                     <div className="vc-p2-warn" role="alert">
                       <span>
                         <AlertIcon size={11} />{" "}
-                        {tr(
-                          `有 ${historyResult.conflictedPaths.length} 个冲突文件：解决后在改动页继续或中止该操作，然后刷新历史。`,
-                          `${historyResult.conflictedPaths.length} conflicted files: resolve them, then continue or abort the operation in the Changes page and refresh the history.`,
-                        )}
+                        {trf("有 {0} 个冲突文件：解决后在改动页继续或中止该操作，然后刷新历史。", "{0} conflicted files: resolve them, then continue or abort the operation in the Changes page and refresh the history.", historyResult.conflictedPaths.length)}
                       </span>
                     </div>
                     <div className="vc-p2-files">
@@ -683,10 +677,7 @@ export function HistoryOpsPanel({
                       <div className="vc-p2-warn" role="alert">
                         <span>
                           <AlertIcon size={11} />{" "}
-                          {tr(
-                            `其中 ${activeRewritePreview.pushedCount} 个提交已推送，整理后需要另行安全强推，应用不会自动推送`,
-                            `${activeRewritePreview.pushedCount} of these commits are already pushed; after rewriting you must force-push safely yourself — the app never pushes automatically`,
-                          )}
+                          {trf("其中 {0} 个提交已推送，整理后需要另行安全强推，应用不会自动推送", "{0} of these commits are already pushed; after rewriting you must force-push safely yourself — the app never pushes automatically", activeRewritePreview.pushedCount)}
                         </span>
                       </div>
                     ) : null}
@@ -727,10 +718,7 @@ export function HistoryOpsPanel({
                       <button type="button" className="vc-link" onClick={() => setRewriteExpanded((value) => !value)}>
                         {rewriteExpanded
                           ? tr("收起", "Collapse")
-                          : tr(
-                              `展开其余 ${activeRewritePreview.rewritten.length - rewriteRowLimit} 个提交`,
-                              `Show ${activeRewritePreview.rewritten.length - rewriteRowLimit} more commits`,
-                            )}
+                          : trf("展开其余 {0} 个提交", "Show {0} more commits", activeRewritePreview.rewritten.length - rewriteRowLimit)}
                       </button>
                     ) : null}
                     <div className="vc-p2-foot">
@@ -773,10 +761,7 @@ export function HistoryOpsPanel({
                   <div className="vc-p2-warn" role="alert">
                     <span>
                       <AlertIcon size={11} />{" "}
-                      {tr(
-                        `其中 ${rewriteResult.pushedCount} 个提交已推送，需要另行安全强推，应用不会自动推送。`,
-                        `${rewriteResult.pushedCount} of the rewritten commits were already pushed; force-push them safely yourself — the app never pushes automatically.`,
-                      )}
+                      {trf("其中 {0} 个提交已推送，需要另行安全强推，应用不会自动推送。", "{0} of the rewritten commits were already pushed; force-push them safely yourself — the app never pushes automatically.", rewriteResult.pushedCount)}
                     </span>
                   </div>
                 ) : null}
@@ -866,10 +851,7 @@ export function HistoryOpsPanel({
                     {" · "}
                     {branchResult.worktreeUntouched
                       ? tr("工作区未改动", "Worktree untouched")
-                      : tr(
-                          `未提交改动 ${branchResult.changeCount} 处仍保留`,
-                          `${branchResult.changeCount} uncommitted changes were kept`,
-                        )}
+                      : trf("未提交改动 {0} 处仍保留", "{0} uncommitted changes were kept", branchResult.changeCount)}
                   </div>
                 ) : null}
               </div>

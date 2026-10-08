@@ -1,3 +1,4 @@
+import { localizeCopy } from "@vela/shared";
 import type { AppLocale } from "../hooks/usePreferences";
 
 const zh = {
@@ -275,5 +276,5 @@ const en: Widen<typeof zh> = {
 export type OnboardingCopy = Widen<typeof zh>;
 
 export function onboardingCopy(locale: AppLocale): OnboardingCopy {
-  return locale === "en" ? en : zh;
+  return localizeCopy(locale, zh, en);
 }

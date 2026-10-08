@@ -61,6 +61,8 @@ export class ConversationStore {
   private readonly saved = new Map<string, StoredConversation>();
   private timer: NodeJS.Timeout | null = null;
   private dirty = false;
+  /** 已移除但尚未从磁盘索引里清掉的对话；写盘合并时据此丢弃其他实例保存的旧记录。 */
+  private readonly removed = new Set<string>();
 
   constructor(private readonly filePath: string) {}
 
@@ -122,6 +124,29 @@ export class ConversationStore {
     return added.length;
   }
 
+  /** 移除对话记录并立即落盘；失败时恢复内存记录。 */
+  remove(ids: readonly string[]): number {
+    this.flushSync(true);
+    const entries = ids.flatMap(id => {
+      const entry = this.conversations.get(id);
+      return entry ? [[id, entry, this.saved.get(id)] as const] : [];
+    });
+    if (!entries.length) return 0;
+    for (const [id] of entries) { this.conversations.delete(id); this.saved.delete(id); this.removed.add(id); }
+    this.dirty = true;
+    try { this.flushSync(true); }
+    catch (error) {
+      for (const [id, entry, saved] of entries) {
+        this.conversations.set(id, entry);
+        if (saved) this.saved.set(id, saved);
+        this.removed.delete(id);
+      }
+      this.dirty = false;
+      throw error;
+    }
+    return entries.length;
+  }
+
   private schedule(): void {
     this.dirty = true;
     if (this.timer) return;
@@ -143,6 +168,7 @@ export class ConversationStore {
     try {
       // 另一个实例可能已保存归档/标题等字段，不能用未改动的旧快照覆盖它们。
       const merged = this.readLatest();
+      for (const id of this.removed) merged.delete(id);
       for (const [id, entry] of this.conversations) {
         const previous = this.saved.get(id);
         if (!previous) {
@@ -159,6 +185,7 @@ export class ConversationStore {
       writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
       renameSync(tempPath, this.filePath);
       for (const [id, entry] of this.conversations) this.saved.set(id, structuredClone(entry));
+      this.removed.clear();
       this.dirty = false;
     } catch (error) {
       // 保留 dirty，使退出或下次变更时仍会重试。

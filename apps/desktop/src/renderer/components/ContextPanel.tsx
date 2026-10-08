@@ -16,7 +16,7 @@ import { ChevronDownIcon } from "./icons";
 import { PlanReferenceCard } from "./PlanPanel";
 import { RepoCard } from "./RepoCard";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
-import { isEnglish, tr } from "../locale";
+import { tr, trf, activeIntlLocale } from "../locale";
 
 const categoryLabels: Record<ContextCategory, [string, string]> = {
   system: ["系统提示词", "System prompt"],
@@ -107,7 +107,7 @@ export function ContextPanel({
 
         <PanelDisclosure
           title={tr("上下文", "Context")}
-          meta={tr(`${context?.messageCount ?? 0} 条消息`, `${context?.messageCount ?? 0} messages`)}
+          meta={trf("{0} 条消息", "{0} messages", context?.messageCount ?? 0)}
           open={contextOpen}
           onToggle={() => setContextOpen((value) => !value)}
         >
@@ -326,7 +326,7 @@ export function ContextUsageCard({ context, details = false }: { context: Contex
                 <span className={`context-usage-swatch ${id}`} />
                 {categoryLabel(id)}
               </span>
-              <span className="context-usage-value" title={`${(segments?.[id] ?? 0).toLocaleString(isEnglish() ? "en-US" : "zh-CN")} tokens`}>
+              <span className="context-usage-value" title={`${(segments?.[id] ?? 0).toLocaleString(activeIntlLocale())} tokens`}>
                 {formatPrecise(segments?.[id] ?? 0)}
               </span>
             </li>
@@ -342,7 +342,7 @@ function formatPercent(percent: number | null, tokens: number): string {
   if (percent == null) return tokens > 0 ? "—" : tr("已用 0%", "0% used");
   const rounded = Math.round(percent);
   if (rounded <= 0 && tokens > 0) return tr("已用 <1%", "<1% used");
-  return tr(`已用 ${rounded}%`, `${rounded}% used`);
+  return trf("已用 {0}%", "{0}% used", rounded);
 }
 
 function formatTotal(tokens: number, contextWindow: number | null): string {

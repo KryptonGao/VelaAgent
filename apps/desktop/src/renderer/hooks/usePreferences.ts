@@ -9,7 +9,7 @@ import {
   type DarkTheme,
   type LightTheme,
 } from "../themes";
-import type { AppLocale, ThinkingSummaryModel } from "@vela/shared";
+import { isAppLocale, type AppLocale, type ThinkingSummaryModel } from "@vela/shared";
 import { isConversationLinkTarget, type ConversationLinkTarget } from "../browser/conversation-link-policy";
 import { soundEffectsKey } from "../notification-sounds";
 
@@ -88,7 +88,7 @@ function isAppearance(value: unknown): value is Appearance {
 }
 
 function isLocale(value: unknown): value is AppLocale {
-  return value === "en" || value === "zh-CN";
+  return isAppLocale(value);
 }
 
 function isToolDisplay(value: unknown): value is ToolDisplay {

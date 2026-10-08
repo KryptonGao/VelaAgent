@@ -1,6 +1,7 @@
+import { intlLocale } from "@vela/shared";
 import type { ToolTrace } from "@vela/shared";
 import { useContext, useEffect, useId, useMemo, useRef, useState } from "react";
-import { localizeError, tr, useAppLocale } from "../locale";
+import { localizeError, tr, useAppLocale, trf } from "../locale";
 import { ConversationLinkContext } from "./ConversationLinkContext";
 import { Markdown } from "./Markdown";
 import { ScrollFade } from "./ScrollFade";
@@ -67,7 +68,7 @@ export function McpToolDetails({ tool }: { tool: ToolTrace }) {
         <div className="tool-markdown tool-error"><Markdown text={body ? localizeError(body) : tr("执行失败", "Execution failed")} /></div></div>
         : !body ? <p className="mcp-detail-muted">{status === "running" ? tr("正在等待工具返回结果…", "Waiting for tool results…") : tr("工具未返回内容", "The tool returned no content")}</p>
         : result.kind === "search" ? <>
-          <div className="mcp-result-heading"><span>{tr("搜索结果", "Search results")}</span><span className="mcp-detail-muted">{tr(`${result.results.length} 条`, `${result.results.length} results`)}</span></div>
+          <div className="mcp-result-heading"><span>{tr("搜索结果", "Search results")}</span><span className="mcp-detail-muted">{trf("{0} 条", "{0} results", result.results.length)}</span></div>
           {result.results.length ? <ol className="mcp-result-list">{result.results.map((item, index) => <SearchResult key={`${item.id ?? item.url ?? item.title}-${index}`} item={item} />)}</ol>
             : <p className="mcp-detail-muted">{tr("未找到匹配结果", "No matching results")}</p>}
         </> : result.kind === "json" ? <>
@@ -88,7 +89,7 @@ function SearchResult({ item }: { item: McpSearchResult }) {
   const snippetRef = useRef<HTMLDivElement>(null);
   const url = mcpResultUrl(item.url);
   const date = item.timestamp ? new Date(item.timestamp) : null;
-  const updated = date && Number.isFinite(date.getTime()) ? date.toLocaleDateString(locale === "zh-CN" ? "zh-CN" : "en-US", { year: "numeric", month: "short", day: "numeric" }) : null;
+  const updated = date && Number.isFinite(date.getTime()) ? date.toLocaleDateString(intlLocale(locale), { year: "numeric", month: "short", day: "numeric" }) : null;
   useEffect(() => {
     const node = snippetRef.current;
     if (!node || expanded) return;
@@ -106,7 +107,7 @@ function SearchResult({ item }: { item: McpSearchResult }) {
       {overflows || expanded ? <button className="mcp-detail-action" type="button" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{expanded ? tr("收起片段", "Collapse excerpt") : tr("展开片段", "Expand excerpt")}</button> : null}</> : null}
     <div className="mcp-result-meta">{url ? <span>{url.hostname === "app.notion.com" || url.hostname === "www.notion.so" ? "Notion" : url.hostname}</span> : null}
       {item.type ? <span>{item.type === "page" ? tr("页面", "Page") : item.type}</span> : null}
-      {updated ? <span title={item.timestamp}>{tr(`更新于 ${updated}`, `Updated ${updated}`)}</span> : null}</div>
+      {updated ? <span title={item.timestamp}>{trf("更新于 {0}", "Updated {0}", updated)}</span> : null}</div>
     {item.id || item.url ? <details className="mcp-result-source"><summary>{tr("来源详情", "Source details")}</summary><dl className="mcp-call-fields">
       {item.url ? <div><dt>URL</dt><dd>{item.url}</dd></div> : null}{item.id ? <div><dt>ID</dt><dd>{item.id}</dd></div> : null}
     </dl></details> : null}

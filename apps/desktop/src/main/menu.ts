@@ -1,5 +1,5 @@
 import { app, BrowserWindow, Menu, shell, type MenuItemConstructorOptions } from "electron";
-import { IpcChannel, type AppLocale, type MenuAction } from "@vela/shared";
+import { IpcChannel, localizeZh, type AppLocale, type MenuAction } from "@vela/shared";
 import desktopPackage from "../../package.json";
 
 const repoUrl = "https://github.com/KryptonGao/VelaHarness";
@@ -12,7 +12,7 @@ export interface DiagnosticsMenuActions {
 }
 
 function text(chinese: string, english: string): string {
-  return activeLocale === "en" ? english : chinese;
+  return localizeZh(activeLocale, chinese, english);
 }
 
 export function getApplicationLocale(): AppLocale {

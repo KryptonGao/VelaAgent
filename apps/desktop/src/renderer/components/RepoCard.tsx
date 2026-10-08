@@ -16,7 +16,7 @@ import {
   PrIcon,
 } from "./icons";
 import type { PrSummary } from "@vela/shared";
-import { localizeError, tr } from "../locale";
+import { localizeError, tr, trf } from "../locale";
 import type { PlanReferenceModel } from "../plan-draft";
 
 const prStateLabels: Record<PrSummary["state"], string> = {
@@ -202,7 +202,7 @@ export function RepoCard({
             onClick={onOpenChanges}
           >
             <span>
-              {git.files.length > 0 ? tr(`${git.files.length} 个变更`, `${git.files.length} changes`) : tr("工作区无变更", "Workspace is clean")}
+              {git.files.length > 0 ? trf("{0} 个变更", "{0} changes", git.files.length) : tr("工作区无变更", "Workspace is clean")}
             </span>
             <span className="repo-changes-arrow">›</span>
           </button>
@@ -253,7 +253,7 @@ export function RepoCard({
             onClick={() => setSourcesOpen((value) => !value)}
           >
             <GridIcon />
-            <span>{sourcesOpen ? tr("收起列表", "Hide list") : tr(`查看全部(${recents.length})`, `View all (${recents.length})`)}</span>
+            <span>{sourcesOpen ? tr("收起列表", "Hide list") : trf("查看全部({0})", "View all ({0})", recents.length)}</span>
           </button>
         ) : null}
         {sourcesOpen

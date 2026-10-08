@@ -100,7 +100,8 @@ export function displayRecipeValue(p: RecipeParameter, value: RecipeValue | unde
 }
 /** A single replace pass: replacement values are never interpreted as templates or commands. */
 export function expandRecipe(recipe: TaskRecipe, values: Record<string, RecipeValue>, context: RecipeContext, additional: string): string {
-  const english = recipe.locale === 'en';
+  // Prompt section labels stay English for every locale except Simplified Chinese.
+  const english = recipe.locale !== undefined && recipe.locale !== 'zh-CN';
   const display = (p: RecipeParameter) => { const v = values[p.id]; return english && (v === undefined || v === '' || typeof v === 'boolean') ? v === true ? 'Yes' : v === false ? 'No' : 'Not provided' : displayRecipeValue(p, v); };
   const substitutions = Object.fromEntries(recipe.parameters.map(p => [p.id, display(p)]));
   substitutions['workspace.name'] = context.name; substitutions['workspace.path'] = context.path;

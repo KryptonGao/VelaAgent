@@ -16,7 +16,7 @@ import type { LoginState } from "../hooks/useModels";
 import { modelKey } from "../hooks/usePreferences";
 import { PopoverPresence } from "./MotionPresence";
 import { SheetPresence } from "./Presence";
-import { localizeError, tr } from "../locale";
+import { localizeError, tr, trf } from "../locale";
 
 const thinkingLabelsEn: Record<ThinkingLevel, string> = {
   off: "Off",
@@ -341,7 +341,7 @@ function ModelMenu({
       </div>
       {hiddenCount > 0 ? (
         <p className="menu-note menu-footer-note">
-          {tr(`已隐藏 ${hiddenCount} 个模型，可在设置里调整`, `${hiddenCount} hidden · manage in settings`)}
+          {trf("已隐藏 {0} 个模型，可在设置里调整", "{0} hidden · manage in settings", hiddenCount)}
         </p>
       ) : null}
       <div className="menu-footer">
@@ -766,6 +766,6 @@ function translate(message: string): string {
   const known = knownText[message];
   if (known) return tr(known[0], known[1]);
   const enter = /^Enter (.+)$/.exec(message);
-  if (enter?.[1]) return tr(`输入 ${enter[1]}`, `Enter ${enter[1]}`);
+  if (enter?.[1]) return trf("输入 {0}", "Enter {0}", enter[1]);
   return message;
 }

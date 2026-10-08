@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { AppLocale, PrReviewComment, PrReviewEvent, PrReviewState, PrReviewSummary, PrSummary } from "@vela/shared";
-import { tr } from "../../locale";
+import { tr, trf } from "../../locale";
 import type { VersionControlApi } from "../../hooks/useVersionControl";
 import { AlertIcon, PrIcon, RefreshIcon } from "../icons";
 import { formatRelativeTime } from "./time-format";
@@ -220,7 +220,7 @@ export function PrReviewPanel({
     <div className="vc-popover vc-p2-review" role="dialog" aria-label={tr("评论与审阅", "Comments and reviews")}>
       <div className="vc-ops-head">
         <b>
-          <PrIcon size={12} /> {tr(`PR #${pr.number} 评论与审阅`, `PR #${pr.number} comments and reviews`)}
+          <PrIcon size={12} /> {trf("PR #{0} 评论与审阅", "PR #{0} comments and reviews", pr.number)}
         </b>
         {api.reviewThreadsLoading ? <span className="vc-spinner" aria-hidden="true" /> : null}
         <button
@@ -360,7 +360,7 @@ export function PrReviewPanel({
                       </span>
                       {thread.resolved && thread.resolvedBy ? (
                         <span className="vc-p2-note">
-                          {tr(`由 ${thread.resolvedBy} 解决`, `Resolved by ${thread.resolvedBy}`)}
+                          {trf("由 {0} 解决", "Resolved by {0}", thread.resolvedBy)}
                         </span>
                       ) : null}
                     </div>

@@ -8,8 +8,8 @@ Switching conversations, opening Settings, folding the Panel and selecting
 another tab keep guests alive. Closing a tab releases its guest. Restarting the
 app does not restore live pages or history.
 
-Conversation links open a Panel tab by default. Settings → Appearance &
-shortcuts → Conversation links can select the system browser. Modified clicks
+Conversation links open a Panel tab by default. Settings → Interface
+→ Conversation links can select the system browser. Modified clicks
 retain native handling. Rendering a link does not open a browser.
 
 ## Persistent Node REPL

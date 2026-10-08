@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PrActivityKind, PrInboxDetail, PrReviewComment, PrTarget } from '@vela/shared';
-import { tr } from '../locale';
+import { tr, activeIntlLocale } from '../locale';
 import { PrMarkdown } from './PrInboxMarkdown';
 import { prTimeline, type PrTimelineEvent } from './pr-inbox-model';
 import { usePrInboxCache } from '../hooks/usePrInboxCache';
@@ -14,7 +14,7 @@ function ActivityTime({ at }: { at: number | null }) {
   if (at === null) return null;
   const seconds = (at - Date.now()) / 1000;
   const [divisor, unit] = Math.abs(seconds) >= 604800 ? [604800, 'week'] : Math.abs(seconds) >= 86400 ? [86400, 'day'] : Math.abs(seconds) >= 3600 ? [3600, 'hour'] : Math.abs(seconds) >= 60 ? [60, 'minute'] : [1, 'second'];
-  const text = new Intl.RelativeTimeFormat(tr('zh-CN', 'en'), { numeric: 'auto', style: 'narrow' }).format(Math.round(seconds / Number(divisor)), unit as Intl.RelativeTimeFormatUnit);
+  const text = new Intl.RelativeTimeFormat(activeIntlLocale(), { numeric: 'auto', style: 'narrow' }).format(Math.round(seconds / Number(divisor)), unit as Intl.RelativeTimeFormatUnit);
   return <time dateTime={new Date(at).toISOString()} title={new Date(at).toLocaleString()}>{text}</time>;
 }
 function ActivityAvatar({ author }: { author: string | null }) {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AppLocale, ConversationGoal, GitChangeScope, GitHunkAction, GitStatusSnapshot } from "@vela/shared";
-import { tr } from "../../locale";
+import { tr, trf } from "../../locale";
 import type { ProjectApi } from "../../hooks/useProject";
 import type { VersionControlApi } from "../../hooks/useVersionControl";
 import { AlertIcon, CheckIcon, ExternalIcon, FileIcon, RefreshIcon, SearchIcon, TrashIcon } from "../icons";
@@ -177,7 +177,7 @@ export function ChangesPage({
     const ok = await api.applyHunks(row.file.path, action, patch);
     if (ok) {
       const verb = action === "stage" ? tr("已暂存", "Staged") : action === "unstage" ? tr("已取消暂存", "Unstaged") : tr("已丢弃", "Discarded");
-      setNotice(tr(`${verb} ${count} 个代码块`, `${verb} ${count} hunk(s)`));
+      setNotice(trf("{0} {1} 个代码块", "{0} {1} hunk(s)", verb, count));
     }
   };
 
@@ -192,10 +192,7 @@ export function ChangesPage({
         <div className="vc-op-banner" role="alert">
           <AlertIcon size={13} />
           <span>
-            {tr(
-              `正在进行的操作：${operationLabel(operation.kind)}，${operation.conflictedPaths.length} 个冲突文件`,
-              `Operation in progress: ${operationLabel(operation.kind)}, ${operation.conflictedPaths.length} conflicted file(s)`,
-            )}
+            {trf("正在进行的操作：{0}，{1} 个冲突文件", "Operation in progress: {0}, {1} conflicted file(s)", operationLabel(operation.kind), operation.conflictedPaths.length)}
           </span>
           <button
             type="button"
@@ -222,7 +219,7 @@ export function ChangesPage({
           <div className="vc-files-title">
             <FileIcon size={13} />
             <b>{tr("变更文件", "Changed files")}</b>
-            <span>{tr(`${status.files.length} 个`, `${status.files.length}`)}</span>
+            <span>{trf("{0} 个", "{0}", status.files.length)}</span>
           </div>
           <button
             type="button"
@@ -247,7 +244,7 @@ export function ChangesPage({
 
         {selection.size > 0 ? (
           <div className="vc-selection-bar">
-            <span>{tr(`已选 ${selection.size} 项`, `${selection.size} selected`)}</span>
+            <span>{trf("已选 {0} 项", "{0} selected", selection.size)}</span>
             <button type="button" className="vc-link" onClick={() => void stageRows(selectedRows.filter((row) => row.scope === "worktree" || row.scope === "conflict"))}>
               {tr("暂存", "Stage")}
             </button>
@@ -566,7 +563,7 @@ function ChangeRow({
         type="checkbox"
         className="vc-check"
         checked={checked}
-        aria-label={tr(`选择 ${row.file.path}`, `Select ${row.file.path}`)}
+        aria-label={trf("选择 {0}", "Select {0}", row.file.path)}
         onClick={(event) => event.stopPropagation()}
         onChange={onToggle}
       />
@@ -612,8 +609,8 @@ function DiscardConfirm({ row, onCancel, onConfirm }: { row: ChangeGroupRow; onC
     <div className="vc-discard-confirm" role="alertdialog" aria-label={tr("确认丢弃", "Confirm discard")}>
       <p>
         {untracked
-          ? tr(`将删除未跟踪文件 ${row.file.path}，此操作不可撤销。`, `Deletes untracked file ${row.file.path}. This cannot be undone.`)
-          : tr(`将把 ${row.file.path} 的工作区内容还原为索引版本；已暂存内容不受影响。`, `Restores ${row.file.path} to the index version; staged content is untouched.`)}
+          ? trf("将删除未跟踪文件 {0}，此操作不可撤销。", "Deletes untracked file {0}. This cannot be undone.", row.file.path)
+          : trf("将把 {0} 的工作区内容还原为索引版本；已暂存内容不受影响。", "Restores {0} to the index version; staged content is untouched.", row.file.path)}
       </p>
       <div className="vc-dialog-actions">
         <button type="button" className="vc-btn vc-btn-ghost" onClick={onCancel}>{tr("取消", "Cancel")}</button>

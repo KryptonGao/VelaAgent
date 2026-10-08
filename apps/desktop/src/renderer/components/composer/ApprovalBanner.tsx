@@ -1,7 +1,7 @@
 import type { SandboxApprovalRequest } from "@vela/shared";
 import { useState } from "react";
 import { ShieldIcon } from "../icons";
-import { tr } from "../../locale";
+import { tr, trf } from "../../locale";
 
 const kindLabels: Record<SandboxApprovalRequest["kind"], [string, string]> = {
   mcp: ["调用 MCP 工具", "Call MCP tool"],
@@ -59,7 +59,7 @@ export function ApprovalBanner({
         <span className="approval-banner-icon">
           <ShieldIcon size={13} />
         </span>
-        <span className="approval-banner-title">{tr(`${kindZh}需要批准`, `${kindEn} requires approval`)}</span>
+        <span className="approval-banner-title">{trf("{0}需要批准", "{0} requires approval", tr(kindZh, kindEn))}</span>
       </div>
       <pre className="approval-banner-summary">{summary}</pre>
       <div className="approval-banner-actions">

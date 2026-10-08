@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { GitCommitSummary, SessionSnapshot } from "@vela/shared";
-import { tr, useAppLocale } from "../../locale";
+import { tr, useAppLocale, trf } from "../../locale";
 import type { ProjectApi } from "../../hooks/useProject";
 import { useVersionControl } from "../../hooks/useVersionControl";
 import { useDismissable } from "../../hooks/useDismissable";
@@ -133,7 +133,7 @@ export function VersionControlView({
             <FolderIcon size={14} />
             <b>{repo.name}</b>
             <span className="vc-badge vc-badge-muted">{tr("Git 仓库", "Git repository")}</span>
-            {repo.subdir ? <span className="vc-badge vc-badge-muted">{tr(`子目录 · ${repo.subdir}`, `subdir · ${repo.subdir}`)}</span> : null}
+            {repo.subdir ? <span className="vc-badge vc-badge-muted">{trf("子目录 · {0}", "subdir · {0}", repo.subdir)}</span> : null}
           </div>
           <div className="vc-repo-path" title={repo.root}>{repo.root}</div>
         </div>
@@ -212,7 +212,7 @@ export function VersionControlView({
               ) : (
                 <span>{tr("尚未发布分支", "Branch not published")}</span>
               )}
-              <span>{status.lastFetchAt ? tr(`Fetch ${formatRelativeTime(status.lastFetchAt, locale)}`, `Fetched ${formatRelativeTime(status.lastFetchAt, locale)}`) : tr("尚未 Fetch", "Never fetched")}</span>
+              <span>{status.lastFetchAt ? trf("Fetch {0}", "Fetched {0}", formatRelativeTime(status.lastFetchAt, locale)) : tr("尚未 Fetch", "Never fetched")}</span>
               <ChevronDownIcon size={10} />
             </button>
             {statusOpen ? (
@@ -242,7 +242,7 @@ export function VersionControlView({
                 {status.operation ? (
                   <div className="vc-status-row vc-status-warn">
                     <AlertIcon size={12} />
-                    <span>{tr(`进行中的操作：${status.operation.kind}`, `Operation in progress: ${status.operation.kind}`)}</span>
+                    <span>{trf("进行中的操作：{0}", "Operation in progress: {0}", status.operation.kind)}</span>
                   </div>
                 ) : null}
                 <div className="vc-status-row">
@@ -380,7 +380,7 @@ export function VersionControlView({
         <div className="vc-scope-note">
           {status.detached
             ? tr("Detached HEAD · 请创建或切换分支", "Detached HEAD · create or switch to a branch")
-            : tr(`工作区 ${branch ?? ""}`, `Workspace ${branch ?? ""}`)}
+            : trf("工作区 {0}", "Workspace {0}", branch ?? "")}
         </div>
       </div>
 
@@ -424,7 +424,7 @@ export function VersionControlView({
       {page === "changes" && changeCount === 0 && status.ahead > 0 && !status.detached ? (
         <div className="vc-push-hint" role="status">
           <BranchIcon size={12} />
-          <span>{tr(`有 ${status.ahead} 个提交待推送。`, `${status.ahead} commits are waiting to be pushed.`)}</span>
+          <span>{trf("有 {0} 个提交待推送。", "{0} commits are waiting to be pushed.", status.ahead)}</span>
           <button type="button" className="vc-link" onClick={onPush}>{tr("仅推送", "Push only")}</button>
         </div>
       ) : null}

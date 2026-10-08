@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { GitHunkAction } from "@vela/shared";
-import { tr } from "../../locale";
+import { tr, trf } from "../../locale";
 import { CheckIcon, CloseIcon, DiffIcon, TrashIcon } from "../icons";
 import { DiffPane } from "../DiffPane";
 import { buildHunkPatch, hunkLabel, parseRenderPatch } from "./diff-hunks";
@@ -64,7 +64,7 @@ export function HunkedDiff({
           >
             {tr("全选代码块", "Select all hunks")}
           </button>
-          <span className="vc-hint">{tr(`已选 ${indexes.length} / ${patch.hunks.length} 块`, `${indexes.length} of ${patch.hunks.length} hunks`)}</span>
+          <span className="vc-hint">{trf("已选 {0} / {1} 块", "{0} of {1} hunks", indexes.length, patch.hunks.length)}</span>
           {actions.map((action) => (
             <button
               key={action}
@@ -89,7 +89,7 @@ export function HunkedDiff({
                   type="checkbox"
                   className="vc-check"
                   checked={checked}
-                  aria-label={tr(`选择代码块 ${hunkLabel(hunk)}`, `Select hunk ${hunkLabel(hunk)}`)}
+                  aria-label={trf("选择代码块 {0}", "Select hunk {0}", hunkLabel(hunk))}
                   onChange={() => toggle(hunk.index)}
                 />
               ) : (

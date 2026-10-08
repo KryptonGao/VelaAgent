@@ -1,7 +1,7 @@
 import { useId, useMemo, useState } from "react";
 import type { ConversationSummary, ProviderSummary } from "@vela/shared";
 import { useUsageHistory } from "../../hooks/useUsageHistory";
-import { tr } from "../../locale";
+import { tr, trf } from "../../locale";
 import { UsageReport } from "./UsageView";
 import { filterUsageRequests, requestDate, summarizeUsage, usageDateKey } from "./usage-model";
 
@@ -32,7 +32,7 @@ export function SettingsUsageView({ conversations, providers }: {
   const available = useMemo(() => summarizeUsage([...history.requests, ...history.summaryRequests]).providers, [history.requests, history.summaryRequests]);
   const missingDates = history.requests.filter(request => requestDate(request) === null).length;
   const providerNames = new Map(providers.map(item => [item.id, item.name]));
-  return <section className="settings-usage" aria-labelledby={`${id}-title`}>
+  return <section className="settings-usage" data-setting-id="usage" aria-labelledby={`${id}-title`}>
     <div className="usage-heading">
       <div><h2 id={`${id}-title`}>{tr("使用统计", "Usage statistics")}</h2>
         <p className="usage-note">{tr("汇总本地所有对话（含归档）的模型请求与 Token 用量。缺失的用量不会显示为零。", "Model requests and token usage across all local conversations, including archived chats. Missing usage is never shown as zero.")}</p>
@@ -66,11 +66,10 @@ export function SettingsUsageView({ conversations, providers }: {
       {invalidRange ? <p className="usage-warning" id={`${id}-range-error`} role="alert">{tr("结束日期不能早于开始日期。", "The end date must be on or after the start date.")}</p> : null}
     </div> : null}
     {history.failed || history.warnings ? <p className="usage-warning" role="status">
-      {tr(`${history.failed} 个对话加载失败，${history.warnings} 个对话的记录不完整；当前统计可能不完整，可点击刷新重试。`,
-        `${history.failed} conversations failed to load; ${history.warnings} have incomplete records. Statistics may be incomplete. Refresh to retry.`)}
+      {trf("{0} 个对话加载失败，{1} 个对话的记录不完整；当前统计可能不完整，可点击刷新重试。", "{0} conversations failed to load; {1} have incomplete records. Statistics may be incomplete. Refresh to retry.", history.failed, history.warnings)}
     </p> : null}
     {missingDates > 0 && (filterStart || filterEnd) ? <p className="usage-note">
-      {tr(`${missingDates} 个请求缺少日期，未纳入日期筛选；可在「可用历史」中查看。`, `${missingDates} undated requests are excluded from date filters. Select All history to include them.`)}
+      {trf("{0} 个请求缺少日期，未纳入日期筛选；可在「可用历史」中查看。", "{0} undated requests are excluded from date filters. Select All history to include them.", missingDates)}
     </p> : null}
     <UsageReport requests={requests} summaries={summaryRequests} providers={providers} loading={history.loading} settings
       start={filterStart} end={filterEnd} />

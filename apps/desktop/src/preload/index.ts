@@ -233,6 +233,14 @@ const api: VelaApi = {
   platform: process.platform,
   development: ipcRenderer.sendSync(IpcChannel.appIsDevelopment) ? {
     syncProductionConversations: () => ipcRenderer.invoke(IpcChannel.appSyncProductionConversations) as Promise<ConversationSyncResult>,
+    previewProductionSync: categories => ipcRenderer.invoke(IpcChannel.appSyncPreview, categories),
+    runProductionSync: categories => ipcRenderer.invoke(IpcChannel.appSyncRun, categories),
+    listProductionSyncBatches: () => ipcRenderer.invoke(IpcChannel.appSyncBatches),
+    rollbackProductionSync: batch => ipcRenderer.invoke(IpcChannel.appSyncRollback, batch),
+    getDevToolsInfo: () => ipcRenderer.invoke(IpcChannel.appDevInfo),
+    openDevTools: () => ipcRenderer.invoke(IpcChannel.appDevOpenDevTools),
+    reloadWindow: () => ipcRenderer.invoke(IpcChannel.appDevReloadWindow),
+    restartMain: () => ipcRenderer.invoke(IpcChannel.appDevRestartMain),
   } : undefined,
   uiStorage: {
     getItem: (key) => storageRequest(IpcChannel.appUiStorageGet, key).value,

@@ -109,11 +109,14 @@ describe("conversation usage statistics", () => {
     assert.deepEqual(stats.providers, []);
   });
 
-  it("formats compact Chinese and English counts without price fields", () => {
+  it("formats compact counts for every language without price fields", () => {
     assert.equal(formatUsageNumber(42_848_000), "4284.8万");
     assert.equal(formatUsageNumber(406_670_000), "4.1亿");
     assert.equal(formatUsageNumber(561), "561");
-    assert.equal(formatUsageNumber(42_848_000, true), "42.8M");
+    assert.equal(formatUsageNumber(42_848_000, "en"), "42.8M");
+    assert.equal(formatUsageNumber(42_848_000, "zh-TW"), "4284.8萬");
+    assert.equal(formatUsageNumber(406_670_000, "ja"), "4.1億");
+    assert.equal(formatUsageNumber(42_848_000, "ko"), "4284.8만");
     assert.equal(formatUsagePercent(null), "—");
     assert.equal(formatUsagePercent(341 / 347), "98.3%");
     assert.equal(formatUsagePercent(1), "100%");

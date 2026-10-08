@@ -1,3 +1,4 @@
+import { appLocaleNames, appLocales } from "@vela/shared";
 import {
   customModelApis,
   thinkingLevels,
@@ -373,11 +374,8 @@ export function OnboardingView({ preferences, models, initialStep, onStepChange,
               <ScreenHeading kicker={copy.stepKickers[0]} title={copy.preferencesTitle} hint={copy.preferencesHint} />
               <SettingsGroup title={copy.language} hint={copy.languageHint}>
                 <div className="onboarding-segmented" role="radiogroup" aria-label={copy.language}>
-                  {([
-                    ["zh-CN", appearanceCopy.zh],
-                    ["en", appearanceCopy.en],
-                  ] as const).map(([id, label]) => (
-                    <button key={id} type="button" role="radio" aria-checked={preferences.locale === id} className={preferences.locale === id ? "active" : ""} onClick={() => preferences.setLocale(id)}>{label}</button>
+                  {appLocales.map((id) => (
+                    <button key={id} type="button" role="radio" aria-checked={preferences.locale === id} className={preferences.locale === id ? "active" : ""} onClick={() => preferences.setLocale(id)}>{appLocaleNames[id]}</button>
                   ))}
                 </div>
               </SettingsGroup>
@@ -622,7 +620,7 @@ export function OnboardingView({ preferences, models, initialStep, onStepChange,
               <h1 id="onboarding-complete-title">{copy.completeTitle}</h1>
               <p className="onboarding-lead">{copy.completeHint}</p>
               <div className="onboarding-summary">
-                <SummaryRow label={copy.summaryLanguage} value={locale === "en" ? "English" : "简体中文"} />
+                <SummaryRow label={copy.summaryLanguage} value={appLocaleNames[locale]} />
                 <SummaryRow label={copy.summaryTheme} value={`${appearanceCopy[preferences.appearance]} · ${themeSummary}`} />
                 <SummaryRow label={copy.summaryTools} value={preferences.toolDisplay === "card" ? appearanceCopy.toolCard : appearanceCopy.toolCompact} />
                 <SummaryRow label={copy.summaryProvider} value={selectedProvider?.name ?? "—"} />

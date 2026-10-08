@@ -696,7 +696,7 @@ function McpSettingsContent({
       className="settings-section mcp-settings"
       aria-busy={Boolean(busy)}
     >
-      <div className="settings-block">
+      <div className="settings-block" data-setting-id="mcp-servers">
         <h2>{text.title}</h2>
         <p className="settings-hint">{text.hint}</p>
         {cwd ? (
@@ -741,7 +741,7 @@ function McpSettingsContent({
       ))}
       {catalog &&
       (projectServers.length > 0 || catalog.projectTrust.trusted) ? (
-        <div className="settings-block mcp-trust">
+        <div className="settings-block mcp-trust" data-setting-id="mcp-trust">
           <h2>{text.trustTitle}</h2>
           <p className="settings-hint">{text.trustHint}</p>
           <p className="settings-path">{catalog.projectTrust.path}</p>
@@ -1105,7 +1105,7 @@ function McpSettingsContent({
           }}
         />
       ) : null}
-      <details className="settings-block">
+      <details className="settings-block" data-setting-id="mcp-import">
         <summary>{text.importTitle}</summary>
         <p className="settings-hint">{text.importHint}</p>
         <div className="settings-form">

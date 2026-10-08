@@ -2,7 +2,7 @@ import { uiStorage } from "../ui-storage";
 import type { OpenTarget } from "@vela/shared";
 import { useEffect, useState } from "react";
 import { useDismissable } from "../hooks/useDismissable";
-import { tr } from "../locale";
+import { tr, trf } from "../locale";
 import { CheckIcon, ChevronDownIcon, FolderIcon, MonitorIcon, TerminalIcon } from "./icons";
 
 const openTargetKey = "vela.openTarget";
@@ -75,7 +75,7 @@ export function OpenInAppButton({ path }: { path: string | null }) {
     void window.vela?.openInTarget(target.id, workspacePath).catch(() => undefined);
   }
 
-  const openLabel = tr(`在 ${active.name} 中打开`, `Open in ${active.name}`);
+  const openLabel = trf("在 {0} 中打开", "Open in {0}", active.name);
 
   return (
     <div className="open-in-anchor" ref={ref}>

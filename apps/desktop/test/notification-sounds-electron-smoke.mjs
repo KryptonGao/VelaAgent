@@ -49,7 +49,7 @@ async function run() {
     const openSettings = async () => {
       await evaluate("document.querySelector('.sidebar-user-pill').click()");
       await until(() => evaluate("!!document.querySelector('.settings-nav-item')"), "settings");
-      await evaluate("Array.from(document.querySelectorAll('.settings-nav-item')).find(n => n.textContent === 'Appearance & shortcuts').click()");
+      await evaluate("Array.from(document.querySelectorAll('.settings-nav-item')).find(n => n.textContent === 'Interface').click()");
     };
     await openSettings();
     assert.equal(await evaluate("document.querySelectorAll('[aria-label=\"Task sounds\"] button')[1].getAttribute('aria-checked')"), "true");

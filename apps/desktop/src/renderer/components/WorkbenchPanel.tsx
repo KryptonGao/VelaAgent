@@ -7,7 +7,7 @@ import type { MessageStore } from "../hooks/message-store";
 import type { UiMessage } from "../hooks/useSession";
 import { useMotionPresence } from "../hooks/useMotionPresence";
 import { WorkbenchTabPanel } from "./MotionPresence";
-import { tr } from "../locale";
+import { tr, trf } from "../locale";
 import { AgentPane } from "./AgentPane";
 import { AgentStatusMark } from "./AgentPanel";
 import { ChangesView } from "./ChangesView";
@@ -419,7 +419,7 @@ function WorkbenchPanelContent({
               <button
                 className={`workbench-tab-close${position.clipped ? " is-clipped" : ""}`}
                 type="button"
-                aria-label={tr(`关闭 ${tab.label}`, `Close ${tab.label}`)}
+                aria-label={trf("关闭 {0}", "Close {0}", tab.label)}
                 title={tr("关闭标签", "Close tab")}
                 style={{ left: position.left, top: position.top }}
                 onClick={() => closeTab(tab)}

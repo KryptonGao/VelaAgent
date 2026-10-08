@@ -1,3 +1,4 @@
+import type { AppLocale } from "./i18n";
 import type { SandboxMode, ThinkingLevel, ThinkingSummaryModel } from './index';
 
 export type RecipeMode = 'agent' | 'plan';
@@ -18,7 +19,7 @@ export interface TaskRecipe extends TaskRecipeInput {
   id: string; origin: 'builtin' | 'user' | 'project' | 'team'; revision: number; createdAt: number; updatedAt: number;
   projectWorkspace?: string;
   teamWorkspace?: string; teamPermission?: 'read' | 'write'; teamFingerprint?: string;
-  builtinVersion?: number; builtinKind?: 'bug' | 'review' | 'release'; locale?: 'zh-CN' | 'en';
+  builtinVersion?: number; builtinKind?: 'bug' | 'review' | 'release'; locale?: AppLocale;
 }
 export interface RecipeUseDraft {
   recipeSnapshot: TaskRecipe; workspace: string; values: Record<string, RecipeValue>;
@@ -53,10 +54,10 @@ export interface RecipeRun {
   retryRequests?: { requestId: string; stageId: string }[];
 }
 export interface TaskRecipesState { recipes: TaskRecipe[]; runs: RecipeRun[]; error: string | null; projectErrors?: Record<string, string>; teams?: RecipeTeamConnection[]; teamErrors?: Record<string, string> }
-export interface RecipeGenerateInput { requestId: string; text: string; locale: 'zh-CN' | 'en'; model: ThinkingSummaryModel; sourceReference?: TaskRecipeInput['sourceReference'] }
+export interface RecipeGenerateInput { requestId: string; text: string; locale: AppLocale; model: ThinkingSummaryModel; sourceReference?: TaskRecipeInput['sourceReference'] }
 export interface RecipeGenerateResult { recipe: TaskRecipeInput; model: ThinkingSummaryModel; sourceText: string }
 export interface TaskRecipesApi {
-  list(locale?: 'zh-CN' | 'en'): Promise<TaskRecipesState>;
+  list(locale?: AppLocale): Promise<TaskRecipesState>;
   save(input: TaskRecipeInput, id?: string, expectedRevision?: number, projectWorkspace?: string): Promise<TaskRecipe>;
   delete(id: string, expectedFingerprint?: string): Promise<void>;
   preview(draft: RecipeUseDraft): Promise<RecipePreview>;

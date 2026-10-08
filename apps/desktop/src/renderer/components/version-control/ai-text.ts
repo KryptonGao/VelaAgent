@@ -1,3 +1,4 @@
+import type { AppLocale } from "@vela/shared";
 import type {
   AiTextAction,
   AiTextKind,
@@ -160,7 +161,7 @@ export interface CommitSnapshotInput {
   taskGoal: string | null;
   userNote: string | null;
   verificationNotes: string | null;
-  locale: "zh-CN" | "en";
+  locale: AppLocale;
   style: AiTextStyle;
 }
 
@@ -211,7 +212,7 @@ export interface PrSnapshotInput {
   taskGoal: string | null;
   userNote: string | null;
   verificationNotes: string | null;
-  locale: "zh-CN" | "en";
+  locale: AppLocale;
   style: AiTextStyle;
 }
 

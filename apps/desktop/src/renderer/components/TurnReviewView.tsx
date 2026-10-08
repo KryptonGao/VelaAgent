@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useEscapeKey } from "../hooks/useDismissable";
-import { tr } from "../locale";
+import { tr, trf } from "../locale";
 import { DiffPane } from "./DiffPane";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { FileIcon, FolderIcon, SearchIcon } from "./icons";
@@ -33,7 +33,7 @@ function fileTree(files: TurnFileChange[]): Directory {
 }
 
 function ChangeStats({ added, removed }: { added: number; removed: number }) {
-  return <span className="turn-review-stats" aria-label={tr(`增加 ${added} 行，删除 ${removed} 行`, `${added} lines added, ${removed} removed`)}>
+  return <span className="turn-review-stats" aria-label={trf("增加 {0} 行，删除 {1} 行", "{0} lines added, {1} removed", added, removed)}>
     <span className="turn-changes-added">+{added}</span>
     <span className="turn-changes-removed">−{removed}</span>
   </span>;
@@ -164,7 +164,7 @@ export function TurnReviewView({ review, visible, onClose }: {
     role="region" aria-labelledby={`${id}-title`}>
     <header className="turn-review-toolbar">
       <FileIcon size={14} /><strong id={`${id}-title`}>{tr("本轮变更", "Turn changes")}</strong>
-      <span className="turn-review-count">{tr(`${changes.files.length} 个文件`, `${changes.files.length} files`)}</span>
+      <span className="turn-review-count">{trf("{0} 个文件", "{0} files", changes.files.length)}</span>
       <ChangeStats added={changes.added} removed={changes.removed} />
       {compact ? <button ref={toggle} type="button" className="turn-review-files-toggle" aria-controls={`${id}-files`}
         aria-expanded={drawerOpen} onClick={() => setDrawerOpen(open => !open)}>
@@ -182,7 +182,7 @@ export function TurnReviewView({ review, visible, onClose }: {
           </header>
           <div className="turn-review-side-labels"><span>{tr("编辑前", "Before")}</span><span>{tr("编辑后", "After")}</span></div>
           {file.diffs.length > 0 ? file.diffs.map((diff, index) => <div className="turn-review-edit" key={index}>
-            {file.diffs.length > 1 ? <div className="turn-review-edit-label">{tr(`编辑 ${index + 1} / ${file.diffs.length}`, `Edit ${index + 1} / ${file.diffs.length}`)}</div> : null}
+            {file.diffs.length > 1 ? <div className="turn-review-edit-label">{trf("编辑 {0} / {1}", "Edit {0} / {1}", index + 1, file.diffs.length)}</div> : null}
             {diff ? <DiffPane path={file.path} diff={diff} mode="split" format="tool" showLineNumbers />
               : <div className="turn-review-empty">{tr("这项编辑没有保存可显示的差异", "No saved diff is available for this edit")}</div>}
           </div>) : <div className="turn-review-empty">{tr("这项编辑没有保存可显示的差异", "No saved diff is available for this edit")}</div>}

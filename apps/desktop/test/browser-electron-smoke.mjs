@@ -286,7 +286,7 @@ async function run() {
     const openLinkSettings = async () => {
       await evaluate("document.querySelector('.sidebar-user-pill').click()");
       await until(() => evaluate("!!document.querySelector('.settings-nav-item')"), "settings");
-      await evaluate("Array.from(document.querySelectorAll('.settings-nav-item')).find(n => n.textContent === 'Appearance & shortcuts').click()");
+      await evaluate("Array.from(document.querySelectorAll('.settings-nav-item')).find(n => n.textContent === 'Interface').click()");
     };
     await openLinkSettings();
     assert.equal(await evaluate("document.querySelector('[aria-label=\"Conversation links\"] button').getAttribute('aria-checked')"), "true");

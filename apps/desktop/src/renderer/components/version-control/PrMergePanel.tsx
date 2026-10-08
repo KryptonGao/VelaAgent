@@ -8,7 +8,7 @@ import type {
   PrState,
   PrSummary,
 } from "@vela/shared";
-import { tr } from "../../locale";
+import { tr, trf } from "../../locale";
 import type { VersionControlApi } from "../../hooks/useVersionControl";
 import { AlertIcon, PrIcon, RefreshIcon } from "../icons";
 import { formatRelativeTime } from "./time-format";
@@ -191,7 +191,7 @@ export function PrMergePanel({
     <div className="vc-popover vc-p2-merge" role="dialog" aria-label={tr("合并与关闭", "Merge and close")}>
       <div className="vc-ops-head">
         <b>
-          <PrIcon size={12} /> {tr(`PR #${pr.number} 合并与关闭`, `PR #${pr.number} merge and close`)}
+          <PrIcon size={12} /> {trf("PR #{0} 合并与关闭", "PR #{0} merge and close", pr.number)}
         </b>
         {api.mergePreviewLoading ? <span className="vc-spinner" aria-hidden="true" /> : null}
         <button
@@ -342,10 +342,7 @@ export function PrMergePanel({
               )}
               {outdatedReviews > 0 ? (
                 <div className="vc-p2-note">
-                  {tr(
-                    `有 ${outdatedReviews} 条审阅已过期，未计入当前批准。`,
-                    `${outdatedReviews} review(s) are outdated and are not counted as current approvals.`,
-                  )}
+                  {trf("有 {0} 条审阅已过期，未计入当前批准。", "{0} review(s) are outdated and are not counted as current approvals.", outdatedReviews)}
                 </div>
               ) : null}
             </section>

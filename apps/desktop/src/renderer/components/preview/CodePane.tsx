@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useContentArrival } from "../BatchMotion";
 import { useFilePreview } from "./FilePreviewContext";
-import { localizeError, tr } from "../../locale";
+import { localizeError, tr, trf } from "../../locale";
 import { highlightDocument, type ThemedToken } from "./highlighter";
 
 /** 超大文件只渲染前若干行,避免一次性创建过多 DOM。 */
@@ -162,7 +162,7 @@ export function CodePane({ onOpenExternal }: { onOpenExternal: (absolutePath: st
       return (
         <CodeNotice
           title={tr("文件过大", "File is too large")}
-          detail={tr(`文件大小为 ${formatSize(content.size)}，不支持在侧栏预览。`, `File size is ${formatSize(content.size)}. Sidebar preview is not supported.`)}
+          detail={trf("文件大小为 {0}，不支持在侧栏预览。", "File size is {0}. Sidebar preview is not supported.", formatSize(content.size))}
           absolutePath={content.absolutePath}
           onOpenExternal={onOpenExternal}
         />
@@ -196,7 +196,7 @@ export function CodePane({ onOpenExternal }: { onOpenExternal: (absolutePath: st
         </div>
         {plainLines.length > maxRenderRows ? (
           <div className="code-note">
-            {tr(`文件较长，仅显示前 ${maxRenderRows.toLocaleString()} 行（共 ${plainLines.length.toLocaleString()} 行）。`, `File is long. Showing the first ${maxRenderRows.toLocaleString()} of ${plainLines.length.toLocaleString()} lines.`)}
+            {trf("文件较长，仅显示前 {0} 行（共 {1} 行）。", "File is long. Showing the first {0} of {1} lines.", maxRenderRows.toLocaleString(), plainLines.length.toLocaleString())}
           </div>
         ) : null}
         {content?.truncated ? <div className="code-note">{tr("文件超过 1 MB，仅显示开头部分。", "File exceeds 1 MB. Showing the beginning only.")}</div> : null}

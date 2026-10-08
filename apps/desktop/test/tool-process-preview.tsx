@@ -133,7 +133,7 @@ function settingsToggle() {
   const group = Array.from(view.querySelectorAll<HTMLElement>('[role="radiogroup"]'))
     .find(item => item.getAttribute("aria-label") === "过程行耗时与折叠记忆");
   if (!group) {
-    click(Array.from(view.querySelectorAll<HTMLButtonElement>(".settings-nav-item")).find(item => item.textContent === "外观与快捷键")!);
+    click(Array.from(view.querySelectorAll<HTMLButtonElement>(".settings-nav-item")).find(item => item.textContent === "对话显示")!);
     return settingsToggle();
   }
   const radios = () => Array.from(group.querySelectorAll<HTMLButtonElement>('[role="radio"]'));

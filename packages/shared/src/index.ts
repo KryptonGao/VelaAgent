@@ -156,6 +156,14 @@ export const IpcChannel = {
   appUiStorageSet: "app:ui-storage-set",
   appIsDevelopment: "app:is-development",
   appSyncProductionConversations: "app:sync-production-conversations",
+  appSyncPreview: "app:sync-production-preview",
+  appSyncRun: "app:sync-production-run",
+  appSyncBatches: "app:sync-production-batches",
+  appSyncRollback: "app:sync-production-rollback",
+  appDevInfo: "app:dev-info",
+  appDevOpenDevTools: "app:dev-open-devtools",
+  appDevReloadWindow: "app:dev-reload-window",
+  appDevRestartMain: "app:dev-restart-main",
   workspaceFileRead: "workspace:file-read",
   workspaceFileList: "workspace:file-list",
   workspaceSearch: "workspace:code-search",
@@ -180,8 +188,8 @@ export const IpcChannel = {
   memoryRemove: "memory:remove",
 } as const;
 
-export const appLocales = ["zh-CN", "en"] as const;
-export type AppLocale = (typeof appLocales)[number];
+import type { AppLocale } from "./i18n";
+export * from "./i18n";
 
 export interface ThinkingSummaryModel {
   provider: string;
@@ -2551,12 +2559,89 @@ export interface ConversationSyncResult {
   unavailable: number;
 }
 
+/** 开发版可从正式版资料目录同步的范围；所有范围都只读取正式版。 */
+export const productionSyncCategories = ["conversations", "settings", "models", "skills", "mcp", "memory"] as const;
+
+export type ProductionSyncCategory = (typeof productionSyncCategories)[number];
+
+export interface ProductionSyncCategoryResult {
+  category: ProductionSyncCategory;
+  /** 预览时为「将导入」，同步后为「已导入」。 */
+  imported: number;
+  /** 开发版已有同名项目，保持原样。 */
+  existing: number;
+  unavailable: number;
+  /** 该范围预览失败的原因；有错误时不能同步。 */
+  error?: string;
+}
+
+export interface ProductionSyncPreview {
+  categories: ProductionSyncCategoryResult[];
+  total: number;
+  /** 脱敏时被清空密钥的提供方或 MCP 服务器数量，需要在开发版重新填写。 */
+  needsCredentials: number;
+}
+
+export interface ProductionSyncResult extends ProductionSyncPreview {
+  /** 没有任何改动时为 null。 */
+  batch: string | null;
+  /** 部分设置在开发版重启后才会生效。 */
+  restartRequired: boolean;
+}
+
+export interface ProductionSyncBatch {
+  id: string;
+  createdAt: number;
+  status: "applying" | "applied";
+  categories: ProductionSyncCategoryResult[];
+  total: number;
+}
+
+export interface ProductionSyncRollbackResult {
+  batch: string;
+  reverted: number;
+  /** 同步之后又被修改过的项目，撤销时保持现状。 */
+  kept: number;
+  restartRequired: boolean;
+}
+
+/** 开发版诊断信息，用于贴进 issue。 */
+export interface DevToolsInfo {
+  name: string;
+  version: string;
+  commit: string | null;
+  branch: string | null;
+  /** 工作区有未提交改动；无法判断时为 null。 */
+  dirty: boolean | null;
+  electron: string;
+  chrome: string;
+  node: string;
+  v8: string;
+  platform: string;
+  arch: string;
+  osRelease: string;
+  home: string;
+}
+
+export interface DevelopmentApi {
+  syncProductionConversations(): Promise<ConversationSyncResult>;
+  previewProductionSync(categories: readonly ProductionSyncCategory[]): Promise<ProductionSyncPreview>;
+  runProductionSync(categories: readonly ProductionSyncCategory[]): Promise<ProductionSyncResult>;
+  listProductionSyncBatches(): Promise<ProductionSyncBatch[]>;
+  rollbackProductionSync(batch: string): Promise<ProductionSyncRollbackResult>;
+  getDevToolsInfo(): Promise<DevToolsInfo>;
+  openDevTools(): Promise<void>;
+  reloadWindow(): Promise<void>;
+  /** 重启 main process；成功时进程会退出，只有失败才会返回错误。 */
+  restartMain(): Promise<void>;
+}
+
 export interface VelaApi extends McpApi, PluginApi {
   prInbox: import("./pr-inbox").PrInboxApi;
   /** 设置页的长期记忆管理入口；Agent 工具由运行时单独提供。 */
   memory: MemoryApi;
   /** 仅开发版提供。 */
-  development?: { syncProductionConversations(): Promise<ConversationSyncResult> };
+  development?: DevelopmentApi;
   taskRecipes?: import("./task-recipes").TaskRecipesApi;
   scheduledTasks?: import("./scheduled-tasks").ScheduledTasksApi;
   /** 应用日志：写入、级别设置与诊断包导出。 */
