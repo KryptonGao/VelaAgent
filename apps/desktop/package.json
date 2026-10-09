@@ -1,7 +1,7 @@
 {
   "name": "@vela/desktop",
-  "version": "1.0.6",
-  "shortVersion": "1.0.6",
+  "version": "1.0.7",
+  "shortVersion": "1.0.7",
   "private": true,
   "main": "./out/main/index.mjs",
   "scripts": {
@@ -11,6 +11,7 @@
     "test:sounds": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --test test/notification-sounds.test.ts",
     "dev": "electron-vite dev --watch",
     "test:pi-sdk:electron": "node test/pi-sdk-electron-smoke.mjs",
+    "test:conversation-export": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --test test/conversation-export.test.ts",
     "test:trace": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --test ../../packages/agent/test/trace.test.ts test/trace-model.test.ts",
     "test:thinking-summary": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --test ../../packages/agent/test/thinking-summary.test.ts ../../packages/agent/test/thinking-summary-http.test.ts test/thinking-summary.test.ts",
     "test:persistence": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --test test/persistence.test.ts test/ui-storage.test.ts ../../packages/agent/test/conversation-persistence.test.ts ../../packages/agent/test/turn-timing.test.ts",

@@ -301,6 +301,7 @@ const api: VelaApi = {
   rewindConversation: (conversationId, turnIndex) =>
     ipcRenderer.invoke(IpcChannel.sessionRewind, conversationId, turnIndex) as Promise<{ state: AppState; messages: TranscriptMessage[] }>,
   getCheckpoints: (conversationId) => ipcRenderer.invoke(IpcChannel.sessionCheckpoints, conversationId),
+  exportConversation: (conversationId, options) => ipcRenderer.invoke(IpcChannel.sessionExport, conversationId, options),
   restoreCheckpoint: (conversationId, turnIndex) =>
     ipcRenderer.invoke(IpcChannel.sessionRestoreCheckpoint, conversationId, turnIndex) as Promise<{ state: AppState; messages: TranscriptMessage[] }>,
   getCheckpointStorage: () => ipcRenderer.invoke(IpcChannel.checkpointStorage),

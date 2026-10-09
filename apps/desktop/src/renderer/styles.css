@@ -1343,6 +1343,7 @@ code,
 .chat-actions-menu button:hover, .chat-actions-menu button:focus-visible { background: var(--bg-sidebar-hover); }
 .chat-actions-menu button:focus-visible, .chat-actions-anchor > button:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
 .chat-actions-menu button[aria-disabled="true"] { color: var(--text-muted); cursor: default; }
+.chat-actions-error { margin: 4px 10px 6px; max-width: 240px; font-size: 12px; line-height: 1.4; color: var(--danger); }
 .chat-project-context {
   display: inline-flex;
   align-items: center;

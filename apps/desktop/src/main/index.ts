@@ -16,6 +16,7 @@ import { createLogger, IpcChannel, isAppLocale, localizeZh } from "@vela/shared"
 import { writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ConversationExportHost } from "./conversation-export-host";
 import { getApplicationLocale, setApplicationLocale, setDiagnosticsMenuActions, setUpdateMenuAction } from "./menu";
 import { LogService } from "./log-service";
 import { installCrashHandlers, LogHost, systemInfo } from "./log-host";
@@ -83,6 +84,7 @@ let project: ProjectHost | null = null;
 let terminals: TerminalHost | null = null;
 let prInboxHost: PrInboxHost | null = null;
 let logHost: LogHost | null = null;
+let conversationExportHost: ConversationExportHost | null = null;
 let updateHost: UpdateHost | null = null;
 
 /*
@@ -366,6 +368,8 @@ async function start(): Promise<void> {
     currentCwd: () => workspaceManager.getState().current ?? fallbackCwd,
   });
   host.register();
+  conversationExportHost = new ConversationExportHost(runtime, getApplicationLocale);
+  conversationExportHost.register();
   registerDevelopmentIpc(runtime, { isPackaged: app.isPackaged, home });
   scheduledTaskHost = new ScheduledTaskHost(scheduler);
   scheduledTaskHost.register();
@@ -442,6 +446,8 @@ app.on("before-quit", (event) => {
   prInboxHost?.dispose();
   logHost?.dispose();
   logHost = null;
+  conversationExportHost?.dispose();
+  conversationExportHost = null;
   updateHost?.dispose();
   try { taskRecipes?.stop(); } catch (error) { log.error("recipe shutdown write failed", error); }
   taskRecipeHost?.dispose(); taskRecipeHost = null;

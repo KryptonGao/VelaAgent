@@ -37,6 +37,7 @@ export const IpcChannel = {
   sessionSummarizeThinking: "session:summarize-thinking",
   sessionTrace: "session:trace",
   sessionTraceDetails: "session:trace-details",
+  sessionExport: "session:export",
   sessionSetMode: "session:set-mode",
   sessionExecutePlan: "session:execute-plan",
   sessionResumeGoal: "session:resume-goal",
@@ -793,6 +794,21 @@ export interface CheckpointTimeline {
   /** 回到对话开始之前；还没有消息时为 null。 */
   start: CheckpointRestorePreview | null;
   turns: ConversationCheckpoint[];
+}
+
+/** 把对话导出成可分享的文档：Markdown 或单文件 HTML，可附带轨迹和文件 diff，便于写复盘。 */
+export interface ConversationExportOptions {
+  format: "markdown" | "html";
+  /** 附上模型请求表和轨迹时间线。 */
+  includeTrace: boolean;
+  /** 附上思考过程；默认不导出。 */
+  includeThinking: boolean;
+  /** 附上 edit / write 工具产生的文件 diff。 */
+  includeDiffs: boolean;
+}
+
+export interface ConversationExportResult {
+  path: string;
 }
 
 /** 检查点占用的磁盘空间；多个对话共用的同一份文件内容只算一次。 */
@@ -2699,6 +2715,8 @@ export interface VelaApi extends McpApi, PluginApi {
   rewindConversation(conversationId: string, turnIndex: number): Promise<{ state: AppState; messages: TranscriptMessage[] }>;
   /** 读取检查点时间轴：每一轮能否回退、会恢复哪些文件。 */
   getCheckpoints(conversationId: string): Promise<CheckpointTimeline>;
+  /** 弹出保存对话框并导出对话；取消保存时返回 null。 */
+  exportConversation(conversationId: string, options: ConversationExportOptions): Promise<ConversationExportResult | null>;
   /** 回到第 turnIndex 轮之后（-1 表示对话开始），移除其后各轮并恢复文件。 */
   restoreCheckpoint(conversationId: string, turnIndex: number): Promise<{ state: AppState; messages: TranscriptMessage[] }>;
   /** 检查点占用的磁盘空间。 */

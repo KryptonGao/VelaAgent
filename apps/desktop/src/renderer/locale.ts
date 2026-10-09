@@ -83,6 +83,8 @@ const knownErrors: Record<string, string> = {
   "这个接口还没有密钥": "This endpoint has no API key.",
   "这个模型还不能使用，请先在账号里登录。": "This model is unavailable. Sign in to the provider first.",
   "对话不存在或已结束": "Chat not found or already ended.",
+  "这个对话还没有消息": "This chat has no messages yet.",
+  "导出格式不正确": "Unsupported export format.",
   "会话服务不可用": "Chat service is unavailable.",
   "没有找到正式版会话，请先在正式版创建会话": "No production conversations found. Create a conversation in the production app first.",
   "开发版正在使用正式版资料目录，无需同步": "The development app already uses the production data directory. No sync is needed.",
