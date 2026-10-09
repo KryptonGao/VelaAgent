@@ -40,3 +40,4 @@ Package version: `1.0.7`. macOS bundle and download version: `1.0.7`.
 - The in-app update tests (`test:updates`, 29 tests) passed.
 - The production build succeeded, and 11 of 13 real-Electron smoke suites passed. The Task Recipes and Pull Request Inbox smoke suites still fail: their scripts were not updated for the 1.0.5 interface redesign and are not related to this release.
 - In the real-Electron renderer checks (`test:ui`), the chat actions menu (including the export items), plugins, memory settings, and update UI checks passed. The MCP settings check fails with or without this release's style changes.
+- The production DMG and ZIP builds, bundle and packaged version metadata, DMG mounting, archive integrity, and the signed SHA-256 checksums were verified.
