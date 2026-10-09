@@ -159,6 +159,8 @@ export class SessionHost {
       return this.currentState();
     });
     ipcMain.handle(IpcChannel.sessionCheckpoints, (_event, rawId: unknown) => this.runtime.getCheckpoints(parseConversationId(rawId, "对话")));
+    ipcMain.handle(IpcChannel.checkpointStorage, () => this.runtime.getCheckpointStorage());
+    ipcMain.handle(IpcChannel.checkpointStorageClean, () => this.runtime.cleanCheckpointStorage());
     ipcMain.handle(IpcChannel.sessionRestoreCheckpoint, async (_event, rawId: unknown, rawTurn: unknown) => {
       const id = parseConversationId(rawId, "对话");
       // -1 回到对话开始之前。

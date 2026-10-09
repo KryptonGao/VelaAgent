@@ -32,8 +32,23 @@ try {
   const development = await ev("Boolean(window.vela.development)");
   assert.deepEqual(labels, ["General", "Agent", "Models & extensions", "Data & workspace", ...(development ? ["Development"] : [])]);
   const items = await ev("[...document.querySelectorAll('.settings-nav-item')].map(n => n.textContent)");
-  assert.equal(items.length, development ? 15 : 14);
-  console.log("PASS grouped nav keeps all 14 pages (plus developer tools in dev builds)");
+  assert.equal(items.length, development ? 17 : 16);
+  console.log("PASS grouped nav keeps all 16 pages (plus developer tools in dev builds)");
+  // the update page talks to the real main-process service over IPC
+  await ev("[...document.querySelectorAll('.settings-nav-item')].find(n => n.textContent === 'About & updates').click()");
+  await until(() => ev("!!document.querySelector('.update-card')"), "updates page");
+  assert.match(await ev("document.querySelector('.update-version').textContent"), /^Vela \d+\.\d+\.\d+/);
+  assert.equal(await ev("document.querySelector('[data-setting-id=\"update-auto\"] [role=switch]').getAttribute('aria-checked')"), "true");
+  console.log("PASS updates page renders the current version and the automatic-update switch");
+
+  // the storage page reads real checkpoint usage from the main process and cleans only after a confirmation
+  await ev("[...document.querySelectorAll('.settings-nav-item')].find(n => n.textContent === 'Storage').click()");
+  await until(() => ev("/^Using /.test(document.querySelector('[data-setting-id=\"checkpoint-storage\"] [role=status]')?.textContent ?? '')"), "storage usage");
+  await ev("[...document.querySelectorAll('[data-setting-id=\"checkpoint-storage\"] button')].find(n => n.textContent === 'Clean up').click()");
+  await until(() => ev("[...document.querySelectorAll('[data-setting-id=\"checkpoint-storage\"] button')].some(n => n.textContent === 'Confirm cleanup')"), "cleanup confirmation");
+  await ev("[...document.querySelectorAll('[data-setting-id=\"checkpoint-storage\"] button')].find(n => n.textContent === 'Confirm cleanup').click()");
+  await until(() => ev("document.querySelector('[data-setting-id=\"checkpoint-storage\"] .settings-saved')?.textContent === 'Nothing to clean up.'"), "cleanup result");
+  console.log("PASS storage page shows checkpoint usage and cleans after confirmation");
 
   // search → jump (permissions sits at the bottom of "Defaults & permissions")
   await ev("document.querySelector('.settings-search-input').focus()");

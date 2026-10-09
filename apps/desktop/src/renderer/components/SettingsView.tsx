@@ -21,10 +21,12 @@ import { ConversationDisplayPage } from "./settings/ConversationDisplayPage";
 import { DevelopmentPage } from "./settings/DevelopmentPage";
 import { InterfacePage } from "./settings/InterfacePage";
 import { LogsPage } from "./settings/LogsPage";
+import { StoragePage } from "./settings/StoragePage";
 import { ModelsPage } from "./settings/ModelsPage";
 import { SettingsNav } from "./settings/SettingsNav";
 import { ShortcutsPage } from "./settings/ShortcutsPage";
 import { SkillsPage } from "./settings/SkillsPage";
+import { UpdatesPage } from "./settings/UpdatesPage";
 import { WorkspacePage } from "./settings/WorkspacePage";
 import {
   isSettingsPageId,
@@ -150,6 +152,7 @@ export function SettingsView({
           <div hidden={page !== "shortcuts"}>
             <ShortcutsPage copy={copy} mod={mod} />
           </div>
+          {page === "updates" ? <UpdatesPage copy={copy} locale={locale} /> : null}
           <div hidden={page !== "defaults"}>
             <AgentDefaultsPage copy={copy} catalog={models.catalog} project={project} />
           </div>
@@ -173,6 +176,7 @@ export function SettingsView({
               onUnarchive={onUnarchiveConversation}
             />
           </div>
+          {page === "storage" ? <StoragePage copy={copy} /> : null}
           {page === "logs" ? <LogsPage copy={copy} /> : null}
           {development ? <div hidden={page !== "development"}>
             <DevelopmentPage copy={copy} development={development} />

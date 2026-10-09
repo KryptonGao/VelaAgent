@@ -1,10 +1,10 @@
 import type { SettingsCopy } from "../settings-copy";
 
 export type SettingsPageId =
-  | "appearance" | "interface" | "shortcuts"
+  | "appearance" | "interface" | "shortcuts" | "updates"
   | "defaults" | "display" | "skills"
   | "models" | "integrations" | "mcp" | "memory"
-  | "workspace" | "archived" | "usage" | "logs"
+  | "workspace" | "archived" | "usage" | "storage" | "logs"
   | "development";
 
 export type SettingsGroupId = "general" | "agent" | "extensions" | "data" | "development";
@@ -16,10 +16,10 @@ export interface SettingsGroup {
 
 /** 导航顺序:先按使用意图分组,同组内由常用到少用。 */
 export const settingsGroups: readonly SettingsGroup[] = [
-  { id: "general", pages: ["appearance", "interface", "shortcuts"] },
+  { id: "general", pages: ["appearance", "interface", "shortcuts", "updates"] },
   { id: "agent", pages: ["defaults", "display", "skills"] },
   { id: "extensions", pages: ["models", "integrations", "mcp", "memory"] },
-  { id: "data", pages: ["workspace", "archived", "usage", "logs"] },
+  { id: "data", pages: ["workspace", "archived", "usage", "storage", "logs"] },
   { id: "development", pages: ["development"] },
 ];
 
@@ -59,6 +59,9 @@ export const settingsEntries: readonly SettingsEntry[] = [
   { id: "composer-capsules", page: "interface", title: (c) => c.appearance.composerCapsules, hint: (c) => c.appearance.composerCapsulesHint, keywords: { zh: ["输入框", "胶囊", "背景"], en: ["composer", "capsule", "input", "background"] } },
   { id: "send-button-icon", page: "interface", title: (c) => c.appearance.sendButtonIcon, keywords: { zh: ["发送", "纸飞机", "箭头"], en: ["send", "paper plane", "arrow"] } },
 
+  { id: "update-status", page: "updates", title: (c) => c.updates.title, hint: (c) => c.pages.updates.description, keywords: { zh: ["更新", "版本", "升级", "检查更新", "重启", "发布页"], en: ["update", "upgrade", "version", "check for updates", "release", "restart", "about"] } },
+  { id: "update-auto", page: "updates", title: (c) => c.updates.autoTitle, hint: (c) => c.updates.autoHint, keywords: { zh: ["自动更新", "自动下载", "后台"], en: ["automatic updates", "auto update", "download", "background"] } },
+
   { id: "shortcuts", page: "shortcuts", title: (c) => c.appearance.shortcuts, hint: (c) => c.appearance.shortcutsHint, keywords: { zh: ["快捷键", "热键", "按键"], en: ["shortcut", "hotkey", "keyboard", "keybinding"] } },
 
   { id: "default-model", page: "defaults", title: (c) => c.agent.model, hint: (c) => c.agent.modelHint, keywords: { zh: ["模型", "默认模型"], en: ["model", "default model"] } },
@@ -95,6 +98,8 @@ export const settingsEntries: readonly SettingsEntry[] = [
   { id: "archived", page: "archived", title: (c) => c.archived.title, hint: (c) => c.archived.hint, keywords: { zh: ["归档", "取消归档", "恢复对话"], en: ["archive", "unarchive", "restore chat"] } },
 
   { id: "usage", page: "usage", title: (c) => c.pages.usage.label, hint: (c) => c.pages.usage.description, keywords: { zh: ["用量", "Token", "统计", "请求"], en: ["usage", "tokens", "statistics", "requests", "cost"] } },
+
+  { id: "checkpoint-storage", page: "storage", title: (c) => c.storage.checkpointsTitle, hint: (c) => c.storage.checkpointsHint, keywords: { zh: ["检查点", "磁盘", "空间", "占用", "清理", "缓存", "存储"], en: ["checkpoint", "disk", "space", "storage", "clean", "cleanup", "cache", "size"] } },
 
   { id: "log-level", page: "logs", title: (c) => c.logs.levelTitle, hint: (c) => c.logs.levelHint, keywords: { zh: ["日志", "调试", "级别"], en: ["log", "debug", "level", "verbose"] } },
   { id: "log-folder", page: "logs", title: (c) => c.logs.folderTitle, hint: (c) => c.logs.folderHint, keywords: { zh: ["日志位置", "日志文件夹"], en: ["log folder", "log location"] } },

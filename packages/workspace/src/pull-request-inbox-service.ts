@@ -1,7 +1,7 @@
 import type {
   PrInboxIdentity, PrInboxList, PrInboxQuery, PrInboxItem, PrRelation, PrRelationPage,
   PrTarget, PrInboxDetail, PrActivityKind, PrActivityPage, PrInboxFiles, PrInboxError,
-  PrReviewComment,
+  PrReviewComment, PrFeedbackThread, PrFeedbackReview,
 } from '@vela/shared';
 import { runGh, classifyGhFailure, ghFailureMessage, type GhResult, type GhRunOptions } from './gh-run';
 import { toReviewComment, toReviewSummary, toReviewThread, mapCheckState } from './pull-request-service';
@@ -16,6 +16,14 @@ const states: Record<PrInboxQuery['state'], string> = {
 const fields = 'number,title,url,state,isDraft,author,body,createdAt,updatedAt,baseRefName,baseRefOid,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,additions,deletions,changedFiles,mergeable,mergeStateStatus,reviewDecision,reviewRequests,statusCheckRollup';
 type Runner = (cwd: string | null, args: string[], timeout: number, stdin?: string, options?: GhRunOptions) => Promise<GhResult>;
 interface QueryCache { result: PrInboxList; members: Map<PrRelation, Map<string, PrInboxItem>> }
+/** 回应审阅意见所需的 PR 现状：未解决线程、请求修改的审阅与能否推回分支。 */
+export interface PrReviewFeedback {
+  headSha: string; headRefName: string; state: string; authorLogin: string | null;
+  headRepository: string | null; isCrossRepository: boolean; maintainerCanModify: boolean;
+  threads: PrFeedbackThread[]; reviews: PrFeedbackReview[]; threadsIncomplete: boolean;
+}
+export interface PrThreadWriteResult { threadId: string; state: 'posted' | 'resolved' | 'closed'; url: string | null }
+const threadPageLimit = 6; const threadCommentLimit = 20;
 class InboxFailure extends Error {
   constructor(readonly info: PrInboxError) { super(info.message); }
 }
@@ -42,6 +50,7 @@ export class PullRequestInboxService {
   private revision = 0;
   private queryVersions = new Map<string, number>();
   private commentWrites = new Map<string, { fingerprint: string; at: number; settled: boolean; promise: Promise<PrReviewComment> }>();
+  private threadWrites = new Map<string, { fingerprint: string; at: number; settled: boolean; promise: Promise<PrThreadWriteResult> }>();
   constructor(private readonly runner: Runner = runGh, private readonly now = Date.now) {}
 
   private async execute(args: string[], signal?: AbortSignal, stdin?: string): Promise<GhResult> {
@@ -391,6 +400,108 @@ export class PullRequestInboxService {
     });
     const write = { fingerprint, at: this.now(), settled: false, promise };
     this.commentWrites.set(key, write);
+    void promise.finally(() => { write.settled = true; write.at = this.now(); }).catch(() => {});
+    return promise;
+  }
+
+  /** 读取需要回应的审阅意见。只读：不会修改 GitHub 上的任何内容。 */
+  async reviewFeedback(raw: PrTarget, identityKey: string, signal?: AbortSignal): Promise<PrReviewFeedback> {
+    const target = validateTarget(raw); const { identity, epoch } = await this.context(identityKey, signal);
+    const pr = await this.view(target, signal);
+    const comment = 'author { login } body url';
+    const query = `query($owner:String!,$repo:String!,$number:Int!,$cursor:String) { repository(owner:$owner,name:$repo) { pullRequest(number:$number) {
+      headRefOid maintainerCanModify
+      reviews(last:20,states:[CHANGES_REQUESTED]) { nodes { id author { login } body url } }
+      reviewThreads(first:50,after:$cursor) { pageInfo { hasNextPage endCursor } nodes { id path line isResolved isOutdated
+        comments(first:${threadCommentLimit}) { pageInfo { hasNextPage } nodes { ${comment} } } } } } } }`;
+    const threads: PrFeedbackThread[] = []; let reviews: PrFeedbackReview[] = []; let cursor: string | null = null; let incomplete = false; let maintainerCanModify = false;
+    for (let page = 0; ; page++) {
+      if (page >= threadPageLimit) { incomplete = true; break; }
+      const response = record(this.json(await this.execute(['api', '--hostname', 'github.com', 'graphql', '--input', '-'], signal,
+        JSON.stringify({ query, variables: { owner: target.owner, repo: target.repo, number: target.number, cursor } }))));
+      const node = response.data?.repository?.pullRequest;
+      if (response.errors?.length || !node) throw new Error('审阅意见读取失败，可能没有访问权限');
+      if (node.headRefOid !== pr.headRefOid) throw new Error('PR 版本已变化，请刷新');
+      maintainerCanModify = node.maintainerCanModify === true;
+      if (page === 0) reviews = (node.reviews?.nodes ?? []).filter((r: any) => typeof r?.body === 'string' && r.body.trim())
+        .map((r: any) => ({ id: String(r.id), author: r.author?.login ?? null, body: r.body, url: safeGithubUrl(r.url, target) }));
+      for (const t of node.reviewThreads?.nodes ?? []) {
+        if (!t || typeof t.id !== 'string' || t.isResolved) continue;
+        const comments = (t.comments?.nodes ?? []).filter((c: any) => c && typeof c.body === 'string')
+          .map((c: any) => ({ author: c.author?.login ?? null, body: c.body, url: safeGithubUrl(c.url, target) }));
+        if (!comments.length) continue;
+        threads.push({ id: t.id, path: typeof t.path === 'string' ? t.path : null, line: Number.isInteger(t.line) ? t.line : null,
+          outdated: t.isOutdated === true, comments, moreComments: t.comments?.pageInfo?.hasNextPage === true });
+      }
+      const info = node.reviewThreads?.pageInfo;
+      if (!info?.hasNextPage) break;
+      cursor = info.endCursor;
+    }
+    this.assertIdentity(identity.key, epoch, signal);
+    return { headSha: pr.headRefOid, headRefName: pr.headRefName ?? '', state: String(pr.state ?? ''), authorLogin: pr.author?.login ?? null,
+      headRepository: pr.headRepositoryOwner?.login && pr.headRepository?.name ? `${pr.headRepositoryOwner.login}/${pr.headRepository.name}` : null,
+      isCrossRepository: pr.isCrossRepository === true, maintainerCanModify, threads, reviews, threadsIncomplete: incomplete };
+  }
+
+  /**
+   * 在审阅线程里回复，并可选择解决线程。和普通留言一样按请求编号保留回执：
+   * 同一编号不会重复发送；结果未确认时让调用方刷新核对，不自动重试。
+   */
+  async replyToThread(raw: PrTarget, threadId: string, body: string, resolve: boolean, identityKey: string, requestId: string): Promise<PrThreadWriteResult> {
+    const target = validateTarget(raw);
+    if (typeof threadId !== 'string' || !/^[A-Za-z0-9_=-]{1,256}$/.test(threadId)) throw new Error('无效的审阅线程');
+    if (typeof body !== 'string' || !body.trim() || body.length > 65_536) throw new Error('回复不能为空，且不能超过 65,536 个字符');
+    if (typeof resolve !== 'boolean' || typeof identityKey !== 'string' || !/^github\.com\/[a-zA-Z0-9][a-zA-Z0-9-]{0,99}$/.test(identityKey) || typeof requestId !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(requestId)) throw new Error('无效回复请求');
+    const key = `${identityKey}:${requestId}`;
+    const fingerprint = JSON.stringify([targetKey(target), threadId, body, resolve]);
+    for (const [id, write] of this.threadWrites) if (write.settled && this.now() - write.at > 10 * 60_000) this.threadWrites.delete(id);
+    const prior = this.threadWrites.get(key);
+    if (prior) {
+      if (prior.fingerprint !== fingerprint) throw new Error('回复请求编号重复且内容不同');
+      return prior.promise;
+    }
+    if (this.threadWrites.size >= 200) throw new Error('回复请求过多，请稍后重试');
+    const promise = Promise.resolve().then(async (): Promise<PrThreadWriteResult> => {
+      const identity = await this.probe(true);
+      if (identity.key !== identityKey) throw new Error('GitHub 身份已变化，请刷新列表后再回复');
+      const epoch = this.epoch;
+      const graphql = async (query: string, variables: Record<string, unknown>) => record(this.json(await this.execute(['api', '--hostname', 'github.com', 'graphql', '--input', '-'], undefined, JSON.stringify({ query, variables }))));
+      const found = await graphql(`query($id:ID!) { node(id:$id) { ... on PullRequestReviewThread { id isResolved viewerCanReply viewerCanResolve
+        pullRequest { number repository { name owner { login } } } } } }`, { id: threadId });
+      const thread = found.data?.node;
+      // The thread id comes from the renderer; it must belong to this exact PR before anything is written.
+      if (found.errors?.length || !thread || thread.pullRequest?.number !== target.number || thread.pullRequest?.repository?.name?.toLowerCase() !== target.repo.toLowerCase() || thread.pullRequest?.repository?.owner?.login?.toLowerCase() !== target.owner.toLowerCase()) throw new Error('审阅线程不属于此 PR 或不可访问');
+      this.assertIdentity(identity.key, epoch);
+      if (thread.isResolved) return { threadId, state: 'closed', url: null };
+      if (thread.viewerCanReply === false) throw new Error('当前身份无权回复此线程');
+      if (resolve && thread.viewerCanResolve === false) throw new Error('当前身份无权解决此线程，未发送回复');
+      const prefix = `${identity.key}:activity:${targetKey(target)}:`;
+      const invalidate = () => {
+        // Also on uncertain failures, so a manual refresh can confirm a possibly accepted write.
+        for (const id of this.reads.keys()) if (id.startsWith(prefix)) this.reads.delete(id);
+        for (const [id, job] of this.pending) if (id.startsWith(prefix)) job.controller.abort();
+      };
+      let url: string | null;
+      try {
+        const reply = await graphql(`mutation($id:ID!,$body:String!) { addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$id,body:$body}) { comment { id url } } }`, { id: threadId, body });
+        const comment = reply.data?.addPullRequestReviewThreadReply?.comment;
+        if (reply.errors?.length || typeof comment?.id !== 'string') throw new Error('GitHub 没有确认回复');
+        url = safeGithubUrl(comment.url, target);
+      } catch (error) {
+        invalidate();
+        throw new Error(`回复提交未确认：${error instanceof Error ? error.message : String(error)}。请刷新活动确认是否已发送，再决定是否重试。`);
+      }
+      if (!resolve) { invalidate(); return { threadId, state: 'posted', url }; }
+      try {
+        const done = await graphql(`mutation($id:ID!) { resolveReviewThread(input:{threadId:$id}) { thread { id isResolved } } }`, { id: threadId });
+        if (done.errors?.length || done.data?.resolveReviewThread?.thread?.isResolved !== true) throw new Error('GitHub 没有确认解决');
+      } catch (error) {
+        throw new Error(`回复已发送，但解决线程失败：${error instanceof Error ? error.message : String(error)}`);
+      } finally { invalidate(); }
+      return { threadId, state: 'resolved', url };
+    });
+    const write = { fingerprint, at: this.now(), settled: false, promise };
+    this.threadWrites.set(key, write);
     void promise.finally(() => { write.settled = true; write.at = this.now(); }).catch(() => {});
     return promise;
   }

@@ -16,9 +16,10 @@ import { createLogger, IpcChannel, isAppLocale, localizeZh } from "@vela/shared"
 import { writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getApplicationLocale, setApplicationLocale, setDiagnosticsMenuActions } from "./menu";
+import { getApplicationLocale, setApplicationLocale, setDiagnosticsMenuActions, setUpdateMenuAction } from "./menu";
 import { LogService } from "./log-service";
 import { installCrashHandlers, LogHost, systemInfo } from "./log-host";
+import { createUpdateService, UpdateHost } from "./update-host";
 import { registerOpenTargetIpc } from "./open-targets";
 import { ProjectHost } from "./project-host";
 import { SessionHost } from "./session-host";
@@ -32,6 +33,7 @@ import { MemoryHost } from "./memory-host";
 import { SecureCredentialStore } from "./plugin-credentials";
 import { ensureLoginShellPath } from "./shell-path";
 import { PrInboxHost } from "./pr-inbox-host";
+import { PrReviewResponseService } from "./pr-review-response-service";
 import { TerminalHost } from "./terminal-host";
 import { configureVelaProfile, prepareVelaHome } from "./vela-home";
 import { registerDevelopmentIpc } from "./development-host";
@@ -81,6 +83,7 @@ let project: ProjectHost | null = null;
 let terminals: TerminalHost | null = null;
 let prInboxHost: PrInboxHost | null = null;
 let logHost: LogHost | null = null;
+let updateHost: UpdateHost | null = null;
 
 /*
  * macOS 上由系统 vibrancy 提供毛玻璃,窗口底色必须是透明的,
@@ -262,6 +265,11 @@ async function start(): Promise<void> {
     locale: getApplicationLocale,
   });
   logHost.register();
+  updateHost = new UpdateHost(createUpdateService(home));
+  updateHost.register();
+  setUpdateMenuAction(() => { void updateHost?.checkFromMenu().catch(error => log.error("update check from menu failed", error)); });
+  // 开发版只提供手动检查，不在后台联网，也不会替换 Electron 开发二进制。
+  if (app.isPackaged) updateHost.service.start();
   const runtime = new AgentRuntime({
     scheduledTasks: scheduler,
     pluginCredentialStore: new SecureCredentialStore(join(home, "integrations-auth.enc.json")),
@@ -308,6 +316,18 @@ async function start(): Promise<void> {
     trustedSnapshot: recipe => scheduler.list().tasks.some(task => JSON.stringify(task.recipeBinding?.recipeSnapshot) === JSON.stringify(recipe)),
     workspaces: registeredWorkspaces, runningWorkspaces: () => runtime.listConversations().filter(c => c.status === "streaming" || runtime.getAgents(c.id).some(a => a.kind !== "root" && a.status === "running")).map(c => c.cwd),
   });
+  prInboxHost?.setResponses(new PrReviewResponseService({
+    inbox: prInboxHost.service, home, workspaces: registeredWorkspaces,
+    startConversation: async (cwd, title, prompt) => {
+      const snapshot = await runtime.createConversation(cwd, { hasWorkspace: true });
+      const id = snapshot.id;
+      if (!id) throw new Error(snapshot.error ?? "无法创建对话");
+      await runtime.renameConversation(id, title);
+      // The turn can run for minutes; the caller only needs the conversation to exist.
+      void runtime.prompt(id, prompt).catch(error => log.error("pr review response prompt failed", error));
+      return id;
+    },
+  }));
   recipes.init(); taskRecipes = recipes;
   if (!recipes.list().error) {
     try { await runtime.reconcileRecipeConversations(recipes.list().runs); }
@@ -408,6 +428,9 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
+// 已下载的更新随退出安装；用户点「立即重启」时安装脚本会在装完后重新打开应用。
+app.on("will-quit", () => updateHost?.service.onWillQuit());
+
 let shutdownComplete = false;
 let shutdownStarted = false;
 app.on("before-quit", (event) => {
@@ -419,6 +442,7 @@ app.on("before-quit", (event) => {
   prInboxHost?.dispose();
   logHost?.dispose();
   logHost = null;
+  updateHost?.dispose();
   try { taskRecipes?.stop(); } catch (error) { log.error("recipe shutdown write failed", error); }
   taskRecipeHost?.dispose(); taskRecipeHost = null;
   scheduledTaskHost?.dispose();

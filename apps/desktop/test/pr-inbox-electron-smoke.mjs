@@ -66,9 +66,14 @@ await new Promise(r=>setTimeout(r,450));console.log('PR_SHOT:inbox');await new P
 const relation=[...document.querySelectorAll('.pr-inbox-relations button')].find(b=>b.textContent.startsWith('待我审查'));relation.click();await wait(()=>document.querySelectorAll('.pr-inbox-row').length===1,'Relation filter');
 fill('.pr-inbox-search input','no-match');await wait(()=>document.querySelector('.pr-inbox-empty')?.textContent.includes('已加载'),'Loaded search scope');fill('.pr-inbox-search input','#128');await wait(()=>document.querySelectorAll('.pr-inbox-row').length===1,'Number search');
 document.querySelector('.pr-inbox-row').click();await wait(()=>document.querySelector('.pr-inbox-overview'),'Overview missing');await wait(()=>document.querySelector('.pr-inbox-activity')?.textContent.includes('旧版本审阅'),'Activity/current-head review');assert(!window.PR_SCRIPT_EXECUTED,'Markdown executed a script');assert(document.querySelector('.pr-inbox-checks').textContent.includes('检查运行中'),'Pending check exit 8');
-console.log('PR_SHOT:overview');await new Promise(r=>setTimeout(r,150));click('变更 3');await wait(()=>document.querySelector('.pr-inbox-file-tree nav button'),'Files missing');await wait(()=>document.querySelector('.pr-inbox-diff-header')?.textContent.includes('src/new name.ts'),'Renamed diff missing');assert(document.querySelector('.diff-line.add')?.textContent.includes('newValue'),'Remote diff missing');
+console.log('PR_SHOT:overview');await new Promise(r=>setTimeout(r,150));
+click('让 Agent 回应审阅意见');await wait(()=>document.querySelector('.pr-response-dialog[open] .pr-response-threads li'),'Response dialog threads missing');
+const responseDialog=document.querySelector('.pr-response-dialog');assert(responseDialog.textContent.includes('src/new name.ts'),'Thread path missing');assert(responseDialog.textContent.includes('没有找到 fixture/Repo 的本机检出'),'No-checkout notice missing');
+assert([...responseDialog.querySelectorAll('footer button')].find(b=>b.classList.contains('is-primary')).disabled,'Start must stay disabled without a local checkout');
+console.log('PR_SHOT:response');await new Promise(r=>setTimeout(r,250));click('取消');await wait(()=>!document.querySelector('.pr-response-dialog[open]'),'Response dialog not closed');
+click('变更 3');await wait(()=>document.querySelector('.pr-inbox-file-tree nav button'),'Files missing');await wait(()=>document.querySelector('.pr-inbox-diff-header')?.textContent.includes('src/new name.ts'),'Renamed diff missing');assert(document.querySelector('.diff-line.add')?.textContent.includes('newValue'),'Remote diff missing');
 assert(document.querySelectorAll('.diff-line.ctx .diff-line-number').length===2,'Unified diff line numbers missing');await new Promise(r=>setTimeout(r,300));console.log('PR_SHOT:changes');await new Promise(r=>setTimeout(r,250));const fileButtons=[...document.querySelectorAll('.pr-inbox-file-tree nav button')];fileButtons.find(b=>b.textContent.includes('binary.png')).click();await wait(()=>document.querySelector('.pr-inbox-file-diff').textContent.includes('没有可用的文本差异'),'Binary state missing');fileButtons.find(b=>b.textContent.includes('large.ts')).click();await wait(()=>buttons().some(b=>b.textContent.includes('展开更多差异')),'Large diff progressive rendering');
-click('← 返回列表');await wait(()=>document.querySelector('.pr-inbox-search input')?.value==='#128','Search not restored');assert(document.querySelector('.pr-inbox-relations [aria-current]').textContent.startsWith('待我审查'),'Relation not restored');
+click('← 返回列表');await wait(()=>document.querySelector('.pr-inbox-search input')?.value==='#128','Search not restored');assert(document.querySelector('.pr-inbox-relations [aria-selected="true"]').textContent.startsWith('待我审查'),'Relation not restored');
 console.log('PR_DELAY:350');await new Promise(r=>setTimeout(r,80));
 document.querySelector('.pr-inbox-row').click();await new Promise(r=>setTimeout(r,60));
 assert(document.querySelector('.pr-inbox-overview')?.textContent.includes('Read PRs without'),'Cached detail was not shown before slow revalidation');
@@ -90,7 +95,7 @@ console.log('PR_MODE:bob');await new Promise(r=>setTimeout(r,80));click('刷新'
 console.log('PR_MODE:offline');await new Promise(r=>setTimeout(r,80));click('刷新');await wait(()=>document.querySelector('.pr-inbox-notice')?.textContent.includes('无法连接'),'Offline state');assert(document.querySelectorAll('.pr-inbox-row').length===1,'Offline cache erased');
 const after=await window.vela.getState();assert(after.session.id===before.session.id,'Conversation changed');assert((await window.vela.getWorkspaceState()).current===null,'Workspace changed');
 click('新对话');await wait(()=>!visible(document.querySelector('.pr-inbox-page')),'PR page not hidden');click('Pull Request');await wait(()=>visible(document.querySelector('.pr-inbox-page')),'PR page not restored');assert(document.querySelector('.pr-inbox-search input').value==='#128','Filters lost on navigation');
-return {rows:2,noWorkspace:true,markdownSafe:true,ipcValidated:true,cachePreserved:true,cacheBeforeNetwork:true,idleRefreshOutsideInbox:true};
+return {rows:2,noWorkspace:true,markdownSafe:true,ipcValidated:true,cachePreserved:true,cacheBeforeNetwork:true,idleRefreshOutsideInbox:true,reviewResponseDialog:true};
 })()\`);
 win.setSize(1000,760);win.webContents.setZoomFactor(2);await new Promise(r=>setTimeout(r,250));
 const overflow=await win.webContents.executeJavaScript('document.querySelector(".pr-inbox-page").scrollWidth>document.querySelector(".pr-inbox-page").clientWidth');if(overflow)throw new Error('PR page overflow at 200%');writeFileSync(shots+'/zoom-200.png',(await win.webContents.capturePage()).toPNG());
@@ -106,5 +111,6 @@ try {
   const calls = readFileSync(join(temp, 'calls.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
   assert.ok(calls.length > 10); assert.ok(calls.filter(c => c.args.includes('search/issues') || c.args.includes('graphql') || c.args.includes('user') || c.args.includes('--repo')).every(c => c.host === 'github.com'));
   assert.ok(calls.every(c => !(c.args[0] === 'pr' && ['merge', 'review', 'comment', 'close', 'ready', 'checkout'].includes(c.args[1]))));
+  assert.ok(calls.every(c => !/mutation/.test(c.stdin)), 'The review response dialog must not write to GitHub');
   console.log('PASS read-only gh calls: ' + calls.length + '; screenshots: ' + shots);
 } finally { rmSync(temp, { recursive: true, force: true }); }

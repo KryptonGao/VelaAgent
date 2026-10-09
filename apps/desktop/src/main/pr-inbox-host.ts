@@ -3,10 +3,18 @@ import { homedir } from 'node:os';
 import { PrInboxIpc, type PrReadOptions } from '@vela/shared';
 import { PullRequestInboxService, validateTarget, safeGithubUrl } from '@vela/workspace';
 import { listOpenTargets, openInTarget } from './open-targets';
+import type { PrReviewResponseService } from './pr-review-response-service';
 
 export class PrInboxHost {
   private requests = new Map<string, AbortController>();
-  constructor(private readonly service = new PullRequestInboxService()) {}
+  private responseService: PrReviewResponseService | null = null;
+  constructor(readonly service = new PullRequestInboxService()) {}
+  /** 回应审阅意见依赖会话运行时，运行时晚于本 host 创建，所以事后注入。 */
+  setResponses(service: PrReviewResponseService): void { this.responseService = service; }
+  private responses(): PrReviewResponseService {
+    if (!this.responseService) throw new Error('审阅回应功能尚未就绪，请稍后重试');
+    return this.responseService;
+  }
   private sender(event: IpcMainInvokeEvent): number {
     if (event.senderFrame !== event.sender.mainFrame) throw new Error('只允许 Vela 主页面访问 Pull Request');
     return event.sender.id;
@@ -43,6 +51,21 @@ export class PrInboxHost {
       this.sender(event); const options = this.options(raw);
       return this.service.comment(target, body, options.identityKey, options.requestId);
     });
+    ipcMain.handle(PrInboxIpc.responsePrepare, (event, target, raw) => this.read(event, raw, (o, signal) => this.responses().prepare(target, o.identityKey, signal)));
+    ipcMain.handle(PrInboxIpc.responseReview, (event, runId, raw) => this.read(event, raw, (o, signal) => this.responses().review(runId, o.identityKey, signal)));
+    ipcMain.handle(PrInboxIpc.responseRuns, (event, target) => { this.sender(event); return this.responses().runsFor(validateTarget(target)); });
+    // Starting, publishing and discarding change files or GitHub; like comment they finish even if the view goes away.
+    ipcMain.handle(PrInboxIpc.responseStart, (event, input, raw) => {
+      this.sender(event); const options = this.options(raw);
+      return this.responses().start(input, options.identityKey, options.requestId);
+    });
+    ipcMain.handle(PrInboxIpc.responsePublish, (event, input) => {
+      this.sender(event);
+      if (!input || typeof input !== 'object') throw new Error('无效发布请求');
+      this.options({ requestId: input.requestId, identityKey: input.identityKey });
+      return this.responses().publish(input);
+    });
+    ipcMain.handle(PrInboxIpc.responseDiscard, (event, runId, removeTree) => { this.sender(event); return this.responses().discard(runId, removeTree); });
     ipcMain.handle(PrInboxIpc.cancel, (event, requestId) => {
       const sender = this.sender(event);
       const options = this.options({ requestId }, false);

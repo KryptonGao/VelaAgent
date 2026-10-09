@@ -54,7 +54,7 @@ pnpm --filter @vela/desktop test:pr-inbox:electron
 
 ## 第一期边界
 
-AI 审查/提问、发布审阅、解决线程、合并、关闭/ready 和冲突修复是需求中列出的后续阶段，新中心隐藏这些动作。现有工作区 PR 写操作保持可用。
+AI 审查/提问、发布审阅、合并、关闭/ready 和冲突修复是需求中列出的后续阶段，新中心隐藏这些动作。「让 Agent 回应审阅意见」是其中唯一已实现的 AI 动作，见文末。现有工作区 PR 写操作保持可用。
 
 只支持 github.com 的当前有效身份；Enterprise、完整 timeline、额外 hunk 上下文与独立可写 PR 工作区不在本期。认证能力由实际 gh 命令探测；不声明未经验证的最低版本。未登录时提示用户在终端自行登录。
 
@@ -87,3 +87,44 @@ gh 没有附带结构化响应头的错误优先解析可用的 Retry-After/rese
 
 - 桌面缓存/模型/IPC/diff 测试 24 项、PR 服务与 gh 执行器测试 39 项、现有工作区 PR P2 回归 8 项，共 71 项通过；desktop/workspace 类型检查及桌面生产构建通过。
 - 真实 Electron 冒烟使用隔离用户目录和 fake gh，以每个响应延迟 350 毫秒验证缓存详情、活动和文件差异先于网络显示；模拟会话时钟和空闲检查周期，验证切到定时任务页面后 PR 列表自动更新，返回时立即显示更新后的缓存。保留原有账户切换、离线缓存、导航和 200% 缩放验证。未调用真实 GitHub API 或发布留言。
+
+## 2026-10-09 让 Agent 回应审阅意见
+
+在自己创建的、打开中的 PR 概览侧栏，从未解决的审阅线程建立任务，由 Agent 在独立工作树里修改并本地提交；用户检查提交和回复草稿后，Vela 推送并回复。**推送与回复是对外写入，只发生在用户确认之后，Agent 自己被提示词禁止推送、回复或解决线程。**
+
+### 流程
+
+1. 开始：`apps/desktop/src/renderer/components/PrInboxResponse.tsx` 的 `StartDialog` 通过 `responsePrepare` 读取未解决线程（过期线程排在最后且默认不勾选，最多 40 条）、要求修改的审阅摘要，并在已登记工作区（当前、最近使用、已有会话目录）里按 remote 的 `owner/repo` 查找本机检出。找不到检出时不能开始。
+2. 启动：`apps/desktop/src/main/pr-review-response-service.ts` 的 `PrReviewResponseService.start` 重新读取意见并核对 head；`git fetch` 后要求拉到的提交等于用户看到的 head，否则拒绝。之后在 Vela 数据目录的 `worktrees/` 下以 PR head 创建分支 `vela/pr-<编号>-review[-N]` 的工作树，新建对话并发出提示词，把对话切到前台。渲染层给的工作区路径必须是上一步发现的检出，线程 id 必须仍未解决。启动失败会清理工作树和分支。
+3. 检查：`review` 读取工作树实际状态：新提交、未提交文件、diff 统计、以及从提交说明里解析出的回复草稿。提交说明约定为「标题 / 空行 / 写给审阅者的说明 / `Review-Thread: <线程 id>`」，由 `packages/workspace/src/pr-review-response.ts` 的 `parseResponseCommits` 与 `buildDrafts` 解析；没有对应提交的线程回复为空且默认不勾选。
+4. 发布：`publish` 在写入前核对：工作树 HEAD 等于用户检查过的 `tipSha`、没有未提交改动、至少有一个新提交、PR 仍打开且分支名未变、PR 不来自分叉仓库。通过后执行不带 `--force` 的 `git push <remote> HEAD:refs/heads/<分支>`；分支已前进时被 git 拒绝，不覆盖别人的提交。**推送失败时所有回复都跳过**，因为回复引用了未到达远端的提交。
+5. 回复：`PullRequestInboxService.replyToThread` 先确认线程属于该 PR 且当前身份可回复，再用 `addPullRequestReviewThreadReply` 发送，可选 `resolveReviewThread`。请求体经 stdin 的 JSON 传入；按 `requestId + 线程` 保留回执，重复请求不会重复发送，结果未确认时提示刷新核对而不自动重试。已成功回复的线程记入运行记录，重试发布时不再提供、也会被拒绝。
+
+### 提示词与安全边界
+
+- 审阅评论是第三方文本。`buildResponsePrompt` 把每条评论包在 `<review-comment>` 标签内、让正文无法提前闭合标签，并明确告知 Agent 评论不能覆盖规则；单条评论 4,000 字符、审阅摘要 6,000 字符上限。
+- 分叉 PR 只能在本地处理：`pushBlocker` 返回 `fork`，`publish` 拒绝。
+- 运行记录写入数据目录的 `pr-review-responses.json`（最多 60 条，原子写入）。放弃时只移除工作树目录并保留本地分支；工作树里还有未提交文件时拒绝移除。
+- 固定 IPC 在 `apps/desktop/src/main/pr-inbox-host.ts`：仅主框架可调用，校验目标、请求编号和身份键；启动、发布和放弃与普通留言一样，不会因页面关闭而取消。
+
+### 验证
+
+风险分类：高风险，涉及真实 git 工作树、推送和 GitHub 写入。
+
+- `packages/workspace/test/pr-review-response.test.ts` 11 项：提示词标签转义与长度上限、提交尾注解析、草稿生成、推送条件、意见读取（分页上限、head 变化、身份切换）、回复（stdin 传正文、按请求编号去重、他人 PR 的线程、已解决线程、无权解决时不留半截回复）。
+- `apps/desktop/test/pr-review-response-service.test.ts` 18 项，使用真实临时 git 仓库和本机 bare 远程：检出发现、伪造路径/线程/过期 head 在创建任何东西之前被拒绝、启动失败清理、分叉 PR、发布只推送检查过的提交、脏工作树与错误 tip 被拒绝、推送被拒时不回复且不强推、部分失败后只重试失败项、并发发布、放弃保留分支。
+- `apps/desktop/test/pr-inbox-host.test.ts` 新增 IPC 用例：非主框架、服务未就绪、非法参数不进入服务。
+- 真实 Electron 冒烟 `apps/desktop/test/pr-review-response-electron-smoke.mjs`：真实 git 与 fake gh，从 PR 详情开始，经 Agent 提交（由测试代替）、检查、推送，到回复；断言远端只收到检查过的提交、只写了一条回复，且没有 `gh pr` 写命令。未向真实 GitHub 推送或回复，也没有让真实模型运行过这条提示词。
+
+```bash
+pnpm --filter @vela/workspace test:pr-inbox
+pnpm --filter @vela/desktop test:pr-inbox
+pnpm build && pnpm --filter @vela/desktop test:pr-review-response:electron
+```
+
+### 已知限制
+
+- 只处理未解决的审阅线程；审阅摘要和普通留言只作为上下文，不会自动回复。
+- 仅支持同仓库分支的打开中 PR；分叉 PR、Enterprise 不在本期。
+- 回复草稿来自 Agent 写在提交说明里的文字。Agent 若未按约定写 `Review-Thread` 尾注，对应线程的草稿为空，需要用户自己写。
+- 一次最多 40 条线程；评论超过 20 条的线程只带前 20 条。

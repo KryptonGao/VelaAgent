@@ -5,6 +5,7 @@ import { DiffPane } from './DiffPane';
 import { PrCheckStatus, PrStateBadge } from './PrInboxPage';
 import { PrMarkdown } from './PrInboxMarkdown';
 import { PrActivity } from './PrInboxActivity';
+import { PrResponsePanel } from './PrInboxResponse';
 import { usePrInboxCache } from '../hooks/usePrInboxCache';
 
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
@@ -37,7 +38,7 @@ function fileStatusLabel(value: string): string {
   return labels[value] ? tr(...labels[value]) : value;
 }
 
-export function PrInboxDetailView({ target, identityKey, active, onBack, related, summary }: { summary: PrInboxItem | null; target: PrTarget; identityKey: string; active: boolean; onBack: () => void; related: boolean }) {
+export function PrInboxDetailView({ target, identityKey, active, onBack, related, summary, onOpenConversation }: { summary: PrInboxItem | null; target: PrTarget; identityKey: string; active: boolean; onBack: () => void; related: boolean; onOpenConversation: (id: string) => void }) {
   const { cache, api } = usePrInboxCache();
   const detail = cache.getDetail(target, identityKey);
   const detailRef = useRef(detail); detailRef.current = detail;
@@ -112,6 +113,7 @@ export function PrInboxDetailView({ target, identityKey, active, onBack, related
           <PrMarkdown text={detail.body || tr('没有描述', 'No description')} target={target}/>
           <PrActivity key={detail.item.headSha} detail={detail} active={active} draft={commentDraft} onDraft={setCommentDraft} posted={postedComments} submitting={commentBusy} submitError={commentError} notice={commentNotice} onSubmit={submitComment}/>
         </article><aside className="pr-inbox-checks">
+          <PrResponsePanel detail={detail} active={active} onOpenConversation={onOpenConversation} onPublished={() => void refresh(true, true)}/>
           <section className="pr-inbox-status-list">
             <div><h2>{tr('合并状态', 'Merge status')}</h2><p className={`pr-inbox-status-line ${detail.item.mergeable === 'CONFLICTING' ? 'tone-bad' : detail.item.mergeable === 'MERGEABLE' ? 'tone-good' : ''}`}>{detail.item.mergeable === 'CONFLICTING' ? tr('存在代码冲突', 'Merge conflicts') : detail.item.mergeable === 'MERGEABLE' ? tr('无代码冲突', 'No code conflicts') : tr('合并能力未知', 'Mergeability unknown')}</p>
               {detail.item.mergeStateStatus !== 'DIRTY' && <p className="pr-inbox-status-sub">{mergeStateLabel(detail.item.mergeStateStatus)}</p>}</div>

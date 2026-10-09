@@ -1,0 +1,78 @@
+.update-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface-subtle);
+  min-width: 0;
+}
+.update-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.update-card-main {
+  flex: 1;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.update-version { font-size: 16px; font-weight: 650; color: var(--text-primary); }
+.update-status { font-size: 15px; color: var(--text-secondary); line-height: 1.5; }
+.update-status.error { color: var(--danger); }
+.update-sub { font-size: 14px; color: var(--text-muted); line-height: 1.5; }
+.update-detail { overflow-wrap: anywhere; }
+.update-progress {
+  height: 4px;
+  margin-top: 4px;
+  border-radius: 99px;
+  background: var(--border-subtle);
+  overflow: hidden;
+}
+.update-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent-blue);
+  transition: width var(--transition-smooth);
+}
+.update-notes summary { cursor: pointer; font-size: 15px; color: var(--text-secondary); }
+.update-notes-body {
+  margin-top: 10px;
+  max-height: 320px;
+  overflow: auto;
+  font-size: 15px;
+}
+
+.update-notice {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 90;
+  width: min(380px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  background: var(--bg-card-surface);
+  box-shadow: var(--shadow-dock);
+  animation: update-notice-in var(--transition-enter) both;
+}
+.update-notice-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.update-notice-text strong { font-size: 15px; font-weight: 650; color: var(--text-primary); }
+.update-notice-text span { font-size: 14px; color: var(--text-muted); line-height: 1.5; }
+.update-notice-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+@keyframes update-notice-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .update-notice { animation: none; }
+  .update-progress > span { transition: none; }
+}

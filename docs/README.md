@@ -17,6 +17,8 @@
 | 文档 | 受众 | 内容 |
 | --- | --- | --- |
 | [development.md](./development.md) | 开发者 | 开发版与安装版的资料目录、同步正式版资料、开发工具，以及界面设置与会话记录的保存位置。 |
+| [updates.md](./updates.md) | 使用者与维护者 | 应用内更新：仅依赖 GitHub Release 的检查、自动下载、Ed25519 验签、退出时替换应用，以及发版签名步骤与限制。 |
+| [checkpoints.md](./checkpoints.md) | 使用者与开发者 | 文件检查点的存储：共享 blob 池与硬链接、stat 缓存、保留策略与总量上限、设置页的清理，以及已知限制。 |
 | [pi-1.0-migration.md](./pi-1.0-migration.md) | 开发者 | Pi 1.0 精确版本迁移、接口适配、依赖与打包检查、验证结果和未验证项。 |
 | [mcp.md](./mcp.md) | 使用者与开发者 | MCP 服务器的配置、项目信任、工具曝光、只读授权、会话生命周期与定向验收。 |
 | [memory.md](./memory.md) | 使用者与开发者 | 项目记忆与全局记忆的目录、作用域、加载与刷新时机、写入权限、设置页管理、worktree 行为与验证。 |
@@ -24,7 +26,7 @@
 | [scheduled-tasks.md](./scheduled-tasks.md) | 使用者与开发者 | 定时任务的时间格式、执行与权限、错过与并发策略、存储与恢复、实现与验证。 |
 | [requirements/version-control.md](./requirements/version-control.md) | 产品与开发者 | 版本控制需求：Git/GH CLI 分工、Commit 与同步、提交关系图、PR、AI 文案辅助及验收标准；P0–P2 已实现，P3 尚未实现。 |
 | [requirements/pull-requests.md](./requirements/pull-requests.md) | 产品与开发者 | Pull Request 中心方案：仅经 GH CLI 访问 GitHub，跨仓库关联查询、分页去重、概览与 diff、同步及验收；第一期读取闭环已实现，AI 与远程写入留待后续。 |
-| [pr-inbox.md](./pr-inbox.md) | 使用者与开发者 | Pull Request 中心的已实现能力、gh/IPC/缓存结构、针对性验证和第一期边界。 |
+| [pr-inbox.md](./pr-inbox.md) | 使用者与开发者 | Pull Request 中心的已实现能力、gh/IPC/缓存结构、针对性验证和第一期边界，以及让 Agent 回应审阅意见（工作树修改、确认后推送并回复）。 |
 | [task-recipes.md](./task-recipes.md) | 使用者与开发者 | 任务配方 P0/P1/P2 的使用、结构化阶段、分支审批与重试、团队共享、效果比较，以及验证和边界。 |
 | [requirements/task-recipes.md](./requirements/task-recipes.md) | 产品与开发者 | 任务配方需求基线：参数化模板、预览、新对话启动、版本快照与使用记录；P0/P1/P2 已实现。 |
 | [plan-mode.md](./plan-mode.md) | 使用者 | Plan 模式的工作方式：规划流程、Plan Document、revision、批准与执行、只读限制和常见问题。 |

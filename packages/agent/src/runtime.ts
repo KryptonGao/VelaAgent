@@ -11,13 +11,14 @@ import { RecipeGenerator, parseRecipeGenerateInput } from './recipe-generator';
 import type { RecipeExecution, RecipeRun, RecipeStageSubmission, RecipeSubmitResult, RecipeStageEvidence, RecipeUseDraft, ScheduledTaskInput, SandboxExecutionContext, SandboxMode, ScheduledTaskService } from "@vela/shared";
 import type { McpCatalog, McpCatalogInput, McpServerInput, McpServerTarget, McpEnabledInput, McpProjectTrustInput, McpToolReadOnlyInput, McpStatusEvent, MemoryLoadReport } from "@vela/shared";
 import { browserUseInstructions, createBrowserTools, type BrowserReplService, type BrowserReplPermission } from "./browser-use";
-import { TurnCheckpoints, changedPaths, type TurnCheckpoint } from "./turn-checkpoints";
+import { TurnCheckpoints, changedPaths, sharedDirectory, type TurnCheckpoint } from "./turn-checkpoints";
+import { checkpointUsage, cleanCheckpoints, defaultCheckpointPolicy } from "./checkpoint-storage";
 import type { TraceRecorder } from "./trace";
 import { ConversationTraces, subscribeTracedSession } from "./runtime-tracing";
 import { SkillLibrary } from "./runtime-skills";
 import { ToolLoadout } from "./runtime-tools";
 import { RecipeSubmitOutcome, stageResponseEvidence, suspendAutomaticRecovery } from "./recipe-stage";
-import type { BranchConversationOptions, CheckpointRestorePreview, CheckpointTimeline, TraceSummaryRequest, TraceUpdate } from "@vela/shared";
+import type { BranchConversationOptions, CheckpointCleanResult, CheckpointRestorePreview, CheckpointStorageUsage, CheckpointTimeline, TraceSummaryRequest, TraceUpdate } from "@vela/shared";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -325,6 +326,7 @@ export class AgentRuntime {
   private readonly memoryLoads = new Map<string, MemoryLoadReport[]>();
   private mcpPoll: ReturnType<typeof setInterval> | null = null;
   private mcpPolling = false;
+  private checkpointSweep: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
   private gate: Promise<void> = Promise.resolve();
   private readonly rewindingWorkspaces = new Set<string>();
@@ -368,6 +370,9 @@ export class AgentRuntime {
     this.initializePromise = this.initialize();
     this.mcpPoll = setInterval(() => { void this.pollMcpChanges(); }, 1000);
     this.mcpPoll.unref();
+    // Merge duplicate checkpoint blobs and apply the retention policy shortly after startup, away from the first paint.
+    this.checkpointSweep = setTimeout(() => { void this.cleanCheckpointStorage().catch(() => undefined); }, 2 * 60 * 1000);
+    this.checkpointSweep.unref();
   }
 
   get activeConversationId(): string | null {
@@ -898,7 +903,18 @@ export class AgentRuntime {
   }
 
   private checkpoints(entry: Conversation) {
-    return new TurnCheckpoints<RewindMetadata>(join(this.options.agentDir, "checkpoints", entry.id), entry.snapshot.cwd, this.options.agentDir);
+    const root = join(this.options.agentDir, "checkpoints");
+    return new TurnCheckpoints<RewindMetadata>(join(root, entry.id), entry.snapshot.cwd, this.options.agentDir, sharedDirectory(root));
+  }
+
+  /** Disk used by file checkpoints. */
+  getCheckpointStorage(): Promise<CheckpointStorageUsage> {
+    return checkpointUsage(join(this.options.agentDir, "checkpoints"));
+  }
+
+  /** Merge duplicate files, drop checkpoints beyond the retention policy and delete files nothing references. */
+  cleanCheckpointStorage(): Promise<CheckpointCleanResult> {
+    return cleanCheckpoints(join(this.options.agentDir, "checkpoints"));
   }
 
   private async finishLatestCheckpoint(entry: Conversation) {
@@ -907,7 +923,10 @@ export class AgentRuntime {
     const branch = entry.sessionManager?.getBranch() ?? [];
     const points = await checkpoints.list();
     const point = [...branch].reverse().map(item => points.find(point => point.userEntryId === item.id)).find(Boolean);
-    if (point) await checkpoints.finish(point, point.userEntryId);
+    if (point) {
+      await checkpoints.finish(point, point.userEntryId);
+      await checkpoints.prune(defaultCheckpointPolicy.maxPointsPerConversation).catch(() => undefined);
+    }
   }
 
   /**
@@ -1876,6 +1895,8 @@ export class AgentRuntime {
 
   dispose(): Promise<void> {
     this.disposed = true;
+    if (this.checkpointSweep) clearTimeout(this.checkpointSweep);
+    this.checkpointSweep = null;
     if (this.mcpPoll) clearInterval(this.mcpPoll);
     this.mcpPoll = null;
     const closing: Promise<void>[] = [...this.sessionStarting.values()].map(starting => starting.then(() => undefined, () => undefined));
@@ -2840,6 +2861,7 @@ export class AgentRuntime {
         if (user) {
           if (this.overlappingCheckpointRuns.has(entry.id)) checkpoint.unavailableReason = "这轮执行时有其他对话同时更改工作区，无法安全回退";
           await this.checkpoints(entry).finish(checkpoint, user.id);
+          await this.checkpoints(entry).prune(defaultCheckpointPolicy.maxPointsPerConversation).catch(() => undefined);
         }
       }
     }

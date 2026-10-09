@@ -11,6 +11,7 @@ import { PlanDocumentProvider } from "./components/PlanPanel";
 import { ScreenPresence } from "./components/MotionPresence";
 import { Presence } from "./components/Presence";
 import { SettingsView } from "./components/SettingsView";
+import { UpdateNotice } from "./components/UpdateNotice";
 import { TaskRecipesPage, type RecipeMessageSeed } from "./components/TaskRecipesPage";
 import { RecipeActionsContext } from "./components/recipe-actions-context";
 import { ScheduledTasksPage } from "./components/ScheduledTasksPage";
@@ -781,7 +782,8 @@ export function App() {
                   </Presence>
                 </FilePreviewProvider>
                 <Presence present={prInboxOpen} keepMounted className="main-stage-pane scheduled-tasks-stage">
-                  <PrInboxPage active={prInboxOpen} sidebarCollapsed={leftCollapsed} onToggleSidebar={toggleLeft} />
+                  <PrInboxPage active={prInboxOpen} sidebarCollapsed={leftCollapsed} onToggleSidebar={toggleLeft}
+                    onOpenConversation={(id) => { setPrInboxOpen(false); void session.switchTo(id); }} />
                 </Presence>
                 <Presence present={recipesOpen} className="main-stage-pane scheduled-tasks-stage">
                   <TaskRecipesPage catalog={models.catalog} workspace={project.workspace?.current ?? null}
@@ -836,6 +838,7 @@ export function App() {
           onSave={session.rename}
           onClose={() => setRenamingConversation(null)}
         /> : null}
+        {onboardingComplete ? <UpdateNotice locale={preferences.locale} /> : null}
         </RecipeActionsContext.Provider>
       </AppLocaleProvider>
     </FileIconThemeProvider>

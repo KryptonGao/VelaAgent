@@ -46,7 +46,7 @@ export function PrUpdatedTime({ value }: { value: string }) {
 }
 function errorText(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 
-export function PrInboxPage({ active, sidebarCollapsed, onToggleSidebar }: { active: boolean; sidebarCollapsed: boolean; onToggleSidebar: () => void }) {
+export function PrInboxPage({ active, sidebarCollapsed, onToggleSidebar, onOpenConversation }: { active: boolean; sidebarCollapsed: boolean; onToggleSidebar: () => void; onOpenConversation: (id: string) => void }) {
   const { cache, api, version } = usePrInboxCache();
   const [query, setQuery] = useState<PrInboxQuery>(defaultPrInboxQuery);
   const [relation, setRelation] = useState<PrRelation | 'all'>('all');
@@ -147,7 +147,7 @@ export function PrInboxPage({ active, sidebarCollapsed, onToggleSidebar }: { act
       <button type="button" disabled={loading} onClick={() => void refresh(true)}>{loading ? tr('读取中…', 'Loading…') : tr('刷新', 'Refresh')}</button>
     </header>
     {selected && identityKey ? <PrInboxDetailView key={`${identityKey}:${selected.owner}/${selected.repo}#${selected.number}`} active={active}
-      summary={selectedItem} target={selected} identityKey={identityKey} onBack={() => setSelected(null)} related={!!selectedItem} /> :
+      summary={selectedItem} target={selected} identityKey={identityKey} onBack={() => setSelected(null)} related={!!selectedItem} onOpenConversation={onOpenConversation} /> :
       <div ref={scrollRef} className="pr-inbox-scroll">
         <div className="pr-inbox-content">
           <div className="pr-inbox-sticky">

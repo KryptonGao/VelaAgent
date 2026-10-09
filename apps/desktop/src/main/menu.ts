@@ -5,6 +5,7 @@ import desktopPackage from "../../package.json";
 const repoUrl = "https://github.com/KryptonGao/VelaHarness";
 let activeLocale: AppLocale = "zh-CN";
 let diagnostics: DiagnosticsMenuActions | null = null;
+let checkForUpdates: (() => void) | null = null;
 
 export interface DiagnosticsMenuActions {
   exportLogs(): void;
@@ -35,6 +36,12 @@ export function setDiagnosticsMenuActions(actions: DiagnosticsMenuActions): void
   installApplicationMenu();
 }
 
+/** 「检查更新…」由主进程直接处理并用系统对话框反馈。 */
+export function setUpdateMenuAction(action: () => void): void {
+  checkForUpdates = action;
+  installApplicationMenu();
+}
+
 function sendMenuAction(action: MenuAction): void {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
   win?.webContents.send(IpcChannel.appMenuAction, action);
@@ -55,6 +62,7 @@ export function installApplicationMenu(): void {
             label: name,
             submenu: [
               { role: "about", label: text(`关于 ${name}`, `About ${name}`) },
+              ...(checkForUpdates ? [{ label: text("检查更新…", "Check for Updates…"), click: () => checkForUpdates?.() } satisfies MenuItemConstructorOptions] : []),
               { type: "separator" },
               { role: "services", label: text("服务", "Services") },
               { type: "separator" },
@@ -109,6 +117,9 @@ export function installApplicationMenu(): void {
         ...(isMac
           ? []
           : [{ role: "about", label: text(`关于 ${name}`, `About ${name}`) } satisfies MenuItemConstructorOptions]),
+        ...(checkForUpdates && !isMac
+          ? [{ label: text("检查更新…", "Check for Updates…"), click: () => checkForUpdates?.() } satisfies MenuItemConstructorOptions]
+          : []),
         {
           label: text("项目主页", "Project Website"),
           click: () => void shell.openExternal(repoUrl),

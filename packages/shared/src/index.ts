@@ -13,6 +13,8 @@ export * from "./trace";
 export * from "./redaction";
 export * from "./logging";
 import type { LogsApi } from "./logging";
+export * from "./updates";
+import type { UpdatesApi } from "./updates";
 import type { TraceSnapshot, TraceDetails, TraceUpdate } from "./trace";
 export const conversationTitleMaxLength = 120;
 
@@ -29,6 +31,8 @@ export const IpcChannel = {
   sessionRewind: "session:rewind",
   sessionCheckpoints: "session:checkpoints",
   sessionRestoreCheckpoint: "session:restore-checkpoint",
+  checkpointStorage: "storage:checkpoints",
+  checkpointStorageClean: "storage:clean-checkpoints",
   sessionMessages: "session:messages",
   sessionSummarizeThinking: "session:summarize-thinking",
   sessionTrace: "session:trace",
@@ -789,6 +793,22 @@ export interface CheckpointTimeline {
   /** 回到对话开始之前；还没有消息时为 null。 */
   start: CheckpointRestorePreview | null;
   turns: ConversationCheckpoint[];
+}
+
+/** 检查点占用的磁盘空间；多个对话共用的同一份文件内容只算一次。 */
+export interface CheckpointStorageUsage {
+  bytes: number;
+  conversations: number;
+  points: number;
+}
+
+/** 检查点的保留策略：每个对话保留最近的若干轮，所有对话合计的不同文件版本不超过上限。 */
+export const checkpointRetention = { maxPointsPerConversation: 50, maxBytes: 4 * 1024 ** 3 } as const;
+
+export interface CheckpointCleanResult {
+  freedBytes: number;
+  removedPoints: number;
+  usage: CheckpointStorageUsage;
 }
 
 /** 从检查点分叉；restoreFiles 会把工作区文件恢复到这一轮之后，原对话后续轮次的改动随之撤销。 */
@@ -2646,6 +2666,8 @@ export interface VelaApi extends McpApi, PluginApi {
   scheduledTasks?: import("./scheduled-tasks").ScheduledTasksApi;
   /** 应用日志：写入、级别设置与诊断包导出。 */
   logs?: LogsApi;
+  /** 应用内更新：从 GitHub Release 检查、下载并校验新版本。 */
+  updates?: UpdatesApi;
   browser?: import("./browser").BrowserPanelApi;
   platform: string;
   /** Present in the desktop app; browser-only previews use localStorage. */
@@ -2679,6 +2701,10 @@ export interface VelaApi extends McpApi, PluginApi {
   getCheckpoints(conversationId: string): Promise<CheckpointTimeline>;
   /** 回到第 turnIndex 轮之后（-1 表示对话开始），移除其后各轮并恢复文件。 */
   restoreCheckpoint(conversationId: string, turnIndex: number): Promise<{ state: AppState; messages: TranscriptMessage[] }>;
+  /** 检查点占用的磁盘空间。 */
+  getCheckpointStorage(): Promise<CheckpointStorageUsage>;
+  /** 合并重复文件、删除超出保留策略的旧检查点和无人引用的文件。 */
+  cleanCheckpointStorage(): Promise<CheckpointCleanResult>;
   /** 取消归档,对话回到侧边栏。 */
   unarchiveConversation(id: string): Promise<AppState>;
   /** 读取某个对话的完整历史(用于应用重启后恢复界面消息)。 */

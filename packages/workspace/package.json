@@ -13,6 +13,6 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --experimental-transform-types --test 'test/*.test.ts'",
-    "test:pr-inbox": "node --experimental-transform-types --test test/gh-run.test.ts test/pr-inbox.test.ts"
+    "test:pr-inbox": "node --experimental-transform-types --test test/gh-run.test.ts test/pr-inbox.test.ts test/pr-review-response.test.ts"
   }
 }

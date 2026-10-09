@@ -128,6 +128,8 @@ import {
   type ThinkingLevel,
   type TranscriptMessage,
   LogsIpc,
+  UpdatesIpc,
+  type UpdateState,
   type VelaApi,
   type WorkspaceEvent,
   type WorkspaceFileContent,
@@ -145,6 +147,12 @@ const api: VelaApi = {
     activity: (target, kind, cursor, headSha, threadId, options) => ipcRenderer.invoke(PrInboxIpc.activity, target, kind, cursor, headSha, threadId, options),
     files: (target, page, headSha, baseSha, options) => ipcRenderer.invoke(PrInboxIpc.files, target, page, headSha, baseSha, options),
     comment: (target, body, options) => ipcRenderer.invoke(PrInboxIpc.comment, target, body, options),
+    responsePrepare: (target, options) => ipcRenderer.invoke(PrInboxIpc.responsePrepare, target, options),
+    responseStart: (input, options) => ipcRenderer.invoke(PrInboxIpc.responseStart, input, options),
+    responseRuns: target => ipcRenderer.invoke(PrInboxIpc.responseRuns, target),
+    responseReview: (runId, options) => ipcRenderer.invoke(PrInboxIpc.responseReview, runId, options),
+    responsePublish: input => ipcRenderer.invoke(PrInboxIpc.responsePublish, input),
+    responseDiscard: (runId, removeWorktree) => ipcRenderer.invoke(PrInboxIpc.responseDiscard, runId, removeWorktree),
     cancel: id => ipcRenderer.invoke(PrInboxIpc.cancel, id),
     open: (target, url) => ipcRenderer.invoke(PrInboxIpc.open, target, url),
     openTerminal: () => ipcRenderer.invoke(PrInboxIpc.terminal),
@@ -230,6 +238,19 @@ const api: VelaApi = {
     openFolder: () => ipcRenderer.invoke(LogsIpc.openFolder),
     export: options => ipcRenderer.invoke(LogsIpc.export, options),
   },
+  updates: {
+    getState: () => ipcRenderer.invoke(UpdatesIpc.getState),
+    subscribe: (listener) => {
+      const handler = (_event: IpcRendererEvent, state: UpdateState) => listener(state);
+      ipcRenderer.on(UpdatesIpc.state, handler);
+      return () => { ipcRenderer.removeListener(UpdatesIpc.state, handler); };
+    },
+    check: () => ipcRenderer.invoke(UpdatesIpc.check),
+    download: () => ipcRenderer.invoke(UpdatesIpc.download),
+    restart: () => ipcRenderer.invoke(UpdatesIpc.restart),
+    setAutoUpdate: enabled => ipcRenderer.invoke(UpdatesIpc.setAutoUpdate, enabled),
+    openReleasePage: () => ipcRenderer.invoke(UpdatesIpc.openReleasePage),
+  },
   platform: process.platform,
   development: ipcRenderer.sendSync(IpcChannel.appIsDevelopment) ? {
     syncProductionConversations: () => ipcRenderer.invoke(IpcChannel.appSyncProductionConversations) as Promise<ConversationSyncResult>,
@@ -282,6 +303,8 @@ const api: VelaApi = {
   getCheckpoints: (conversationId) => ipcRenderer.invoke(IpcChannel.sessionCheckpoints, conversationId),
   restoreCheckpoint: (conversationId, turnIndex) =>
     ipcRenderer.invoke(IpcChannel.sessionRestoreCheckpoint, conversationId, turnIndex) as Promise<{ state: AppState; messages: TranscriptMessage[] }>,
+  getCheckpointStorage: () => ipcRenderer.invoke(IpcChannel.checkpointStorage),
+  cleanCheckpointStorage: () => ipcRenderer.invoke(IpcChannel.checkpointStorageClean),
   getTrace: (conversationId) => ipcRenderer.invoke(IpcChannel.sessionTrace, conversationId),
   getTraceDetails: (conversationId, nodeId) => ipcRenderer.invoke(IpcChannel.sessionTraceDetails, conversationId, nodeId),
   getMessages: (conversationId: string) =>

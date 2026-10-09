@@ -22,6 +22,7 @@ const suites = {
     { name: "mcp-settings-ui", runner: "node" },
     { name: "memory-settings-ui", runner: "node" },
     { name: "chat-actions-ui", runner: "node" },
+    { name: "updates-ui", runner: "node" },
   ],
   smoke: [
     { name: "pi-sdk-electron-smoke", runner: "node" },
@@ -33,6 +34,7 @@ const suites = {
     { name: "scheduled-tasks-electron-smoke", runner: "node" },
     { name: "task-recipes-electron-smoke", runner: "node" },
     { name: "pr-inbox-electron-smoke", runner: "node" },
+    { name: "pr-review-response-electron-smoke", runner: "node" },
     { name: "notification-sounds-electron-smoke", runner: "electron" },
     { name: "settings-electron-smoke", runner: "electron" },
     { name: "thinking-blur-electron-smoke", runner: "electron" },
