@@ -375,12 +375,15 @@ export interface McpSettingsSectionProps {
   locale: AppLocale;
   workspacePath: string | null;
   conversationId?: string | null;
+  /** 当前对话的目录与工作区不一致：按工作区管理 MCP，不绑定对话。 */
+  detached?: boolean;
 }
 
 export function McpSettingsSection({
   locale,
   workspacePath,
   conversationId,
+  detached = false,
 }: McpSettingsSectionProps) {
   const text = settingsCopy(locale).mcp;
   const [selected, setSelected] = useState<{
@@ -391,7 +394,7 @@ export function McpSettingsSection({
   } | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
-  const needsState = conversationId == null || !workspacePath;
+  const needsState = !detached && (conversationId == null || !workspacePath);
   useEffect(() => {
     if (!needsState || !window.vela) return;
     let active = true;
@@ -436,11 +439,16 @@ export function McpSettingsSection({
       ? selected
       : null;
   // null means no chat, so the state cwd is authoritative even if a stale project path is present.
-  const cwd =
-    conversationId == null
+  const cwd = detached
+    ? (workspacePath ?? "")
+    : conversationId == null
       ? (resolved?.cwd ?? "")
       : (workspacePath ?? resolved?.cwd ?? "");
-  const id = conversationId === undefined ? resolved?.id : conversationId;
+  const id = detached
+    ? null
+    : conversationId === undefined
+      ? resolved?.id
+      : conversationId;
   if (!window.vela?.getMcpCatalog)
     return <p className="settings-note">{text.unavailable}</p>;
   if (needsState && !resolved) {

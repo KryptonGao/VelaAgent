@@ -1,8 +1,10 @@
 import { AgentRuntime, parseThinkingSummaryInput, type RuntimeEvent } from "@vela/agent";
 import {
   IpcChannel,
+  agentControlActions,
   customModelApis,
   thinkingLevels,
+  type AgentControlAction,
   type AgentSettings,
   type AgentStreamEvent,
   type AppState,
@@ -13,6 +15,7 @@ import {
   type CustomModelInput,
   type ImageAttachment,
   type InteractionMode,
+  isAgentBusy,
   isAgentToolName,
   isInteractionMode,
   isRuntimeInstructionMode,
@@ -182,6 +185,16 @@ export class SessionHost {
     ipcMain.handle(IpcChannel.sessionSummarizeThinking, (_event, raw: unknown) => {
       return this.runtime.summarizeThinking(parseThinkingSummaryInput(raw));
     });
+    ipcMain.handle(IpcChannel.sessionAgentControl, (_event, rawConversation: unknown, rawAgent: unknown, rawAction: unknown) => {
+      if (typeof rawAction !== "string" || !(agentControlActions as readonly string[]).includes(rawAction)) {
+        throw new Error("不支持这个子代理操作");
+      }
+      this.runtime.controlAgent(
+        parseConversationId(rawConversation, "对话"),
+        parseId(rawAgent, "Agent"),
+        rawAction as AgentControlAction,
+      );
+    });
     ipcMain.handle(IpcChannel.sessionAgentMessages, (_event, rawConversation: unknown, rawAgent: unknown) => {
       return this.runtime.getAgentMessages(
         parseConversationId(rawConversation, "对话"),
@@ -277,7 +290,7 @@ export class SessionHost {
     if (event.type === "agents") {
       // 子代理改完工作区后刷新 Git；同一个代理只触发一次。
       for (const agent of event.agents) {
-        if (agent.kind === "root" || !agent.mutated || agent.status === "running") continue;
+        if (agent.kind === "root" || !agent.mutated || isAgentBusy(agent.status)) continue;
         if (this.mutatedAgents.has(agent.id)) continue;
         this.mutatedAgents.add(agent.id);
         this.hooks.onAgentMutation?.();

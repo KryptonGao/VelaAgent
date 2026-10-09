@@ -46,6 +46,16 @@ class FakeSession {
     for (const listener of this.listeners) listener({ type: "turn_end" } as AgentSessionEvent);
   }
 
+  tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
+
+  getSessionStats(): { tokens: FakeSession["tokens"] } {
+    return { tokens: { ...this.tokens } };
+  }
+
+  emit(event: AgentSessionEvent): void {
+    for (const listener of this.listeners) listener(event);
+  }
+
   async abort(): Promise<void> {
     this.aborted = true;
     this.release?.();
@@ -359,4 +369,160 @@ it("Browser Host details-only failures mark child steps failed and potentially m
   assert.equal(child.steps.find(step => step.id === "browser-call")?.status, "error");
   assert.equal(child.mutated, true);
   control.dispose();
+});
+
+describe("单个子代理的暂停、继续与取消", () => {
+  const info = (control: AgentControl, id: string) => control.list().find((agent) => agent.id === id)!;
+  const running = (control: AgentControl) =>
+    control.list().filter((agent) => agent.kind !== "root" && agent.status === "running").length;
+
+  /** 子代理先等 gate，再过一次工具调用前的暂停点；被取消时返回「被取消」。 */
+  function gatedHost(host: FakeHost): { openGate: () => void } {
+    let openGate = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      openGate = resolve;
+    });
+    host.sessionFactory = (request) => {
+      const session = new FakeSession();
+      session.responder = async () => {
+        await gate;
+        return (await request.beforeToolCall()) ? "做完了" : "被取消";
+      };
+      return session;
+    };
+    return { openGate };
+  }
+
+  it("暂停在下一次工具调用前生效，继续后跑完并停表", async () => {
+    const { control, host } = createControl();
+    const { openGate } = gatedHost(host);
+    const agent = control.spawn("root-id", { kind: "general", task: "慢任务", name: "slow" });
+    await waitFor(() => info(control, agent.id).status === "running", "开始运行");
+    assert.notEqual(info(control, agent.id).runningSince, null);
+
+    control.pause(agent.id);
+    assert.equal(info(control, agent.id).status, "running");
+    assert.equal(info(control, agent.id).pauseRequested, true);
+
+    openGate();
+    await waitFor(() => info(control, agent.id).status === "paused", "停在工具调用前");
+    const paused = info(control, agent.id);
+    assert.equal(paused.pauseRequested, false);
+    assert.equal(paused.runningSince, null);
+    const frozen = paused.activeMs;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(info(control, agent.id).activeMs, frozen, "暂停期间不计时");
+
+    control.resume(agent.id);
+    await waitFor(() => info(control, agent.id).status === "completed", "继续后完成");
+    assert.equal(info(control, agent.id).runningSince, null);
+    assert.equal(host.rootMessages.at(-1)?.status, "completed");
+  });
+
+  it("暂停期间让出并发槽位，继续时重新排队", async () => {
+    const { control, host } = createControl();
+    const { openGate } = gatedHost(host);
+    const target = control.spawn("root-id", { kind: "general", task: "会被暂停", name: "target" });
+    await waitFor(() => info(control, target.id).status === "running", "目标开始运行");
+    control.pause(target.id);
+    openGate();
+    await waitFor(() => info(control, target.id).status === "paused", "目标已暂停");
+
+    host.sessionFactory = () => {
+      const session = new FakeSession();
+      session.responder = async (_text, current) => {
+        await current.blockUntilReleased();
+        return "占位结束";
+      };
+      return session;
+    };
+    for (let index = 0; index < maxConcurrentAgents; index += 1) {
+      control.spawn("root-id", { kind: "explore", task: `占位 ${index}`, name: `hold-${index}` });
+    }
+    await waitFor(() => running(control) === maxConcurrentAgents, "暂停的代理没有占着槽位");
+
+    control.resume(target.id);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(info(control, target.id).status, "paused", "槽位满时继续要排队");
+    for (const [path, session] of host.sessions) {
+      if (path.includes("hold-")) await session.abort();
+    }
+    await waitFor(() => info(control, target.id).status === "completed", "拿到槽位后完成");
+  });
+
+  it("取消已暂停的代理：拦下工具调用，不回投父代理", async () => {
+    const { control, host } = createControl();
+    const { openGate } = gatedHost(host);
+    const agent = control.spawn("root-id", { kind: "general", task: "要取消", name: "doomed" });
+    await waitFor(() => info(control, agent.id).status === "running", "开始运行");
+    control.pause(agent.id);
+    openGate();
+    await waitFor(() => info(control, agent.id).status === "paused", "已暂停");
+
+    control.cancel(agent.id);
+    await waitFor(() => info(control, agent.id).status === "aborted", "已取消");
+    assert.equal(host.sessions.get("/root/doomed")?.aborted, true);
+    assert.equal(host.rootMessages.length, 0);
+    assert.equal(info(control, agent.id).runningSince, null);
+  });
+
+  it("取消连带后代，已完成的兄弟不受影响", async () => {
+    const { control, host } = createControl();
+    host.sessionFactory = (request) => {
+      const session = new FakeSession();
+      session.responder = async (_text, current) => {
+        if (request.path === "/root/done") return "早就完成";
+        await current.blockUntilReleased();
+        return "没做完";
+      };
+      return session;
+    };
+    const done = control.spawn("root-id", { kind: "general", task: "已完成", name: "done" });
+    await waitFor(() => info(control, done.id).status === "completed", "兄弟已完成");
+    const parent = control.spawn("root-id", { kind: "general", task: "父", name: "parent" });
+    await waitFor(() => info(control, parent.id).status === "running", "父开始运行");
+    const child = control.spawn(parent.id, { kind: "general", task: "子", name: "child" });
+    await waitFor(() => info(control, child.id).status === "running", "子开始运行");
+
+    control.cancel(parent.id);
+    await waitFor(
+      () => info(control, parent.id).status === "aborted" && info(control, child.id).status === "aborted",
+      "父子都已取消",
+    );
+    assert.equal(info(control, done.id).status, "completed");
+    assert.equal(host.rootMessages.filter((message) => message.status === "aborted").length, 0);
+  });
+
+  it("状态不允许时拒绝操作", async () => {
+    const { control } = createControl();
+    const agent = control.spawn("root-id", { kind: "explore", task: "快任务", name: "quick" });
+    await waitFor(() => info(control, agent.id).status === "completed", "完成");
+    assert.throws(() => control.pause(agent.id), /正在运行/);
+    assert.throws(() => control.resume(agent.id), /没有被暂停/);
+    assert.throws(() => control.cancel(agent.id), /没有在运行/);
+    assert.throws(() => control.pause("root-id"), /主代理/);
+    assert.throws(() => control.cancel("missing"), /不存在/);
+  });
+
+  it("按会话统计累计 token，并只计运行耗时", async () => {
+    const { control, host } = createControl();
+    host.sessionFactory = () => {
+      const session = new FakeSession();
+      session.responder = async (_text, current) => {
+        current.tokens = { input: 900, output: 120, cacheRead: 3000, cacheWrite: 50, total: 4070 };
+        current.emit({ type: "message_end", message: { role: "assistant", content: [] } } as unknown as AgentSessionEvent);
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        return "统计完成";
+      };
+      return session;
+    };
+    const agent = control.spawn("root-id", { kind: "explore", task: "统计", name: "stats" });
+    await waitFor(() => info(control, agent.id).usage.total === 4070, "token 实时刷新");
+    assert.deepEqual(info(control, agent.id).usage, { input: 900, output: 120, cacheRead: 3000, cacheWrite: 50, total: 4070 });
+    await waitFor(() => info(control, agent.id).status === "completed", "完成");
+    const done = info(control, agent.id);
+    assert.ok(done.activeMs >= 20, `耗时应覆盖运行片段，实际 ${done.activeMs}`);
+    assert.equal(done.runningSince, null);
+    assert.equal(control.storedAgents().find((item) => item.id === agent.id)?.usage.total, 4070);
+  });
 });

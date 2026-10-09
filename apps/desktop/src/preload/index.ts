@@ -5,6 +5,7 @@ import {
   TaskRecipesIpc,
   ScheduledTasksIpc,
   type ScheduledTasksState,
+  type AgentControlAction,
   type AgentSettings,
   type ConversationSyncResult,
   type McpStatusEvent,
@@ -313,6 +314,8 @@ const api: VelaApi = {
   summarizeThinking: (input) => ipcRenderer.invoke(IpcChannel.sessionSummarizeThinking, input) as Promise<string>,
   getAgentMessages: (conversationId: string, agentId: string) =>
     ipcRenderer.invoke(IpcChannel.sessionAgentMessages, conversationId, agentId) as Promise<TranscriptMessage[]>,
+  controlAgent: (conversationId: string, agentId: string, action: AgentControlAction) =>
+    ipcRenderer.invoke(IpcChannel.sessionAgentControl, conversationId, agentId, action) as Promise<void>,
   getCatalog: () => ipcRenderer.invoke(IpcChannel.getCatalog) as Promise<ModelCatalog>,
   selectModel: (provider, id) => ipcRenderer.invoke(IpcChannel.selectModel, provider, id) as Promise<AppState>,
   setThinkingLevel: (level: ThinkingLevel) => ipcRenderer.invoke(IpcChannel.setThinkingLevel, level) as Promise<AppState>,

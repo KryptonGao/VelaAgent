@@ -1,4 +1,4 @@
-import type { AgentInfo } from "@vela/shared";
+import { isAgentBusy, type AgentControlAction, type AgentInfo } from "@vela/shared";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { useDismissable } from "../hooks/useDismissable";
 import { useEntryArrival } from "../hooks/useEntryArrival";
@@ -9,7 +9,9 @@ import { useMessages } from "../hooks/useMessages";
 import type { UiMessage } from "../hooks/useSession";
 import { tr, trf } from "../locale";
 import { ActivityIndicator } from "./ActivityIndicator";
-import { AgentStatusMark, agentKindLabel, agentStatusLabel } from "./AgentPanel";
+import {
+  AgentControls, AgentRunStats, AgentStatusMark, agentKindLabel, agentStateText, formatTokenCount, useAgentClock,
+} from "./AgentPanel";
 import { Markdown } from "./Markdown";
 import { Thinking } from "./Thinking";
 import { ToolList } from "./ToolCard";
@@ -27,6 +29,8 @@ interface AgentPaneProps {
   onSwitch: (agentId: string) => void;
   /** 首次展示某个 agent 时回填历史消息。 */
   ensureMessages: (agentId: string) => void;
+  /** 暂停、继续或取消某个子代理。 */
+  onControl: (agentId: string, action: AgentControlAction) => void;
 }
 
 /**
@@ -48,13 +52,14 @@ export function AgentPane(props: AgentPaneProps) {
 
 function VisibleAgentPane({
   agent, agents, messages: providedMessages, messageStore, conversationId = null,
-  toolDisplay, onSwitch, ensureMessages, follow,
+  toolDisplay, onSwitch, ensureMessages, onControl, follow,
 }: AgentPaneProps & { follow: MutableRefObject<AgentFollow> }) {
   const storedMessages = useMessages(messageStore, conversationId, agent.id);
   const messages = messageStore ? storedMessages : providedMessages ?? emptyMessages;
   const agentId = agent.id;
   const scrollRef = useRef<HTMLDivElement>(null);
   const streaming = agent.status === "running";
+  const now = useAgentClock([agent]);
   const arrivalKeys = useMemo(() => messages.flatMap((message) => [message.id,
     ...(message.thinking ? [`${message.id}:thinking`] : []),
     ...(message.tools.length ? [`${message.id}:tools`] : []),
@@ -110,10 +115,12 @@ function VisibleAgentPane({
           <AgentStatusMark status={agent.status} />
           <AgentBreadcrumb agent={agent} agents={agents} onSwitch={onSwitch} />
           <span className="agent-kind">{agentKindLabel(agent.kind)}</span>
-          <span className={`agent-state is-${agent.status}`}>{agentStatusLabel(agent.status)}</span>
+          <span className={`agent-state is-${agent.status}`}>{agentStateText(agent)}</span>
         </div>
         <div className="agent-pane-actions">
-          <AgentRosterMenu agents={agents} activeId={agentId} onSelect={onSwitch} />
+          <AgentRunStats agent={agent} now={now} />
+          <AgentControls agent={agent} onControl={onControl} />
+          <AgentRosterMenu agents={agents} activeId={agentId} onSelect={onSwitch} onControl={onControl} />
         </div>
       </header>
       <div className="agent-pane-scroll" ref={scrollRef} onScroll={onScroll}>
@@ -212,22 +219,28 @@ function AgentBreadcrumb({
   );
 }
 
-/** Agent Tree / Roster：平铺按深度缩进，用来切换右侧显示的 agent。 */
+/** SubAgents 面板：每个子代理的状态、token、耗时，以及单独的暂停 / 继续 / 取消。 */
 function AgentRosterMenu({
   agents,
   activeId,
   onSelect,
+  onControl,
 }: {
   agents: readonly AgentInfo[];
   activeId: string;
   onSelect: (agentId: string) => void;
+  onControl: (agentId: string, action: AgentControlAction) => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useDismissable<HTMLDivElement>(open, () => setOpen(false));
-  const items = agents
-    .filter((item) => item.kind !== "root")
-    .sort((a, b) => a.createdAt - b.createdAt);
+  const items = useMemo(
+    () => agents.filter((item) => item.kind !== "root").sort((a, b) => a.createdAt - b.createdAt),
+    [agents],
+  );
+  const now = useAgentClock(open ? items : []);
   if (items.length === 0) return null;
+  const active = items.filter((item) => isAgentBusy(item.status)).length;
+  const totalTokens = items.reduce((sum, item) => sum + item.usage.total, 0);
   return (
     <div className="agent-roster-menu-anchor" ref={ref}>
       <button
@@ -235,31 +248,46 @@ function AgentRosterMenu({
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
-        title={tr("切换子代理", "Switch subagent")}
-        aria-label={tr("切换子代理", "Switch subagent")}
+        title={tr("子代理面板", "Subagents panel")}
+        aria-label={tr("子代理面板", "Subagents panel")}
         onClick={() => setOpen((value) => !value)}
       >
         <BranchIcon size={13} />
       </button>
       {open ? (
         <div className="agent-roster-menu" role="listbox" aria-label={tr("子代理列表", "Subagent list")}>
+          <div className="agent-roster-summary">
+            <span>{trf("{0} 个子代理 · {1} 个进行中", "{0} subagents · {1} active", items.length, active)}</span>
+            <span className="agent-run-stat" title={tr("所有子代理累计 token", "Total tokens across all subagents")}>
+              {formatTokenCount(totalTokens)} tok
+            </span>
+          </div>
           {items.map((item) => (
-            <button
+            <div
               key={item.id}
-              className={`agent-roster-menu-item${item.id === activeId ? " is-active" : ""}`}
-              type="button"
-              role="option"
-              aria-selected={item.id === activeId}
+              className={`agent-roster-row${item.id === activeId ? " is-active" : ""}`}
               style={{ paddingLeft: 10 + Math.max(0, item.depth - 1) * 14 }}
-              onClick={() => {
-                onSelect(item.id);
-                setOpen(false);
-              }}
             >
-              <AgentStatusMark status={item.status} />
-              <span className="agent-roster-menu-path">{item.path}</span>
-              <span className="agent-roster-menu-meta">{agentKindLabel(item.kind)}</span>
-            </button>
+              <button
+                className="agent-roster-menu-item"
+                type="button"
+                role="option"
+                aria-selected={item.id === activeId}
+                onClick={() => {
+                  onSelect(item.id);
+                  setOpen(false);
+                }}
+              >
+                <AgentStatusMark status={item.status} />
+                <span className="agent-roster-menu-path">{item.path}</span>
+                <span className="agent-roster-menu-meta">{agentKindLabel(item.kind)}</span>
+              </button>
+              <div className="agent-roster-row-detail">
+                <span className={`agent-state is-${item.status}`}>{agentStateText(item)}</span>
+                <AgentRunStats agent={item} now={now} />
+                <AgentControls agent={item} onControl={onControl} />
+              </div>
+            </div>
           ))}
         </div>
       ) : null}

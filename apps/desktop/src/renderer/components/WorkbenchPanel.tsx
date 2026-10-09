@@ -1,4 +1,4 @@
-import type { AgentInfo, ExecutionPlan, PlanExecutionContextStrategy } from "@vela/shared";
+import type { AgentControlAction, AgentInfo, ExecutionPlan, PlanExecutionContextStrategy } from "@vela/shared";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { ProjectApi } from "../hooks/useProject";
 import type { SidebarResize } from "../hooks/useSidebarResize";
@@ -61,6 +61,7 @@ interface WorkbenchPanelProps {
   conversationId?: string | null;
   toolDisplay?: ToolDisplay;
   ensureAgentMessages: (agentId: string) => void;
+  onControlAgent: (agentId: string, action: AgentControlAction) => void;
   onOpenAgent: (agentId: string) => void;
   /** 新建一个起始标签页 */
   onNewTab: () => void;
@@ -139,6 +140,7 @@ function WorkbenchPanelContent({
   browserOperating,
   toolDisplay,
   ensureAgentMessages,
+  onControlAgent,
   onOpenAgent,
   onNewTab,
   onStartAction,
@@ -593,6 +595,7 @@ function WorkbenchPanelContent({
                   else onOpenAgent(agentId);
                 }}
                 ensureMessages={ensureAgentMessages}
+                onControl={onControlAgent}
             />
           </WorkbenchTabPanel>
         ))}

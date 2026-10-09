@@ -37,7 +37,7 @@ const plans: ProposedPlanItem[] = [1, 2].map((revision) => ({ id: `plan-${revisi
   supersedes: revision === 2 ? "plan-1" : null, status: revision === 1 ? "superseded" : "draft",
   objective: "Implement Batch 3", createdAt: revision, approvedAt: null }));
 const agent = { id: "agent-1", parentId: "root", path: "/root/frontend", name: "frontend", kind: "worker", status: "running", depth: 1,
-  task: "UI animation", steps: [], mutated: false, finalText: null, error: null, createdAt: 1, updatedAt: 1 } as AgentInfo;
+  task: "UI animation", steps: [], mutated: false, finalText: null, error: null, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, activeMs: 0, runningSince: null, pauseRequested: false, createdAt: 1, updatedAt: 1 } as AgentInfo;
 const message = (id: string, text: string): UiMessage => ({ id, role: "assistant", text, thinking: "", tools: [] });
 const skills = Array.from({ length: 30 }, (_, i) => ({ name: `skill-${i}`, description: `Skill ${i} description`, location: `/fixture/skill-${i}`, origin: "user" })) as any[];
 const skillItems = skills.map(skill => ({ type: "skill" as const, skill }));
@@ -110,7 +110,7 @@ function Fixture() {
         <button className="mode-pill mode-plan">Plan</button> <button className="sandbox-pill sandbox-smart">Smart sandbox</button>
       </div>
       <div className="fixture-card"><h3>子代理步骤</h3><div className="fixture-pane"><AgentPane agent={agent} agents={[agent]} messages={messages}
-        onSwitch={noop} ensureMessages={ensure} toolDisplay="compact" /></div></div>
+        onSwitch={noop} ensureMessages={ensure} onControl={noop} toolDisplay="compact" /></div></div>
       <div className="fixture-card"><h3>Trace</h3><div className="fixture-pane"><TraceView state={traceState} onConversation={noop} onAbort={async () => {}} pendingInteraction={false} /></div></div>
     </div>
   </div>;

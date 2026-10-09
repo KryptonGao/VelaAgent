@@ -77,6 +77,11 @@ export function SettingsView({
   const searchRef = useRef<HTMLInputElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const workspacePath = project.environment?.path ?? project.workspace?.current ?? null;
+  // 对话目录缺失时工作区无法跟随它切换，此时 MCP/集成按工作区管理，不绑定该对话，否则主进程会拒绝请求。
+  const activeConversation = conversationId ? conversations.find((item) => item.id === conversationId) : undefined;
+  const conversationDetached = Boolean(
+    activeConversation && workspacePath && activeConversation.cwd.replace(/\/+$/, "") !== workspacePath.replace(/\/+$/, ""),
+  );
 
   const entries = useMemo(
     () => resolveSettingsEntries(copy).filter((entry) => pages.includes(entry.page)),
@@ -139,8 +144,8 @@ export function SettingsView({
               <p>{pageMeta.description}</p>
             </header>
           )}
-          {page === "integrations" ? <IntegrationsSection locale={locale} workspacePath={workspacePath} conversationId={conversationId} /> : null}
-          {page === "mcp" ? <McpSettingsSection locale={locale} workspacePath={workspacePath} conversationId={conversationId} /> : null}
+          {page === "integrations" ? <IntegrationsSection locale={locale} workspacePath={workspacePath} conversationId={conversationDetached ? null : conversationId} /> : null}
+          {page === "mcp" ? <McpSettingsSection locale={locale} workspacePath={workspacePath} conversationId={conversationId} detached={conversationDetached} /> : null}
           {page === "memory" ? <MemorySettingsSection locale={locale} conversationId={conversationId} /> : null}
           {page === "usage" ? <SettingsUsageView conversations={conversations} providers={models.catalog?.providers ?? []} /> : null}
           <div hidden={page !== "appearance"}>

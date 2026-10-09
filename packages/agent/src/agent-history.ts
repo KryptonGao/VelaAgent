@@ -1,5 +1,5 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { agentStatuses, type AgentInfo, type TranscriptMessage } from "@vela/shared";
+import { agentStatuses, emptyAgentUsage, type AgentInfo, type AgentUsage, type TranscriptMessage } from "@vela/shared";
 
 /** 子代理索引；完整消息保存在独立的 Pi JSONL 会话里。 */
 export interface StoredAgent extends AgentInfo {
@@ -26,7 +26,7 @@ export function normalizeStoredAgents(value: unknown): StoredAgent[] {
       name: typeof record.name === "string" ? record.name : record.path.split("/").at(-1) ?? "agent",
       kind: record.kind,
       // 进程退出后原来的任务不会自动续跑，不能继续显示运行中。
-      status: status === "running" || status === "idle" ? "aborted" : status,
+      status: status === "running" || status === "idle" || status === "paused" ? "aborted" : status,
       depth: record.path.split("/").filter(Boolean).length - 1,
       task: typeof record.task === "string" ? record.task : "",
       steps: Array.isArray(record.steps) ? record.steps.flatMap((step) => {
@@ -39,6 +39,11 @@ export function normalizeStoredAgents(value: unknown): StoredAgent[] {
       mutated: record.mutated === true,
       finalText: typeof record.finalText === "string" ? unwrapAgentReport(record.finalText) : null,
       error: typeof record.error === "string" ? record.error : null,
+      usage: normalizeUsage(record.usage),
+      activeMs: finiteNumber(record.activeMs),
+      // 进程退出时的运行片段不再续计。
+      runningSince: null,
+      pauseRequested: false,
       createdAt: finiteNumber(record.createdAt),
       updatedAt: finiteNumber(record.updatedAt),
       sessionFile: typeof record.sessionFile === "string" ? record.sessionFile : null,
@@ -113,6 +118,16 @@ function unwrapAgentReport(content: string): string {
 
 function object(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? value as Record<string, unknown> : null;
+}
+
+function normalizeUsage(value: unknown): AgentUsage {
+  const record = object(value);
+  if (!record) return { ...emptyAgentUsage };
+  return {
+    input: finiteNumber(record.input), output: finiteNumber(record.output),
+    cacheRead: finiteNumber(record.cacheRead), cacheWrite: finiteNumber(record.cacheWrite),
+    total: finiteNumber(record.total),
+  };
 }
 
 function finiteNumber(value: unknown): number {

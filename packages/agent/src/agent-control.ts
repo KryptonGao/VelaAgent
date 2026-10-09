@@ -6,7 +6,7 @@ import {
   type AgentSessionEvent,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import type { AgentInfo, AgentStatus, SubagentKind } from "@vela/shared";
+import { emptyAgentUsage, isAgentBusy, type AgentInfo, type AgentStatus, type AgentUsage, type SubagentKind } from "@vela/shared";
 import { randomUUID } from "node:crypto";
 import { Type } from "typebox";
 import { normalizeStoredAgents, type StoredAgent } from "./agent-history";
@@ -49,6 +49,11 @@ export interface AgentSessionRequest {
   forkMessages: AgentMessage[];
   /** 控制面为这个子代理生成的 agent 树工具；运行时并入沙箱工具后注册。 */
   customTools: ToolDefinition[];
+  /**
+   * 每次工具调用前由运行时的扩展等待；用户暂停该子代理时，它在这里挂起直到继续或取消。
+   * 返回 false 表示子代理已被取消，这次工具调用不应再执行。
+   */
+  beforeToolCall?: () => Promise<boolean>;
 }
 
 /** 发给 root 对话会话的消息：子代理结论，或子代理主动发的消息。 */
@@ -57,7 +62,7 @@ export interface AgentRootMessage {
   agentId: string;
   path: string;
   agentKind: SubagentKind;
-  status?: Exclude<AgentStatus, "idle" | "running">;
+  status?: Exclude<AgentStatus, "idle" | "running" | "paused">;
   text: string;
 }
 
@@ -80,7 +85,7 @@ export interface AgentControlOptions {
 }
 
 interface AgentTaskOutcome {
-  status: Exclude<AgentStatus, "idle" | "running">;
+  status: Exclude<AgentStatus, "idle" | "running" | "paused">;
   text: string;
   error: string | null;
 }
@@ -107,6 +112,12 @@ interface ManagedAgent {
   running: boolean;
   aborted: boolean;
   disposed: boolean;
+  /** 用户请求暂停；到下一次工具调用前生效，继续或取消时清除。 */
+  paused: boolean;
+  /** 当前是否占着全局并发槽位；暂停期间让出，继续时重新排队抢。 */
+  slot: boolean;
+  /** 挂在暂停点上等待继续或取消的调用。 */
+  resumeWaiters: Array<() => void>;
   /** abortAll 递增；旧代际的排队任务不再执行。 */
   generation: number;
   fork: ContextFork;
@@ -129,7 +140,7 @@ export class AgentControl {
       this.agents.set(info.id, {
         info, sessionFile, session: null, sessionPromise: null, unsubscribe: null,
         queue: [], processing: false, running: false, aborted: false,
-        disposed: false, generation: 0, fork: "none",
+        disposed: false, paused: false, slot: false, resumeWaiters: [], generation: 0, fork: "none",
       });
     }
   }
@@ -150,6 +161,10 @@ export class AgentControl {
       mutated: false,
       finalText: null,
       error: null,
+      usage: { ...emptyAgentUsage },
+      activeMs: 0,
+      runningSince: null,
+      pauseRequested: false,
       createdAt: now,
       updatedAt: now,
     };
@@ -163,6 +178,9 @@ export class AgentControl {
       running: false,
       aborted: false,
       disposed: false,
+      paused: false,
+      slot: false,
+      resumeWaiters: [],
       generation: 0,
       fork: "none",
       sessionFile: null,
@@ -325,6 +343,10 @@ export class AgentControl {
       mutated: false,
       finalText: null,
       error: null,
+      usage: { ...emptyAgentUsage },
+      activeMs: 0,
+      runningSince: null,
+      pauseRequested: false,
       createdAt: now,
       updatedAt: now,
     };
@@ -338,6 +360,9 @@ export class AgentControl {
       running: false,
       aborted: false,
       disposed: false,
+      paused: false,
+      slot: false,
+      resumeWaiters: [],
       generation: 0,
       fork: input.fork ?? "none",
       sessionFile: null,
@@ -416,16 +441,56 @@ export class AgentControl {
   abortAll(): void {
     for (const agent of this.agents.values()) {
       if (agent.info.kind === "root" || agent.disposed) continue;
-      agent.aborted = true;
-      agent.generation += 1;
-      if (agent.running) void agent.session?.abort();
-      else agent.info.status = "aborted";
-      while (agent.queue.length > 0) {
-        const task = agent.queue.shift();
-        task?.consume?.({ status: "aborted", text: "", error: null });
-      }
+      this.abortAgent(agent);
+      if (!agent.running) agent.info.status = "aborted";
     }
     this.emit();
+  }
+
+  /**
+   * 请求暂停一个正在运行的子代理。模型输出无法中途冻结，所以在它下一次调用工具前停下；
+   * 在此之前状态保持 running 并标记 pauseRequested。已暂停或没在跑的代理会报错。
+   */
+  pause(agentId: string): AgentInfo {
+    const agent = this.requireChild(agentId);
+    if (agent.info.status !== "running" || !agent.running) throw new Error("只能暂停正在运行的子代理。");
+    if (agent.paused) throw new Error("这个子代理已经在暂停了。");
+    agent.paused = true;
+    agent.info.pauseRequested = true;
+    agent.info.updatedAt = Date.now();
+    this.emit();
+    return cloneAgent(agent.info);
+  }
+
+  /** 继续被暂停（或还没停下的暂停请求）的子代理。 */
+  resume(agentId: string): AgentInfo {
+    const agent = this.requireChild(agentId);
+    if (!agent.paused) throw new Error("这个子代理没有被暂停。");
+    agent.paused = false;
+    agent.info.pauseRequested = false;
+    agent.info.updatedAt = Date.now();
+    this.releasePauseWaiters(agent);
+    this.emit();
+    return cloneAgent(agent.info);
+  }
+
+  /**
+   * 取消一个子代理在做的事，并连带取消它派出的所有后代：后代的结论会回投给它，
+   * 留着只会让它被重新唤醒。已完成的代理保持原状，之后仍可接收新消息。
+   */
+  cancel(agentId: string): AgentInfo {
+    const target = this.requireChild(agentId);
+    const doomed = this.descendantsOf(target);
+    let touched = false;
+    for (const agent of [target, ...doomed]) {
+      if (agent.disposed || !(isAgentBusy(agent.info.status) || agent.queue.length > 0 || agent.processing)) continue;
+      touched = true;
+      this.abortAgent(agent);
+      if (!agent.running) agent.info.status = "aborted";
+    }
+    if (!touched) throw new Error("这个子代理没有在运行。");
+    this.emit();
+    return cloneAgent(target.info);
   }
 
   /** 释放整棵树：销毁子会话并了结还在排队的等待者。root 会话由运行时负责。 */
@@ -450,6 +515,46 @@ export class AgentControl {
     this.agents.clear();
     this.spawnSequence = 0;
     return Promise.allSettled(closing).then(() => undefined);
+  }
+
+  /** 终止一个代理当前和排队中的工作；调用方负责 emit。 */
+  private abortAgent(agent: ManagedAgent): void {
+    agent.aborted = true;
+    agent.generation += 1;
+    agent.paused = false;
+    agent.info.pauseRequested = false;
+    this.releasePauseWaiters(agent);
+    if (agent.running) void agent.session?.abort();
+    while (agent.queue.length > 0) {
+      const task = agent.queue.shift();
+      task?.consume?.({ status: "aborted", text: "", error: null });
+    }
+  }
+
+  private releasePauseWaiters(agent: ManagedAgent): void {
+    const waiters = agent.resumeWaiters.splice(0);
+    for (const wake of waiters) wake();
+  }
+
+  private requireChild(agentId: string): ManagedAgent {
+    const agent = this.requireAgent(agentId);
+    if (agent.info.kind === "root") throw new Error("不能对主代理做这个操作。");
+    if (agent.disposed) throw new Error("这个子代理已经结束。");
+    return agent;
+  }
+
+  private descendantsOf(root: ManagedAgent): ManagedAgent[] {
+    const result: ManagedAgent[] = [];
+    const frontier = [root.info.id];
+    while (frontier.length > 0) {
+      const parentId = frontier.pop();
+      for (const agent of this.agents.values()) {
+        if (agent.info.parentId !== parentId || agent.info.kind === "root") continue;
+        result.push(agent);
+        frontier.push(agent.info.id);
+      }
+    }
+    return result;
   }
 
   private requireAgent(agentId: string): ManagedAgent {
@@ -528,6 +633,7 @@ export class AgentControl {
         const task = agent.queue.shift();
         if (!task) break;
         await this.semaphore.acquire();
+        agent.slot = true;
         try {
           if (agent.disposed || task.generation !== agent.generation) {
             task.consume?.({ status: "aborted", text: "", error: null });
@@ -538,7 +644,11 @@ export class AgentControl {
           // 被用户中止的回合没有有效结论，不再回投父代理。
           if (!consumed && outcome.status !== "aborted") this.deliverToParent(agent, outcome);
         } finally {
-          this.semaphore.release();
+          // 暂停期间槽位已经让出；只有还占着的才归还。
+          if (agent.slot) {
+            agent.slot = false;
+            this.semaphore.release();
+          }
         }
       }
     } finally {
@@ -569,6 +679,7 @@ export class AgentControl {
       path: agent.info.path,
       forkMessages: selectForkMessages(parentSession.messages, agent.fork),
       customTools: this.createAgentTools(agent.info.id),
+      beforeToolCall: () => this.checkpoint(agent),
       sessionFile: agent.sessionFile,
     });
     if (agent.disposed) {
@@ -589,6 +700,13 @@ export class AgentControl {
       agentId: agent.info.id,
       event,
     });
+    if (event.type === "message_end" && event.message.role === "assistant") {
+      if (this.refreshUsage(agent)) {
+        agent.info.updatedAt = Date.now();
+        this.emit();
+      }
+      return;
+    }
     if (event.type === "tool_execution_start") {
       rememberStep(agent.info.steps, {
         id: event.toolCallId,
@@ -621,7 +739,10 @@ export class AgentControl {
   ): Promise<AgentTaskOutcome> {
     agent.running = true;
     agent.aborted = false;
+    agent.paused = false;
+    agent.info.pauseRequested = false;
     agent.info.status = "running";
+    this.beginRun(agent);
     agent.info.task = oneLine(task.text, 160);
     agent.info.error = null;
     agent.info.finalText = null;
@@ -649,6 +770,10 @@ export class AgentControl {
         : "completed";
 
     agent.running = false;
+    agent.paused = false;
+    agent.info.pauseRequested = false;
+    this.endRun(agent);
+    this.refreshUsage(agent);
     agent.info.status = status;
     agent.info.error = status === "failed" ? errorText || "子代理执行失败" : null;
     agent.info.finalText = text ? clipText(text, subagentOutputCap).text : null;
@@ -663,6 +788,69 @@ export class AgentControl {
       stopped: agent.aborted,
     });
     return { status, text: report.text, error: errorText || null };
+  }
+
+  private beginRun(agent: ManagedAgent): void {
+    agent.info.runningSince ??= Date.now();
+  }
+
+  private endRun(agent: ManagedAgent): void {
+    if (agent.info.runningSince === null) return;
+    agent.info.activeMs += Math.max(0, Date.now() - agent.info.runningSince);
+    agent.info.runningSince = null;
+  }
+
+  /** 从会话统计刷新累计 token；返回是否有变化。统计不可用时保持原值。 */
+  private refreshUsage(agent: ManagedAgent): boolean {
+    let tokens: AgentUsage | null = null;
+    try {
+      const stats = agent.session?.getSessionStats().tokens;
+      if (stats) {
+        tokens = {
+          input: stats.input, output: stats.output,
+          cacheRead: stats.cacheRead, cacheWrite: stats.cacheWrite, total: stats.total,
+        };
+      }
+    } catch {
+      return false;
+    }
+    if (!tokens) return false;
+    const current = agent.info.usage;
+    if (current.input === tokens.input && current.output === tokens.output
+      && current.cacheRead === tokens.cacheRead && current.cacheWrite === tokens.cacheWrite
+      && current.total === tokens.total) return false;
+    agent.info.usage = tokens;
+    return true;
+  }
+
+  /**
+   * 工具调用前的暂停点。暂停时让出并发槽位、停表，挂起到继续或取消；
+   * 继续后重新抢槽位再放行；取消时返回 false，让这次工具调用被拦下，由已触发的 abort 收尾。
+   */
+  private async checkpoint(agent: ManagedAgent): Promise<boolean> {
+    if (agent.aborted || agent.disposed) return false;
+    if (!agent.paused) return true;
+    this.endRun(agent);
+    agent.info.status = "paused";
+    agent.info.pauseRequested = false;
+    agent.info.updatedAt = Date.now();
+    if (agent.slot) {
+      agent.slot = false;
+      this.semaphore.release();
+    }
+    this.emit();
+    while (agent.paused && !agent.aborted && !agent.disposed) {
+      await new Promise<void>((resolve) => agent.resumeWaiters.push(resolve));
+    }
+    if (agent.aborted || agent.disposed) return false;
+    await this.semaphore.acquire();
+    agent.slot = true;
+    if (agent.aborted || agent.disposed) return false;
+    agent.info.status = "running";
+    this.beginRun(agent);
+    agent.info.updatedAt = Date.now();
+    this.emit();
+    return true;
   }
 
   /** 会话创建失败：整条队列一起失败，等结果的调用方和父代理都收到原因。 */

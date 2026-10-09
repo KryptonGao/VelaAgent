@@ -12,7 +12,7 @@ import {
 } from "@vela/workspace";
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, session, shell, webContents } from "electron";
 import type { BrowserWindowConstructorOptions } from "electron";
-import { createLogger, IpcChannel, isAppLocale, localizeZh } from "@vela/shared";
+import { createLogger, IpcChannel, isAgentBusy, isAppLocale, localizeZh } from "@vela/shared";
 import { writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -316,7 +316,7 @@ async function start(): Promise<void> {
       if (!result.ok) throw new Error(result.message);
     },
     trustedSnapshot: recipe => scheduler.list().tasks.some(task => JSON.stringify(task.recipeBinding?.recipeSnapshot) === JSON.stringify(recipe)),
-    workspaces: registeredWorkspaces, runningWorkspaces: () => runtime.listConversations().filter(c => c.status === "streaming" || runtime.getAgents(c.id).some(a => a.kind !== "root" && a.status === "running")).map(c => c.cwd),
+    workspaces: registeredWorkspaces, runningWorkspaces: () => runtime.listConversations().filter(c => c.status === "streaming" || runtime.getAgents(c.id).some(a => a.kind !== "root" && isAgentBusy(a.status))).map(c => c.cwd),
   });
   prInboxHost?.setResponses(new PrReviewResponseService({
     inbox: prInboxHost.service, home, workspaces: registeredWorkspaces,

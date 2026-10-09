@@ -151,6 +151,7 @@ export const IpcChannel = {
   questionEvent: "session:question-event",
   questionReply: "session:question-reply",
   sessionAgentMessages: "session:agent-messages",
+  sessionAgentControl: "session:agent-control",
   appPickAttachments: "app:pick-attachments",
   appHydrateAttachments: "app:hydrate-attachments",
   appListOpenTargets: "app:list-open-targets",
@@ -660,9 +661,37 @@ export function isAgentToolName(name: string): boolean {
   return (agentToolNames as readonly string[]).includes(name);
 }
 
-export const agentStatuses = ["idle", "running", "completed", "failed", "aborted"] as const;
+export const agentStatuses = ["idle", "running", "paused", "completed", "failed", "aborted"] as const;
 
 export type AgentStatus = (typeof agentStatuses)[number];
+
+/** running 和 paused 都占着一个未结束的回合：暂停的代理只是停在工具调用之前，会话还在。 */
+export function isAgentBusy(status: AgentStatus): boolean {
+  return status === "running" || status === "paused";
+}
+
+/** 用户能对单个子代理做的操作；pause 在下一次工具调用前生效。 */
+export const agentControlActions = ["pause", "resume", "cancel"] as const;
+
+export type AgentControlAction = (typeof agentControlActions)[number];
+
+/** 一个代理会话累计计费的 token。 */
+export interface AgentUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  total: number;
+}
+
+export const emptyAgentUsage: Readonly<AgentUsage> = Object.freeze({
+  input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0,
+});
+
+/** 已累计的运行耗时：不含暂停和排队等待，运行中再加上当前这一段。 */
+export function agentElapsedMs(agent: Pick<AgentInfo, "activeMs" | "runningSince">, now: number): number {
+  return agent.activeMs + (agent.runningSince === null ? 0 : Math.max(0, now - agent.runningSince));
+}
 
 /** root 是对话主代理；其余是子代理树里的节点。 */
 export type AgentKind = SubagentKind | "root";
@@ -693,6 +722,14 @@ export interface AgentInfo {
   finalText: string | null;
   /** 最近一次失败原因。 */
   error: string | null;
+  /** 累计 token；root 不统计。 */
+  usage: AgentUsage;
+  /** 已结束的运行片段累计耗时（毫秒）。 */
+  activeMs: number;
+  /** 当前运行片段的开始时间；不在运行（含暂停、排队）时为 null。 */
+  runningSince: number | null;
+  /** 已请求暂停但当前模型输出还没结束；到下一次工具调用前才会真正停下。 */
+  pauseRequested: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -2732,6 +2769,8 @@ export interface VelaApi extends McpApi, PluginApi {
   getTraceDetails(conversationId: string, nodeId: string): Promise<TraceDetails | null>;
   /** 读取某个常驻子代理自己的消息历史(用于打开右侧 Agent Pane 时回填)。 */
   getAgentMessages(conversationId: string, agentId: string): Promise<TranscriptMessage[]>;
+  /** 暂停、继续或取消单个子代理；取消会连带它派出的子代理。 */
+  controlAgent(conversationId: string, agentId: string, action: AgentControlAction): Promise<void>;
   onEvent(listener: (event: AgentStreamEvent) => void): () => void;
   getCatalog(): Promise<ModelCatalog>;
   selectModel(provider: string, id: string): Promise<AppState>;

@@ -13,7 +13,9 @@ import { AgentRuntime } from "../src/runtime.ts";
 function agent(overrides: Partial<StoredAgent> = {}): StoredAgent {
   return { id: "child", parentId: "root", path: "/root/test", name: "test", kind: "explore",
     status: "completed", depth: 1, task: "查 package.json", steps: [], mutated: false,
-    finalText: "检查完成", error: null, createdAt: 1, updatedAt: 2, sessionFile: null, ...overrides };
+    finalText: "检查完成", error: null, createdAt: 1, updatedAt: 2, sessionFile: null,
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, activeMs: 0, runningSince: null,
+    pauseRequested: false, ...overrides };
 }
 
 describe("子代理历史恢复", () => {
@@ -177,6 +179,21 @@ describe("子代理历史恢复", () => {
     assert.equal(transcript[1]?.tools[0]?.activity.path, "README.md");
     assert.equal(transcript[1]?.text, "旧代理结论");
     assert.equal(transcript[1]?.tools[0]?.activity.body, undefined);
+  });
+
+  it("恢复累计 token 和耗时，暂停中的代理进程退出后按已停止处理", () => {
+    const [restored] = normalizeStoredAgents([agent({
+      status: "paused", pauseRequested: true, runningSince: Date.now(), activeMs: 4200,
+      usage: { input: 10, output: 5, cacheRead: 2, cacheWrite: 1, total: 18 },
+    })]);
+    assert.equal(restored?.status, "aborted");
+    assert.equal(restored?.pauseRequested, false);
+    assert.equal(restored?.runningSince, null);
+    assert.equal(restored?.activeMs, 4200);
+    assert.deepEqual(restored?.usage, { input: 10, output: 5, cacheRead: 2, cacheWrite: 1, total: 18 });
+    const [legacy] = normalizeStoredAgents([{ ...agent(), usage: undefined, activeMs: undefined }]);
+    assert.deepEqual(legacy?.usage, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 });
+    assert.equal(legacy?.activeMs, 0);
   });
 
   it("过滤损坏、重复和 root 节点，文件缺失仍能展示已有结论", async () => {

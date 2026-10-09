@@ -1,7 +1,7 @@
 import { PrInboxPage } from "./components/PrInboxPage";
 import { uiStorage } from "./ui-storage";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AgentInfo, TaskRecipe } from "@vela/shared";
+import { emptyAgentUsage, type AgentInfo, type TaskRecipe } from "@vela/shared";
 import { AgentWorkspaceProvider } from "./components/AgentPanel";
 import { SessionChatView } from "./components/SessionChatView";
 import { ContextPanel } from "./components/ContextPanel";
@@ -101,6 +101,10 @@ function findAgentInMessages(messages: UiMessage[], agentId: string): AgentInfo 
         mutated: activity.mutated === true,
         finalText: tool.activity.body ?? null,
         error: null,
+        usage: { ...emptyAgentUsage },
+        activeMs: 0,
+        runningSince: null,
+        pauseRequested: false,
         createdAt: 0,
         updatedAt: 0,
       };
@@ -755,6 +759,7 @@ export function App() {
                         conversationId={session.activeConversationId}
                         toolDisplay={preferences.toolDisplay}
                         ensureAgentMessages={session.ensureAgentMessages}
+                        onControlAgent={session.controlAgent}
                         onOpenAgent={openAgentPane}
                         onNewTab={openStartTab}
                         onStartAction={handleStartAction}

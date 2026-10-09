@@ -16,7 +16,7 @@ const params = new URLSearchParams(location.search);
 const agent = {
   id: "agent-1", parentId: "root", path: "/root/graph-layout", name: "graph-layout", kind: "worker",
   status: "running", depth: 1, task: "UI", steps: [], mutated: false, finalText: null, error: null,
-  createdAt: 1, updatedAt: 1,
+  usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, activeMs: 0, runningSince: null, pauseRequested: false, createdAt: 1, updatedAt: 1,
 } as unknown as AgentInfo;
 
 function MainPane() {
@@ -86,7 +86,7 @@ function Pane({ isolated, scrollOffset, stream }: { isolated: boolean; scrollOff
       <div className="workbench-panel" style={{ width: "100%", display: "flex", flexDirection: "column" }}>
         <div className="workbench-content">
           <div className="workbench-tabpanel">
-            <AgentPane agent={agent} agents={[agent]} messages={messages} onSwitch={() => {}} ensureMessages={() => {}} toolDisplay="cards" />
+            <AgentPane agent={agent} agents={[agent]} messages={messages} onSwitch={() => {}} ensureMessages={() => {}} onControl={() => {}} toolDisplay="cards" />
           </div>
         </div>
       </div>

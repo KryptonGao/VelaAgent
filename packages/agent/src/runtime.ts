@@ -64,6 +64,8 @@ import {
   type ToolActivity,
   type TranscriptMessage,
   type AiTextResult,
+  type AgentControlAction,
+  isAgentBusy,
 } from "@vela/shared";
 import { defaultToolNames } from "@vela/tools";
 import { getCurrentTools, clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
@@ -146,6 +148,7 @@ import {
 } from "./agent-control";
 import {
   agentKindPrompt,
+  createAgentPauseExtension,
   createExploreGuardExtension,
   spawnAgentToolName,
 } from "./subagent";
@@ -440,7 +443,7 @@ export class AgentRuntime {
       });
       if (entries.some(entry => entry.id === this.activeId)) throw new Error("当前会话属于这批同步，请先切换到其他会话再撤销");
       if (entries.some(entry => entry.driving || entry.session?.isStreaming
-        || entry.control?.list().some(agent => agent.kind !== "root" && agent.status === "running"))) {
+        || entry.control?.list().some(agent => agent.kind !== "root" && isAgentBusy(agent.status)))) {
         throw new Error("这批同步的会话仍在运行，请先停止后再撤销");
       }
       await Promise.all(entries.map(entry => this.detachEntry(entry)));
@@ -559,7 +562,7 @@ export class AgentRuntime {
     const model = entry.session?.model;
     if (entry.snapshot.mode !== run.mode || model?.provider !== expected.model.provider || model?.id !== expected.model.id
       || entry.session?.thinkingLevel !== expected.thinkingLevel) throw new Error("聊天的模式或模型已变化，请检查后新建配方任务");
-    if (entry.control?.list().some(agent => agent.kind !== "root" && agent.status === "running")) throw new Error("聊天仍有运行中的子任务");
+    if (entry.control?.list().some(agent => agent.kind !== "root" && isAgentBusy(agent.status))) throw new Error("聊天仍有运行中的子任务");
     entry.recipeWorkflowActive = true;
   }
   finishRecipeWorkflow(run: RecipeRun): void {
@@ -839,7 +842,7 @@ export class AgentRuntime {
   private assertWorkspaceIdle(cwd: string) {
     for (const other of this.conversations.values()) {
       if (other.snapshot.cwd !== cwd) continue;
-      if (other.driving || other.session?.isStreaming || other.control?.list().some(agent => agent.kind !== "root" && agent.status === "running")) {
+      if (other.driving || other.session?.isStreaming || other.control?.list().some(agent => agent.kind !== "root" && isAgentBusy(agent.status))) {
         throw new Error("工作区还有任务运行中，请停止或等待完成后修改消息");
       }
     }
@@ -918,7 +921,7 @@ export class AgentRuntime {
   }
 
   private async finishLatestCheckpoint(entry: Conversation) {
-    if (entry.control?.list().some(agent => agent.kind !== "root" && agent.status === "running")) return;
+    if (entry.control?.list().some(agent => agent.kind !== "root" && isAgentBusy(agent.status))) return;
     const checkpoints = this.checkpoints(entry);
     const branch = entry.sessionManager?.getBranch() ?? [];
     const points = await checkpoints.list();
@@ -1540,6 +1543,15 @@ export class AgentRuntime {
       return this.decorateMcpTranscript(conversationId, null, transcriptFromProjection(manager.buildSessionProjection()));
     }
     return stored ? this.decorateMcpTranscript(conversationId, null, legacyAgentTranscript(stored)) : [];
+  }
+
+  /** 用户对单个子代理的操作：暂停（下一次工具调用前生效）、继续、取消（含后代）。 */
+  controlAgent(conversationId: string, agentId: string, action: AgentControlAction): void {
+    const control = this.conversations.get(conversationId)?.control;
+    if (!control) throw new Error("找不到这个对话的子代理。");
+    if (action === "pause") control.pause(agentId);
+    else if (action === "resume") control.resume(agentId);
+    else control.cancel(agentId);
   }
 
   getAgents(conversationId: string | null): AgentInfo[] {
@@ -2789,7 +2801,7 @@ export class AgentRuntime {
     this.overlappingCheckpointRuns.delete(entry.id);
     for (const other of this.conversations.values()) {
       if (other.id !== entry.id && other.snapshot.cwd === entry.snapshot.cwd && (other.driving || other.session?.isStreaming ||
-        other.control?.list().some(agent => agent.kind !== "root" && agent.status === "running"))) {
+        other.control?.list().some(agent => agent.kind !== "root" && isAgentBusy(agent.status)))) {
         this.overlappingCheckpointRuns.add(entry.id);
         this.overlappingCheckpointRuns.add(other.id);
       }
@@ -2893,6 +2905,7 @@ export class AgentRuntime {
       noExtensions: true,
       extensionFactories: [
         ...(input.kind === "explore" ? [{ name: "vela-explore", hidden: true, factory: createExploreGuardExtension() }] : []),
+        ...(input.beforeToolCall ? [{ name: "vela-agent-pause", hidden: true, factory: createAgentPauseExtension(input.beforeToolCall) }] : []),
         { name: "vela-memory", hidden: true, factory: this.memoryExtension(entry, input.agentId) },
         ...mcp.factories(),
       ],
@@ -2952,7 +2965,7 @@ export class AgentRuntime {
     this.emit({ type: "agents", conversationId: entry.id, agents });
     // 子代理改完工作区后，按一次修订推进 Goal 验证的有效性。
     for (const agent of agents) {
-      if (agent.kind === "root" || !agent.mutated || agent.status === "running") continue;
+      if (agent.kind === "root" || !agent.mutated || isAgentBusy(agent.status)) continue;
       if (entry.agentMutationsSeen.has(agent.id)) continue;
       entry.agentMutationsSeen.add(agent.id);
       if (entry.snapshot.goal) this.advanceGoalWorkRevision(entry);

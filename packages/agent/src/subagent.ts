@@ -44,6 +44,16 @@ export function exploreCommandAllowed(command: string): boolean {
   return isPlanSafeCommand(command);
 }
 
+/** 子代理每次调用工具前先过暂停点；被取消时拦下这次调用，让 abort 尽快收尾。 */
+export function createAgentPauseExtension(beforeToolCall: () => Promise<boolean>): ExtensionFactory {
+  return (pi) => {
+    pi.on("tool_call", async () => {
+      if (await beforeToolCall()) return undefined;
+      return { block: true, reason: "子代理已被用户取消。" };
+    });
+  };
+}
+
 export function createExploreGuardExtension(): ExtensionFactory {
   return (pi) => {
     pi.on("tool_call", async (event) => {

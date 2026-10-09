@@ -1,7 +1,9 @@
 import type {
   AgentInfo,
   AgentRuntimeStreamEvent,
+  AgentControlAction,
   AgentStatus,
+  AgentUsage,
   AgentStreamEvent,
   AppState,
   AskUserQuestionRequest,
@@ -15,7 +17,7 @@ import type {
   ToolTrace,
   TranscriptMessage,
 } from "@vela/shared";
-import { agentStatuses } from "@vela/shared";
+import { agentStatuses, emptyAgentUsage } from "@vela/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createMessageStore, emptyMessages, messageScope } from "./message-store";
 import { applyPlanDraft, type PlanDraft } from "../plan-draft";
@@ -520,6 +522,18 @@ export function useSession(notify: NotifySound = noSound) {
     [loadAgentMessages],
   );
 
+  /** 暂停、继续或取消当前对话里的一个子代理；状态变化随 agents 事件回来。 */
+  const controlAgent = useCallback(async (agentId: string, action: AgentControlAction) => {
+    const conversationId = activeIdRef.current;
+    const api = window.vela;
+    if (!conversationId || !api) return;
+    try {
+      await api.controlAgent(conversationId, agentId, action);
+    } catch {
+      // 子代理恰好已经结束时操作会被拒绝，界面以随后的状态事件为准。
+    }
+  }, []);
+
   const activeAgents = useMemo(
     () => (activeConversationId ? agents[activeConversationId] ?? state?.agents ?? [] : []),
     [activeConversationId, agents, state?.agents],
@@ -547,6 +561,7 @@ export function useSession(notify: NotifySound = noSound) {
     getQuestion,
     replyQuestion,
     ensureAgentMessages,
+    controlAgent,
     send,
     removeInstruction,
     edit,
@@ -832,6 +847,20 @@ function sanitizeSteps(value: ToolActivity["steps"]): ToolActivity["steps"] {
   return steps.length > 0 ? steps.slice(-40) : undefined;
 }
 
+function finiteOr0(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function sanitizeUsage(value: unknown): AgentUsage {
+  if (!value || typeof value !== "object") return { ...emptyAgentUsage };
+  const record = value as Record<string, unknown>;
+  return {
+    input: finiteOr0(record.input), output: finiteOr0(record.output),
+    cacheRead: finiteOr0(record.cacheRead), cacheWrite: finiteOr0(record.cacheWrite),
+    total: finiteOr0(record.total),
+  };
+}
+
 /** 主进程推来的 agent 快照在渲染层再校验一次，坏数据直接丢掉。 */
 function sanitizeAgents(value: unknown): AgentInfo[] {
   if (!Array.isArray(value)) return [];
@@ -863,6 +892,10 @@ function sanitizeAgents(value: unknown): AgentInfo[] {
       mutated: record.mutated === true,
       finalText: typeof record.finalText === "string" ? record.finalText : null,
       error: typeof record.error === "string" ? record.error : null,
+      usage: sanitizeUsage(record.usage),
+      activeMs: finiteOr0(record.activeMs),
+      runningSince: typeof record.runningSince === "number" && Number.isFinite(record.runningSince) ? record.runningSince : null,
+      pauseRequested: record.pauseRequested === true,
       createdAt: typeof record.createdAt === "number" ? record.createdAt : 0,
       updatedAt: typeof record.updatedAt === "number" ? record.updatedAt : 0,
     });

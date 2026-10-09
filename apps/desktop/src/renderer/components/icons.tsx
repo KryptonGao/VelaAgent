@@ -159,6 +159,31 @@ export function CloseIcon({ size = 13 }: IconProps) {
   );
 }
 
+export function PauseIcon({ size = 13 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <line x1="9" y1="5" x2="9" y2="19" />
+      <line x1="15" y1="5" x2="15" y2="19" />
+    </svg>
+  );
+}
+
+export function PlayIcon({ size = 13 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M7 4.5v15l12-7.5-12-7.5Z" />
+    </svg>
+  );
+}
+
+export function StopSquareIcon({ size = 13 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <rect x="6" y="6" width="12" height="12" rx="1.5" />
+    </svg>
+  );
+}
+
 export function ArrowUpIcon({ size = 11 }: IconProps) {
   return (
     <svg {...base(size)}>

@@ -4,7 +4,7 @@ import { useFrameTask } from "../hooks/useFrameTask";
 import { VersionControlView } from "./version-control/VersionControlView";
 import { TraceView } from "./trace/TraceView";
 import { UsageView } from "./usage/UsageView";
-import type { AppState, AskUserQuestionRequest, InteractionMode } from "@vela/shared";
+import { isAgentBusy, type AppState, type AskUserQuestionRequest, type InteractionMode } from "@vela/shared";
 import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useAgentWorkspace } from "./AgentPanel";
 import { modKeyLabel } from "../platform";
@@ -648,7 +648,7 @@ export function ChatView({
                     getQuestion={getQuestion}
                     onReplyQuestion={onReplyQuestion}
                     onOpenImage={setImageView}
-                    editDisabled={session?.status !== "ready" || subagents.some(agent => agent.status === "running")}
+                    editDisabled={session?.status !== "ready" || subagents.some(agent => isAgentBusy(agent.status))}
                     editTurn={branchTurn}
                     onEditTurn={onEdit}
                   />

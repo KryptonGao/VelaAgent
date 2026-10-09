@@ -42,7 +42,7 @@ const models = { catalog: { models: [], providers: [] }, login: { active: false 
   select: noop, setThinking: noop, add: noop, remove: noop, logout: noop, loginProvider: noop,
   replyLogin: noop, cancelLogin: noop, dismissLogin: noop } as unknown as ReturnType<typeof useModels>;
 const agent = (id: string): AgentInfo => ({ id, parentId: null, path: `/root/${id}`, name: id, kind: "general", status: "running", depth: 1,
-  task: "Fixture", steps: [], mutated: false, finalText: null, error: null, createdAt: 0, updatedAt: 0 });
+  task: "Fixture", steps: [], mutated: false, finalText: null, error: null, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, activeMs: 0, runningSince: null, pauseRequested: false, createdAt: 0, updatedAt: 0 });
 const a = agent("a");
 const b = agent("b");
 const agents = [a, b];
@@ -67,11 +67,11 @@ function Fixture() {
     </Profiler></div>
     <div id="agent-a" style={{ width: 350, height: 600, display: "flex" }}><Profiler id="a" onRender={() => { counts.a += 1; }}>
       <AgentPane agent={a} agents={agents} messageStore={session.messageStore} conversationId="c" visible={visible}
-        ensureMessages={session.ensureAgentMessages} onSwitch={noop} />
+        ensureMessages={session.ensureAgentMessages} onSwitch={noop} onControl={noop} />
     </Profiler></div>
     <div id="agent-b" style={{ width: 350, height: 600, display: "flex" }}><Profiler id="b" onRender={() => { counts.b += 1; }}>
       <AgentPane agent={b} agents={agents} messageStore={session.messageStore} conversationId="c"
-        ensureMessages={session.ensureAgentMessages} onSwitch={noop} />
+        ensureMessages={session.ensureAgentMessages} onSwitch={noop} onControl={noop} />
     </Profiler></div>
     <div id="details" style={{ width: 300 }}><ToolCard tool={tools[0]!} /><ToolRunGroup tools={tools} /><CompactToolGroup tools={tools} /></div>
   </div>;
