@@ -28,6 +28,8 @@ import { usePreferences } from "./hooks/usePreferences";
 import { useNotificationSounds } from "./hooks/useNotificationSounds";
 import { isBoolean, useStoredState } from "./hooks/useStoredState";
 import { useProject } from "./hooks/useProject";
+import { usePrInboxBackgroundRefresh } from "./hooks/usePrInboxCache";
+import { useSidebarItems } from "./hooks/useSidebarItems";
 import { useSession, type UiMessage } from "./hooks/useSession";
 import { useSidebarResize } from "./hooks/useSidebarResize";
 import { useTurnReview } from "./hooks/useTurnReview";
@@ -132,6 +134,7 @@ export function App() {
   const [rightCollapsed, setRightCollapsed] = useStoredState("vela.rightCollapsed", true, isBoolean);
   const [scheduledTasksOpen, setScheduledTasksOpen] = useState(false);
   const [prInboxOpen, setPrInboxOpen] = useState(false);
+  usePrInboxBackgroundRefresh(useSidebarItems().prInbox);
   const [recipesOpen, setRecipesOpen] = useState(false);
   const [recipeToUse, setRecipeToUse] = useState<TaskRecipe | null>(null);
   const consumeRecipeSelection = useCallback(() => setRecipeToUse(null), []);

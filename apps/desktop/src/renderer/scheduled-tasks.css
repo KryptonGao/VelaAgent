@@ -41,3 +41,100 @@
 .scheduled-task-execution { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .scheduled-task-schedule { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 @media (max-width: 760px) { .scheduled-task-execution, .scheduled-task-schedule { grid-template-columns: minmax(0, 1fr); } }
+
+/* ── Scheduled Tasks page: compact header, two-column task cards, modal editor ── */
+.st-page { padding: 28px 32px 40px; }
+.st-page .scheduled-tasks-header { align-items: center; gap: 12px 16px; }
+.st-page .scheduled-tasks-header p { margin: 4px 0 0; }
+.st-page .scheduled-tasks-header .scheduled-tasks-note { font-size: 12px; line-height: 1.5; max-width: 62ch; }
+.st-page h1 { font-size: 21px; font-weight: 600; letter-spacing: -.3px; }
+.st-page .scheduled-tasks-error { margin: 12px 0 0; }
+.st-page .st-primary, .st-page .scheduled-tasks-header > button { background: var(--accent-blue); color: var(--accent-contrast); border-color: transparent; font-weight: 500; }
+.st-page .st-primary:hover:not(:disabled), .st-page .scheduled-tasks-header > button:hover:not(:disabled) { background: var(--accent-blue-hover); }
+.st-page .st-danger { color: var(--danger, #d13438); }
+.st-page .st-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger, #d13438) 10%, transparent); }
+
+.st-page .scheduled-tasks-filter { justify-content: space-between; margin: 22px 0 12px; }
+.st-page .scheduled-tasks-filter label { display: flex; align-items: center; gap: 8px; color: var(--text-muted); }
+.st-page .scheduled-tasks-filter select { padding: 5px 8px; min-height: 30px; }
+.scheduled-tasks-count { color: var(--text-muted); font-size: 12px; }
+
+.st-page .scheduled-tasks-empty { display: grid; gap: 6px; justify-items: center; text-align: center; padding: 48px 24px; border: 1px dashed var(--border-strong); border-radius: 12px; }
+.st-page .scheduled-tasks-empty strong { color: var(--text-primary); font-size: 14px; font-weight: 600; }
+.st-page .scheduled-tasks-empty span { max-width: 46ch; line-height: 1.6; }
+
+.st-page .scheduled-tasks-list { grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); align-items: start; gap: 14px; }
+.st-page .scheduled-task-card { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; background: var(--bg-card-surface); transition: border-color .15s, box-shadow .15s; }
+.st-page .scheduled-task-card:hover { border-color: var(--border-strong); box-shadow: 0 1px 8px color-mix(in srgb, var(--text-primary) 6%, transparent); }
+.st-page .scheduled-task-card > * { margin: 0; }
+.st-page .scheduled-task-title { flex-wrap: nowrap; align-items: center; gap: 10px; }
+.st-page .scheduled-task-title h3 { flex: 1; min-width: 0; font-size: 14.5px; font-weight: 600; }
+.st-page .scheduled-task-prompt { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; max-height: none; overflow: hidden; white-space: normal; color: var(--text-secondary); line-height: 1.55; }
+.st-page details .scheduled-task-prompt { display: block; max-height: 160px; overflow: auto; white-space: pre-wrap; }
+.st-page details { font-size: 12px; color: var(--text-muted); }
+.st-page details summary { cursor: pointer; }
+
+.st-status { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 500; white-space: nowrap; color: var(--text-muted); background: color-mix(in srgb, var(--text-muted) 12%, transparent); }
+.st-status::before, .st-dot { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+.st-dot { display: inline-block; margin-right: 6px; vertical-align: 1px; }
+.st-status[data-tone=ok] { color: var(--success, #1a7f4b); background: color-mix(in srgb, var(--success, #1a7f4b) 13%, transparent); }
+.st-status[data-tone=bad] { color: var(--danger, #d13438); background: color-mix(in srgb, var(--danger, #d13438) 12%, transparent); }
+.st-status[data-tone=run] { color: var(--accent-blue); background: var(--accent-tint, color-mix(in srgb, var(--accent-blue) 12%, transparent)); }
+.st-dot[data-tone=ok] { color: var(--success, #1a7f4b); }
+.st-dot[data-tone=bad] { color: var(--danger, #d13438); }
+.st-dot[data-tone=run] { color: var(--accent-blue); }
+.st-dot[data-tone=idle] { color: var(--text-dim); }
+
+.st-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; padding: 10px 0 2px; border-top: 1px solid var(--border-subtle); font-size: 12px; }
+.st-meta > div { min-width: 0; display: grid; gap: 1px; }
+.st-meta dt { color: var(--text-dim); font-size: 11px; }
+.st-meta dd { margin: 0; color: var(--text-secondary); overflow-wrap: anywhere; }
+.st-meta dd.scheduled-task-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+
+.st-page .scheduled-task-card .scheduled-task-actions { margin-top: 2px; gap: 6px; }
+.st-page .scheduled-task-card .scheduled-task-actions button { min-height: 28px; padding: 3px 10px; font-size: 12px; background: transparent; border-color: var(--border-subtle); }
+.st-page .scheduled-task-card .scheduled-task-actions button:hover:not(:disabled) { background: var(--bg-hover); }
+.st-page .scheduled-task-card .scheduled-task-actions .st-primary { background: var(--accent-blue); border-color: transparent; }
+.st-page .scheduled-task-card .scheduled-task-actions .st-primary:hover:not(:disabled) { background: var(--accent-blue-hover); }
+.st-page .scheduled-task-card .scheduled-task-actions .st-danger { margin-left: auto; border-color: transparent; }
+.st-page .st-confirm { padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--danger, #d13438) 8%, transparent); font-size: 12px; }
+.st-page .scheduled-task-history { margin: 4px 0 0; font-size: 12px; max-height: 260px; overflow: auto; }
+.st-page .scheduled-task-history li { padding: 8px 0; line-height: 1.55; color: var(--text-secondary); }
+.st-page .scheduled-task-history li button { margin-top: 4px; min-height: 26px; padding: 2px 10px; font-size: 12px; }
+
+/* Editor dialog */
+.st-dialog { width: min(680px, calc(100vw - 32px)); max-height: min(780px, calc(100vh - 40px)); margin: auto; padding: 0; border: 1px solid var(--border-subtle); border-radius: 14px; color: var(--text-primary); background: var(--bg-elevated); box-shadow: 0 16px 60px rgba(0, 0, 0, .26); overflow: hidden; }
+.st-dialog[open] { display: flex; flex-direction: column; }
+.st-dialog::backdrop { background: rgba(0, 0, 0, .35); }
+.st-page .st-form { display: flex; flex-direction: column; flex: 1; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 0; background: none; }
+.st-page .st-form > fieldset { display: contents; }
+.st-form-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px 14px 22px; border-bottom: 1px solid var(--border-subtle); }
+.st-form-head h3 { font-size: 15px; font-weight: 600; }
+.st-page .st-close { display: inline-grid; place-items: center; width: 28px; height: 28px; min-height: 0; padding: 0; border-color: transparent; background: transparent; color: var(--text-muted); }
+.st-form-body { flex: 1 1 auto; min-height: 0; overflow: auto; display: grid; gap: 0; padding: 0 22px; }
+.st-section { display: grid; gap: 12px; padding: 18px 0; min-width: 0; }
+.st-section + .st-section { border-top: 1px solid var(--border-subtle); }
+.st-section h4 { margin: 0; font-size: 12px; font-weight: 600; color: var(--text-muted); letter-spacing: .02em; }
+.st-section label { color: var(--text-secondary); font-size: 12px; }
+.st-section :is(input, select, textarea) { font-size: 13px; background: var(--bg-surface-subtle); }
+.st-section textarea { line-height: 1.55; min-height: 96px; }
+.st-section p { margin: 0; font-size: 12px; }
+.st-form .scheduled-task-schedule { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.st-form .scheduled-task-schedule .st-span-2 { grid-column: span 2; }
+.st-form .scheduled-task-execution { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.st-form .scheduled-task-weekdays { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0; border: 0; margin: 0; }
+.st-form .scheduled-task-weekdays legend { float: left; margin: 0 8px 0 0; padding: 0; font-size: 12px; color: var(--text-secondary); line-height: 30px; }
+.st-form .scheduled-task-weekdays label { display: inline-grid; position: relative; }
+.st-form .scheduled-task-weekdays input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; padding: 0; }
+.st-form .scheduled-task-weekdays span { display: grid; place-items: center; min-width: 38px; height: 30px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--bg-surface-subtle); color: var(--text-secondary); font-size: 12px; }
+.st-form .scheduled-task-weekdays label:has(input:checked) span { background: var(--accent-blue); border-color: transparent; color: var(--accent-contrast); }
+.st-form .scheduled-task-weekdays label:has(input:focus-visible) span { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+.st-form-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 22px; border-top: 1px solid var(--border-subtle); background: var(--bg-elevated); }
+.st-form-foot button { min-width: 84px; }
+
+@media (max-width: 760px) {
+  .st-page { padding: 20px 16px 32px; }
+  .st-form .scheduled-task-schedule { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .st-form .scheduled-task-execution { grid-template-columns: minmax(0, 1fr); }
+  .st-meta { grid-template-columns: minmax(0, 1fr); }
+}

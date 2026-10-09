@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PrInboxItem, PrInboxQuery, PrRelation, PrTarget } from '@vela/shared';
-import { tr } from '../locale';
+import { tr, activeIntlLocale } from '../locale';
 import { filterInbox, loadedCount } from './pr-inbox-model';
 import { PrInboxDetailView } from './PrInboxDetailView';
-import { usePrInboxCache, usePrInboxIdleRefresh } from '../hooks/usePrInboxCache';
+import { usePrInboxCache } from '../hooks/usePrInboxCache';
+import { useSlidingTabIndicator } from './useSlidingTabIndicator';
+import { defaultPrInboxQuery } from './pr-inbox-cache';
 import '../pr-inbox.css';
 
 export const relationLabels: Record<PrRelation | 'all', [string, string]> = {
@@ -29,13 +31,26 @@ export function PrStateBadge({ state }: { state: PrInboxItem['state'] }) {
   const labels = { open: ['打开', 'Open'], draft: ['草稿', 'Draft'], merged: ['已合并', 'Merged'], closed: ['已关闭', 'Closed'] };
   return <span className={`pr-inbox-badge state-${state}`}>{tr(labels[state][0], labels[state][1])}</span>;
 }
+/** Recent updates read as "3 days ago"; anything older than a week falls back to a short date. */
+export function PrUpdatedTime({ value }: { value: string }) {
+  const at = Date.parse(value);
+  if (!Number.isFinite(at)) return null;
+  const seconds = (at - Date.now()) / 1000;
+  const [divisor, unit] = Math.abs(seconds) >= 86400 ? [86400, 'day'] : Math.abs(seconds) >= 3600 ? [3600, 'hour'] : Math.abs(seconds) >= 60 ? [60, 'minute'] : [1, 'second'];
+  const locale = activeIntlLocale();
+  const date = new Date(at);
+  const text = Math.abs(seconds) < 7 * 86400
+    ? new Intl.RelativeTimeFormat(locale, { numeric: 'auto', style: 'narrow' }).format(Math.round(seconds / Number(divisor)), unit as Intl.RelativeTimeFormatUnit)
+    : date.toLocaleDateString(locale, date.getFullYear() === new Date().getFullYear() ? { month: 'short', day: 'numeric' } : { year: 'numeric', month: 'short', day: 'numeric' });
+  return <time className="pr-inbox-updated" dateTime={value} title={date.toLocaleString()}>{text}</time>;
+}
 function errorText(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 
 export function PrInboxPage({ active, sidebarCollapsed, onToggleSidebar }: { active: boolean; sidebarCollapsed: boolean; onToggleSidebar: () => void }) {
   const { cache, api, version } = usePrInboxCache();
-  usePrInboxIdleRefresh(cache);
-  const [query, setQuery] = useState<PrInboxQuery>({ state: 'openAndDraft', repository: null });
+  const [query, setQuery] = useState<PrInboxQuery>(defaultPrInboxQuery);
   const [relation, setRelation] = useState<PrRelation | 'all'>('all');
+  const relationTabs = useSlidingTabIndicator({ activeKey: relation });
   const [keyword, setKeyword] = useState('');
   const [sort, setSort] = useState('attention');
   const list = cache.getList(query);
@@ -120,6 +135,7 @@ export function PrInboxPage({ active, sidebarCollapsed, onToggleSidebar }: { act
   const repositories = [...new Set((list?.items ?? []).map(i => `${i.target.owner}/${i.target.repo}`))].sort();
   if (query.repository && !repositories.includes(query.repository)) repositories.unshift(query.repository);
   const resetPage = () => { setPage(0); scrollPosition.current = 0; };
+  const selectedItem = selected ? items.find(i => i.key === `${selected.host}/${selected.owner}/${selected.repo}#${selected.number}`.toLowerCase()) ?? null : null;
   const open = (item: PrInboxItem) => { scrollPosition.current = scrollRef.current?.scrollTop ?? 0; setSelected(item.target); };
 
   return <section className="pr-inbox-page" aria-label="Pull Request">
@@ -127,27 +143,31 @@ export function PrInboxPage({ active, sidebarCollapsed, onToggleSidebar }: { act
       {sidebarCollapsed && <button type="button" onClick={onToggleSidebar} aria-label={tr('展开侧栏', 'Show sidebar')}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>}
       <span>Pull Requests</span>
       <span className="pr-inbox-sync">{list?.syncedAt ? `${list.stale ? tr('缓存 · ', 'Cached · ') : ''}${tr('同步于 ', 'Synced ')}${new Date(list.syncedAt).toLocaleTimeString()}` : ''}</span>
+      <span className="pr-inbox-account">{list?.identity ? `@${list.identity.login}` : tr('GitHub 身份未确认', 'GitHub identity unavailable')}</span>
       <button type="button" disabled={loading} onClick={() => void refresh(true)}>{loading ? tr('读取中…', 'Loading…') : tr('刷新', 'Refresh')}</button>
     </header>
     {selected && identityKey ? <PrInboxDetailView key={`${identityKey}:${selected.owner}/${selected.repo}#${selected.number}`} active={active}
-      sourceUrl={list?.items.find(i => i.key === `${selected.host}/${selected.owner}/${selected.repo}#${selected.number}`.toLowerCase())?.url ?? null}
-      target={selected} identityKey={identityKey} onBack={() => setSelected(null)} related={!!list?.items.some(i => i.key === `${selected.host}/${selected.owner}/${selected.repo}#${selected.number}`.toLowerCase())} /> :
+      summary={selectedItem} target={selected} identityKey={identityKey} onBack={() => setSelected(null)} related={!!selectedItem} /> :
       <div ref={scrollRef} className="pr-inbox-scroll">
         <div className="pr-inbox-content">
-          <div className="pr-inbox-heading"><h1>Pull Requests</h1><span className="pr-inbox-account">{list?.identity ? `@${list.identity.login}` : tr('GitHub 身份未确认', 'GitHub identity unavailable')}</span></div>
-          <nav className="pr-inbox-relations" aria-label={tr('关联类型', 'Relationships')}>
-            {(Object.keys(relationLabels) as Array<PrRelation | 'all'>).map(value => <button type="button" key={value} aria-current={relation === value ? 'page' : undefined}
-              onClick={() => { setRelation(value); resetPage(); }}>{tr(...relationLabels[value])}<span>{list ? loadedCount(list, value) : '—'}</span></button>)}
-          </nav>
-          <div className="pr-inbox-filters">
-            <label className="pr-inbox-search"><span>{tr('搜索已加载 PR', 'Search loaded PRs')}</span><input ref={searchRef} value={keyword} placeholder={tr('标题、仓库或 #编号', 'Title, repository or #number')} onChange={e => { setKeyword(e.target.value); resetPage(); }} /></label>
-            <label><span>{tr('仓库（已加载范围）', 'Repository (loaded results)')}</span><select value={query.repository ?? ''} onChange={e => { setQuery(q => ({ ...q, repository: e.target.value || null })); resetPage(); }}>
-              <option value="">{tr('所有仓库', 'All repositories')}</option>{repositories.map(repo => <option key={repo}>{repo}</option>)}</select></label>
-            <label><span>{tr('状态', 'State')}</span><select value={query.state} onChange={e => { setQuery(q => ({ ...q, state: e.target.value as PrInboxQuery['state'] })); resetPage(); }}>
-              {([['openAndDraft', '打开与草稿', 'Open & draft'], ['open', '仅打开', 'Open'], ['draft', '仅草稿', 'Draft'], ['merged', '已合并', 'Merged'], ['closed', '已关闭', 'Closed'], ['all', '全部状态', 'All states']] as const).map(([value, zh, en]) => <option key={value} value={value}>{tr(zh, en)}</option>)}
-            </select></label>
-            <label><span>{tr('排序', 'Sort')}</span><select value={sort} onChange={e => { setSort(e.target.value); resetPage(); }}>
-              <option value="attention">{tr('需要关注优先', 'Attention first')}</option><option value="updated">{tr('最近更新', 'Recently updated')}</option><option value="repository">{tr('按仓库', 'Repository')}</option></select></label>
+          <div className="pr-inbox-sticky">
+            <nav ref={relationTabs.navRef} className="conversation-view-tabs pr-inbox-relations" role="tablist" aria-label={tr('关联类型', 'Relationships')}
+              onPointerMove={relationTabs.onPointerMove} onPointerLeave={relationTabs.onPointerLeave}>
+              {(Object.keys(relationLabels) as Array<PrRelation | 'all'>).map(value => <button type="button" role="tab" key={value} data-tab-key={value} ref={relationTabs.registerTab(value)}
+                aria-selected={relation === value} onClick={() => { setRelation(value); resetPage(); }}>{tr(...relationLabels[value])}<span>{list ? loadedCount(list, value) : '—'}</span></button>)}
+              {relationTabs.indicator}
+            </nav>
+            <div className="pr-inbox-filters">
+              <label className="pr-inbox-search"><svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><circle cx="9" cy="9" r="5.5"/><path d="m13.2 13.2 3.8 3.8"/></svg>
+                <input ref={searchRef} value={keyword} aria-label={tr('搜索已加载 PR', 'Search loaded PRs')} placeholder={tr('搜索已加载 PR：标题、仓库或 #编号', 'Search loaded PRs: title, repository or #number')} onChange={e => { setKeyword(e.target.value); resetPage(); }} /></label>
+              <select aria-label={tr('仓库（已加载范围）', 'Repository (loaded results)')} value={query.repository ?? ''} onChange={e => { setQuery(q => ({ ...q, repository: e.target.value || null })); resetPage(); }}>
+                <option value="">{tr('所有仓库', 'All repositories')}</option>{repositories.map(repo => <option key={repo}>{repo}</option>)}</select>
+              <select aria-label={tr('状态', 'State')} value={query.state} onChange={e => { setQuery(q => ({ ...q, state: e.target.value as PrInboxQuery['state'] })); resetPage(); }}>
+                {([['openAndDraft', '打开与草稿', 'Open & draft'], ['open', '仅打开', 'Open'], ['draft', '仅草稿', 'Draft'], ['merged', '已合并', 'Merged'], ['closed', '已关闭', 'Closed'], ['all', '全部状态', 'All states']] as const).map(([value, zh, en]) => <option key={value} value={value}>{tr(zh, en)}</option>)}
+              </select>
+              <select aria-label={tr('排序', 'Sort')} value={sort} onChange={e => { setSort(e.target.value); resetPage(); }}>
+                <option value="attention">{tr('需要关注优先', 'Attention first')}</option><option value="updated">{tr('最近更新', 'Recently updated')}</option><option value="repository">{tr('按仓库', 'Repository')}</option></select>
+            </div>
           </div>
           {(localError || list?.error) && <div className="pr-inbox-notice" role="alert">
             <p>{localError || list?.error?.message}</p>
@@ -158,17 +178,17 @@ export function PrInboxPage({ active, sidebarCollapsed, onToggleSidebar }: { act
             <button type="button" disabled={loading || !!list?.error?.retryAt && Date.now() < list.error.retryAt} onClick={() => void refresh(true)}>{tr('重试读取', 'Retry')}</button>
           </div>}
           {list?.pages.some(p => p.incompleteResults) && <p className="pr-inbox-notice">{tr('搜索结果不完整或超过 1,000 条，请缩小仓库范围。', 'Results are incomplete or exceed 1,000. Narrow the repository filter.')}</p>}
-          {!list && loading ? <div className="pr-inbox-skeleton" role="status" aria-label={tr('正在读取 PR', 'Loading PRs')}>{Array.from({ length: 5 }, (_, i) => <div key={i} />)}</div> :
+          {!list && loading ? <div className="pr-inbox-skeleton" role="status" aria-label={tr('正在读取 PR', 'Loading PRs')}>{Array.from({ length: 8 }, (_, i) => <div key={i} />)}</div> :
             <div className="pr-inbox-list" aria-busy={loading}>
-              {visible.map((item, index) => <div key={item.key}>
+              {visible.map((item, index) => <Fragment key={item.key}>
                 {sort === 'attention' && (index === 0 || !!item.attentionReasons.length !== !!visible[index - 1].attentionReasons.length) && <h2 className="pr-inbox-group">{item.attentionReasons.length ? tr('需要关注', 'Needs attention') : tr('其他', 'Other')}</h2>}
                 <button type="button" className="pr-inbox-row" onClick={() => open(item)}>
-                  <span className={`pr-inbox-pr-symbol state-${item.state}`} aria-hidden="true"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><circle cx="6" cy="5" r="3"/><circle cx="6" cy="19" r="3"/><circle cx="18" cy="19" r="3"/><path d="M6 8v8M18 16V9a4 4 0 0 0-4-4h-2m2-2-2 2 2 2"/></svg></span>
-                  <span className="pr-inbox-row-title"><strong>{item.title}</strong><span className="pr-inbox-meta">{item.target.owner}/{item.target.repo} <span>#{item.target.number}</span> {item.relations.map(r => <span key={r}>{tr(...relationLabels[r])}</span>)}</span></span>
+                  <span className={`pr-inbox-pr-symbol state-${item.state}`} aria-hidden="true"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="6" cy="5" r="3"/><circle cx="6" cy="19" r="3"/><circle cx="18" cy="19" r="3"/><path d="M6 8v8M18 16V9a4 4 0 0 0-4-4h-2m2-2-2 2 2 2"/></svg></span>
+                  <span className="pr-inbox-row-title"><strong title={item.title}>{item.title}</strong><span className="pr-inbox-meta"><span>{item.target.owner}/{item.target.repo}</span><span>#{item.target.number}</span>{item.relations.map(r => <span className="pr-inbox-relation-tag" key={r}>{tr(...relationLabels[r])}</span>)}</span></span>
                   <span className="pr-inbox-row-state"><PrStateBadge state={item.state}/><span className="pr-inbox-check">{item.enrichment === 'idle' ? tr('正在读取状态…', 'Reading status…') : item.enrichment === 'error' ? tr('状态读取失败', 'Status unavailable') : <PrCheckStatus state={item.checks}/>}</span></span>
-                  <time className="pr-inbox-updated" dateTime={item.updatedAt}>{item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : ''}</time>
+                  <PrUpdatedTime value={item.updatedAt}/>
                 </button>
-              </div>)}
+              </Fragment>)}
               {list && !filtered.length && <div className="pr-inbox-empty">{keyword || relation !== 'all' ? tr('已加载的 PR 中没有匹配结果。', 'No matches in loaded PRs.') : list.complete ? tr('没有关联的 Pull Request。', 'No related pull requests.') : tr('当前读取范围内没有 PR，结果尚未完整。', 'No PRs in the current range. Results are incomplete.')}</div>}
             </div>}
           {filtered.length > 40 && <div className="pr-inbox-pagination"><button type="button" disabled={!effectivePage} onClick={() => setPage(effectivePage - 1)}>{tr('上一页', 'Previous')}</button><span>{effectivePage + 1} / {Math.ceil(filtered.length / 40)}</span><button type="button" disabled={(effectivePage + 1) * 40 >= filtered.length} onClick={() => setPage(effectivePage + 1)}>{tr('下一页', 'Next')}</button></div>}

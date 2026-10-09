@@ -17,7 +17,9 @@
   flex-shrink: 0;
   gap: 16px;
   margin: 0 20px;
-  overflow-x: auto;
+  /* clip 而非 auto:让滑动下划线悬停时能向两侧展开到容器外 12px。 */
+  overflow: clip;
+  overflow-clip-margin: 12px;
   border-bottom: 1px solid var(--border-subtle);
   position: relative;
 }
@@ -37,7 +39,7 @@
 }
 
 .usage-tabs button:hover { color: var(--text-primary); }
-.usage-tabs button[aria-selected="true"] { color: var(--text-primary); }
+.usage-tabs button[aria-selected="true"] { color: var(--accent-blue); }
 .usage-tabs button span { color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .usage-view :focus-visible { outline: 2px solid var(--accent-blue); outline-offset: -2px; }
 
@@ -72,7 +74,7 @@
 @container usage (max-width: 520px) {
   .usage-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .usage-content { padding: 16px; }
-  .usage-tabs { margin: 0 16px; gap: 12px; }
+  .usage-tabs { margin: 0 16px; gap: 12px; overflow-x: auto; }
   .usage-summary-card { padding: 14px; }
 }
 

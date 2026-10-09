@@ -1,5 +1,5 @@
 import { useEffect, useSyncExternalStore } from 'react';
-import { getPrInboxCache, type PrInboxCache } from '../components/pr-inbox-cache';
+import { defaultPrInboxQuery, getPrInboxCache } from '../components/pr-inbox-cache';
 
 export function usePrInboxCache() {
   const cache = getPrInboxCache(window.vela!.prInbox);
@@ -7,24 +7,34 @@ export function usePrInboxCache() {
   return { cache, api: cache.api, version };
 }
 
-/** Keep loaded PR data fresh while working elsewhere; pause when the window is hidden or input is active. */
-export function usePrInboxIdleRefresh(cache: PrInboxCache) {
+/**
+ * Keep PR data fresh from app start, whichever page is open and whether or not the user is typing,
+ * and preload the details of PRs not opened yet so clicking one renders from cache.
+ * Only a hidden window pauses it; becoming visible again refreshes right away.
+ */
+export function usePrInboxBackgroundRefresh(enabled: boolean) {
   useEffect(() => {
-    let lastInput = Date.now(); let disposed = false; let idle: number | null = null;
-    const input = () => { lastInput = Date.now(); };
-    const isIdle = () => !disposed && document.visibilityState === 'visible' && Date.now() - lastInput >= 10_000;
+    const source = window.vela?.prInbox;
+    if (!enabled || !source) return;
+    const cache = getPrInboxCache(source);
+    let disposed = false; let idle: number | null = null;
+    const isVisible = () => !disposed && document.visibilityState === 'visible';
     const tick = () => {
-      if (!isIdle() || idle !== null) return;
-      idle = window.requestIdleCallback(() => { idle = null; void cache.refreshIdle(isIdle); });
+      if (!isVisible() || idle !== null) return;
+      // Idle callbacks only wait for a free frame; the timeout keeps refreshes going during continuous interaction.
+      idle = window.requestIdleCallback(() => {
+        idle = null;
+        void cache.warm(defaultPrInboxQuery)
+          .then(() => cache.preload(defaultPrInboxQuery, isVisible))
+          .then(() => cache.refreshIdle(isVisible));
+      }, { timeout: 2_000 });
     };
-    const events = ['pointerdown', 'pointermove', 'keydown', 'wheel'] as const;
-    for (const event of events) window.addEventListener(event, input, { passive: true });
-    document.addEventListener('visibilitychange', input);
+    const start = window.setTimeout(tick, 3_000);
     const timer = window.setInterval(tick, 15_000);
+    document.addEventListener('visibilitychange', tick);
     return () => {
-      disposed = true; clearInterval(timer); if (idle !== null) window.cancelIdleCallback(idle);
-      for (const event of events) window.removeEventListener(event, input);
-      document.removeEventListener('visibilitychange', input);
+      disposed = true; clearTimeout(start); clearInterval(timer); if (idle !== null) window.cancelIdleCallback(idle);
+      document.removeEventListener('visibilitychange', tick);
     };
-  }, [cache]);
+  }, [enabled]);
 }

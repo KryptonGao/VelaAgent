@@ -500,11 +500,12 @@
 .vc-subtabs button {
   position: relative;
   height: 100%;
-  padding: 0 1px;
+  padding: 0 4px;
   border: 0;
   background: transparent;
   color: var(--text-muted);
   font-size: 12px;
+  transition: color 140ms var(--motion-ease-enter);
 }
 
 .vc-subtabs button:not(.active):hover {
@@ -512,8 +513,7 @@
 }
 
 .vc-subtabs button.active {
-  color: var(--text-primary);
-  font-weight: 600;
+  color: var(--accent-blue);
 }
 
 .vc-pill {

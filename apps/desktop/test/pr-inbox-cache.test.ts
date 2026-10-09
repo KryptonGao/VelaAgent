@@ -154,3 +154,47 @@ it('discards old activity and patch versions when detail observes a new head or 
   const before = f.calls.length; f.advance(); await f.cache.refreshIdle();
   assert.ok(f.calls.slice(before).every(call => call.name !== 'activity' && call.name !== 'files'));
 });
+
+it('keeps entries that are still being read when later reads fill the cache', async () => {
+  const f = fixture(); await f.seed();
+  await f.cache.api.detail(target, f.options());
+  for (let n = 1; n <= 220; n++) {
+    await f.cache.api.detail({ ...target, number: 1000 + n }, f.options());
+    assert.ok(f.cache.getList(query)); assert.ok(f.cache.getDetail(target, identity.key));
+  }
+  assert.equal(f.cache.getDetail({ ...target, number: 1001 }, identity.key), null);
+});
+
+it('warms the default list and newest row status before the inbox is opened, then backs off on failure', async () => {
+  const f = fixture({ list: async () => list({ items: [{ ...item, enrichment: 'idle' }] }), enrich: async targets => targets.map(t => ({ ...item, target: t })) });
+  await f.cache.warm(query);
+  assert.deepEqual(f.calls.map(call => call.name), ['list', 'enrich']);
+  assert.equal(f.cache.getList(query)?.items[0].title, 'Cached PR');
+  await f.cache.warm(query); assert.equal(f.calls.length, 2);
+  const failing = fixture({ list: async () => { throw new Error('offline'); } });
+  await failing.cache.warm(query); await failing.cache.warm(query); assert.equal(failing.calls.length, 1);
+  failing.advance(); await failing.cache.warm(query); assert.equal(failing.calls.length, 2);
+});
+
+it('preloads unopened PR details attention-first, a few per call, and refreshes them on a slower cadence', async () => {
+  const row = (number: number, updatedAt: string, attention = false): PrInboxItem => ({ ...item, key: `github.com/owner/repo#${number}`, target: { ...target, number }, updatedAt,
+    attentionReasons: attention ? ['reviewRequested'] : [] });
+  const rows = [row(1, '2026-10-01T00:00:00Z'), row(2, '2026-10-05T00:00:00Z'), row(3, '2026-09-01T00:00:00Z', true), row(4, '2026-10-03T00:00:00Z')];
+  const f = fixture({ list: async () => list({ items: rows }) }); await f.seed();
+  await f.cache.api.detail({ ...target, number: 2 }, f.options());
+  const before = f.calls.length;
+  await f.cache.preload(query);
+  const preloaded = f.calls.slice(before);
+  assert.deepEqual(preloaded.filter(call => call.name === 'detail').map(call => call.args[0].number), [3, 4]);
+  assert.equal(preloaded.filter(call => call.name === 'activity').length, 8);
+  assert.ok(f.cache.getDetail({ ...target, number: 3 }, identity.key));
+  assert.ok(f.cache.getActivity({ ...target, number: 3 }, identity.key, head).comments);
+  await f.cache.preload(query, () => true, 2);
+  assert.deepEqual(f.calls.slice(before).filter(call => call.name === 'detail').map(call => call.args[0].number), [3, 4, 1]);
+  // Viewed entries refresh after a minute; preloaded ones wait for five.
+  const settled = f.calls.length; f.advance(); await f.cache.refreshIdle(); await f.cache.refreshIdle();
+  assert.ok(f.calls.slice(settled).every(call => !(call.name === 'detail' && call.args[0].number !== 2)));
+  f.advance(5 * 60_000);
+  for (let i = 0; i < 4; i++) await f.cache.refreshIdle();
+  assert.ok(f.calls.slice(settled).some(call => call.name === 'detail' && call.args[0].number === 3));
+});
