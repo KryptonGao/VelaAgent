@@ -9,11 +9,17 @@ export * from "./plugin";
 import type { PluginApi } from "./plugin";
 import type { McpApi } from "./mcp";
 import type { MemoryApi, MemoryLoadReport } from "./memory";
+import type { UiPreference } from "./intelligent-ui";
 export * from "./trace";
 export * from "./redaction";
 export * from "./logging";
 import type { LogsApi } from "./logging";
 export * from "./updates";
+export * from "./intelligent-ui";
+export * from "./intelligent-ui-expression";
+export * from "./intelligent-ui-components";
+export * from "./intelligent-ui-parser";
+export * from "./intelligent-ui-state";
 import type { UpdatesApi } from "./updates";
 import type { TraceSnapshot, TraceDetails, TraceUpdate } from "./trace";
 export const conversationTitleMaxLength = 120;
@@ -175,6 +181,8 @@ export const IpcChannel = {
   workspaceSearch: "workspace:code-search",
   getAgentSettings: "agent:get-settings",
   saveAgentSettings: "agent:save-settings",
+  getIntelligentUi: "intelligent-ui:get",
+  setIntelligentUi: "intelligent-ui:set",
   listSkills: "skills:list",
   openSkillsDir: "skills:open-dir",
   scanExternalSkills: "skills:scan-external",
@@ -2781,6 +2789,9 @@ export interface VelaApi extends McpApi, PluginApi {
   removeModel(provider: string, id: string): Promise<AppState>;
   getAgentSettings(): Promise<AgentSettings>;
   saveAgentSettings(settings: AgentSettings): Promise<AgentSettings>;
+  /** Intelligent UI 偏好：决定模型是否被告知可以生成交互界面。 */
+  getIntelligentUi(): Promise<{ preference: UiPreference }>;
+  setIntelligentUi(preference: UiPreference): Promise<{ preference: UiPreference }>;
   listSkills(): Promise<SkillCatalog>;
   openSkillsDirectory(): Promise<void>;
   scanExternalSkills(): Promise<ExternalSkillScan>;

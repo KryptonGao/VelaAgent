@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import type { AppLocale, ThinkingSummaryModel } from "@vela/shared";
 import type { MessageStore } from "../hooks/message-store";
 import { useMessages } from "../hooks/useMessages";
@@ -8,6 +8,9 @@ import { ChatView, type ChatViewProps } from "./ChatView";
 import { uiStorage } from "../ui-storage";
 import { createFoldStore, type ToolFoldStore } from "./tool-fold-state";
 import { ToolProcessProvider } from "./ToolProcessContext";
+import { mayContainUi } from "@vela/shared";
+import { UiHostProvider, uiStateStore, type UiHost } from "./intelligent-ui/UiRuntime";
+import { stableUiMessageId } from "./intelligent-ui/ui-state-store";
 
 // A remount renders before the old provider's cleanup flushes. Reuse its memory
 // state here, including when durable storage is unavailable.
@@ -42,6 +45,10 @@ export const SessionChatView = memo(function SessionChatView({ messageStore, sum
         (stores.get(id) ?? createFoldStore({ sessionId: id, storage: uiStorage })).resetSession();
         stores.delete(id);
       }
+      // 会话被删除：连同交互界面的本地状态一起清理。
+      if (id && id !== sessionId && !existing.has(id)) {
+        uiStateStore.removeConversation(id);
+      }
     }
     previousSessionIds.current = existing;
   }, [props.state?.conversations, sessionId, stores]);
@@ -58,7 +65,33 @@ export const SessionChatView = memo(function SessionChatView({ messageStore, sum
     model: summaryModel,
     locale,
   });
+  const streaming = props.state?.session.status === "streaming";
+  const modelReady = props.state?.session.modelReady ?? false;
+  const onSend = props.onSend;
+  // 第 n 条含界面的助手回复得到稳定位置 u{n}：实时消息与历史恢复的消息 id 不同，但这个序号一致。
+  const uiOrdinals = useMemo(() => {
+    const ordinals = new Map<string, string>();
+    for (const message of messages) {
+      if (message.role === "assistant" && mayContainUi(message.text)) ordinals.set(message.id, stableUiMessageId(ordinals.size));
+    }
+    return ordinals;
+  }, [messages]);
+  // 回退、编辑重发之后不再存在的位置，其本地状态一并清除；流式中或历史未加载时不动。
+  useEffect(() => {
+    if (sessionId && !streaming && messages.length > 0) uiStateStore.pruneConversation(sessionId, uiOrdinals.size);
+  }, [sessionId, streaming, messages.length, uiOrdinals.size]);
+  const uiHost = useMemo<UiHost>(() => ({
+    conversationId: sessionId,
+    stableMessageId: (messageId) => uiOrdinals.get(messageId) ?? null,
+    canSubmit: modelReady,
+    agentBusy: streaming,
+    // 与输入框一致：运行中进入队列，不打断当前任务。
+    submit: (text) => onSend(text, undefined, streaming ? "queue" : undefined),
+    openLink: () => false,
+  }), [sessionId, uiOrdinals, modelReady, streaming, onSend]);
   return <ToolProcessProvider sessionId={sessionId} store={foldStore} compact={props.toolDisplay === "compact"} enabled={toolProcessDetails}>
-    <ChatView {...props} messages={messages} thinkingSummaries={thinkingSummaries} />
+    <UiHostProvider value={uiHost}>
+      <ChatView {...props} messages={messages} thinkingSummaries={thinkingSummaries} />
+    </UiHostProvider>
   </ToolProcessProvider>;
 });

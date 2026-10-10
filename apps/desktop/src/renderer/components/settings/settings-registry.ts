@@ -1,4 +1,5 @@
 import type { SettingsCopy } from "../settings-copy";
+import { uiCopy } from "../intelligent-ui/copy";
 
 export type SettingsPageId =
   | "appearance" | "interface" | "shortcuts" | "updates"
@@ -76,6 +77,8 @@ export const settingsEntries: readonly SettingsEntry[] = [
   { id: "thinking-summary", page: "display", title: (c) => c.appearance.thinkingSummary, hint: (c) => c.appearance.thinkingSummaryHint, keywords: { zh: ["思考摘要", "思考总结", "总结"], en: ["thinking summary", "summary", "summarize"] } },
   { id: "thinking-summary-model", page: "display", title: (c) => c.appearance.thinkingSummaryModel, hint: (c) => c.appearance.thinkingSummaryModelHint, keywords: { zh: ["总结模型", "摘要模型"], en: ["summary model"] } },
   { id: "thinking-summary-style", page: "display", title: (c) => c.appearance.thinkingSummaryStyle, hint: (c) => c.appearance.thinkingSummaryStyleHint, keywords: { zh: ["总结显示", "标题", "跟在思考后", "跟随回复"], en: ["summary display", "headline", "inline", "prose"] } },
+
+  { id: "intelligent-ui", page: "display", title: () => uiCopy.setting.title(), hint: () => uiCopy.setting.description(), keywords: { zh: ["交互界面", "计算器", "对比表", "原生界面", "动态界面", "生成式界面"], en: ["intelligent ui", "interactive", "generative ui", "calculator", "interface", "visual"] } },
 
   { id: "skills", page: "skills", title: (c) => c.agent.skills, hint: (c) => c.agent.skillsHint, keywords: { zh: ["技能", "迁移", "Codex", "Claude Code", "SKILL.md"], en: ["skill", "migrate", "codex", "claude code", "SKILL.md"] } },
 

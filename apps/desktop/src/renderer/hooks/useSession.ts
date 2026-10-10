@@ -20,6 +20,7 @@ import type {
 import { agentStatuses, emptyAgentUsage } from "@vela/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createMessageStore, emptyMessages, messageScope } from "./message-store";
+import { uiStateStore } from "../components/intelligent-ui/ui-state-instance";
 import { applyPlanDraft, type PlanDraft } from "../plan-draft";
 import { localizeError, tr } from "../locale";
 import { didCompleteTask, noSound, streamNotificationSound, type NotifySound } from "../notification-sounds";
@@ -425,6 +426,8 @@ export function useSession(notify: NotifySound = noSound) {
     const id = activeIdRef.current;
     if (!api || !id) throw new Error(tr("对话不存在或已结束", "Chat not found or already ended."));
     const next = await api.branchConversation(id, turnIndex, options);
+    // 分支沿用分支点之前的交互界面状态，复制快照而不是共享。
+    if (next.activeConversationId) uiStateStore.copyConversation(id, next.activeConversationId);
     setState(next);
     if (next.activeConversationId) void loadTranscript(next.activeConversationId);
   }, [loadTranscript]);

@@ -3,7 +3,7 @@ import { PluginRegistry } from "./mcp/plugin-registry";
 import { OAuthMCPManager } from "./mcp/oauth";
 import { PluginMCPManager } from "./mcp/manager";
 import type { CredentialStore } from "./mcp/credentials";
-import type { BuiltInPlugin, PluginCatalog, PluginTarget, PluginStatusEvent } from "@vela/shared";
+import type { BuiltInPlugin, PluginCatalog, PluginTarget, PluginStatusEvent, UiPreference } from "@vela/shared";
 import { redactMcpDisplay, mcpConfiguredSecrets } from "./mcp-redaction";
 import { McpSessionBridge, isMcpTool, type McpPermission } from "./mcp-session";
 import { createScheduledTaskTools, scheduledTaskInstructions } from "./scheduled-task-tools";
@@ -94,6 +94,8 @@ import {
 import { ModelDirectory } from "./model-directory";
 import { MemoryService } from "./memory";
 import { MemorySettings } from "./memory-settings";
+import { IntelligentUiSettings } from "./intelligent-ui-settings";
+import { intelligentUiInstructions } from "./intelligent-ui-prompt";
 import { createMemoryContextExtension } from "./memory-context";
 import { createMemoryTools, memoryDisabledInstructions, memoryInstructions, memoryReadOnlyInstructions, type MemoryWritePermission } from "./memory-tools";
 import { openCodeSessionHeaders } from "./provider-headers";
@@ -337,11 +339,13 @@ export class AgentRuntime {
   /** 记忆服务入口：模型工具与桌面管理入口共用同一个实例；第一版是文件存储，不维护数据库副本。 */
   readonly memory: MemoryService;
   private readonly memorySettings: MemorySettings;
+  private readonly intelligentUiSettings: IntelligentUiSettings;
 
   constructor(private readonly options: AgentRuntimeOptions) {
     this.currentCwd = options.cwd;
     this.memory = new MemoryService({ agentDir: options.agentDir });
     this.memorySettings = new MemorySettings(options.agentDir);
+    this.intelligentUiSettings = new IntelligentUiSettings(options.agentDir);
     this.skills = new SkillLibrary(options.agentDir);
     this.tools = new ToolLoadout({
       scheduledTasks: Boolean(options.scheduledTasks),
@@ -2171,7 +2175,17 @@ export class AgentRuntime {
             availableTools: (mode, plan) => this.tools.native(mode, plan, entry),
             authorizeCall: call => this.tools.authorize(call, entry),
           }),
-        }, { name: "vela-memory", hidden: true, factory: this.memoryExtension(entry, null) }, ...(this.options.scheduledTasks ? [{ name: "vela-scheduled-tasks-clock", hidden: true,
+        }, { name: "vela-memory", hidden: true, factory: this.memoryExtension(entry, null) }, {
+          name: "vela-intelligent-ui",
+          hidden: true,
+          factory: ((pi) => { pi.on("before_agent_start", event => {
+            // 每轮读取当前偏好，设置切换后下一轮立即生效。
+            const extra = intelligentUiInstructions(this.intelligentUiSettings.preference, entry.snapshot.mode);
+            if (!extra) return;
+            const current = event.systemPromptOptions.appendSystemPrompt.trim();
+            event.systemPromptOptions.appendSystemPrompt = current ? `${current}\n\n${extra}` : extra;
+          }); }) as ExtensionFactory,
+        }, ...(this.options.scheduledTasks ? [{ name: "vela-scheduled-tasks-clock", hidden: true,
           factory: ((pi) => { pi.on("before_agent_start", event => {
             event.systemPromptOptions.appendSystemPrompt += `\n\n任务时间上下文：${new Date().toISOString()}；本机时区：${Intl.DateTimeFormat().resolvedOptions().timeZone}`;
           }); }) as ExtensionFactory,
@@ -3056,6 +3070,15 @@ export class AgentRuntime {
    */
   getMemoryStatus(conversationId: string, agentId?: string): MemoryLoadReport[] {
     return (this.memoryLoads.get(agentId ? `${conversationId}/${agentId}` : conversationId) ?? []).map((source) => ({ ...source }));
+  }
+
+  getIntelligentUiSettings(): { preference: UiPreference } {
+    return { preference: this.intelligentUiSettings.preference };
+  }
+
+  setIntelligentUiPreference(preference: UiPreference): { preference: UiPreference } {
+    this.intelligentUiSettings.setPreference(preference);
+    return this.getIntelligentUiSettings();
   }
 
   getMemorySettings(): { enabled: boolean } {

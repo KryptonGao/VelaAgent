@@ -26,6 +26,8 @@
 
 长内容会截断并注明省略的字符数：`bash` 输出和失败文本上限 4000 / 2000 字符，其余工具输出 1200 字符，时间线最多 1000 行。用户消息里的图片只记录数量。
 
+助手回复里的交互界面（`vela-ui` 块）导出为纯文字等价物，不含原始 JSON 或可点击动作；有用户保存的输入时使用保存值，详见 [intelligent-ui.md](./intelligent-ui.md)。实现在 `apps/desktop/src/main/intelligent-ui-export.ts`。
+
 表头与小标题跟随应用语言（zh-CN、zh-TW、en、ja、ko）。工具名、轨迹节点类型和状态保持英文标识。
 
 ## 脱敏

@@ -11,6 +11,7 @@
     "test:sounds": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --test test/notification-sounds.test.ts",
     "dev": "electron-vite dev --watch",
     "test:pi-sdk:electron": "node test/pi-sdk-electron-smoke.mjs",
+    "test:intelligent-ui": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --test test/intelligent-ui-renderer.test.ts test/intelligent-ui-export.test.ts ../../packages/agent/test/intelligent-ui-*.test.ts",
     "test:conversation-export": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --test test/conversation-export.test.ts",
     "test:trace": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --test ../../packages/agent/test/trace.test.ts test/trace-model.test.ts",
     "test:thinking-summary": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --test ../../packages/agent/test/thinking-summary.test.ts ../../packages/agent/test/thinking-summary-http.test.ts test/thinking-summary.test.ts",
