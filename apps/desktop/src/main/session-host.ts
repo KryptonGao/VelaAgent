@@ -19,6 +19,7 @@ import {
   isAgentToolName,
   isInteractionMode,
   isRuntimeInstructionMode,
+  isUiPreference,
   type ModelAuthEvent,
   type NewConversationSelection,
   type PlanExecutionContextStrategy,
@@ -221,6 +222,11 @@ export class SessionHost {
     ipcMain.handle(IpcChannel.getAgentSettings, () => this.runtime.getAgentSettings());
     ipcMain.handle(IpcChannel.saveAgentSettings, async (_event, raw: unknown) => {
       return this.runtime.saveAgentSettings(parseAgentSettings(raw));
+    });
+    ipcMain.handle(IpcChannel.getIntelligentUi, () => this.runtime.getIntelligentUiSettings());
+    ipcMain.handle(IpcChannel.setIntelligentUi, (_event, raw: unknown) => {
+      if (!isUiPreference(raw)) throw new Error("Intelligent UI 偏好不正确");
+      return this.runtime.setIntelligentUiPreference(raw);
     });
     ipcMain.handle(IpcChannel.listSkills, () => this.runtime.listSkills(this.hooks.currentCwd()));
     ipcMain.handle(IpcChannel.scanExternalSkills, () => this.runtime.scanExternalSkills(this.hooks.currentCwd()));

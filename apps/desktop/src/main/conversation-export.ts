@@ -10,6 +10,7 @@ import {
   type TranscriptTool,
 } from "@vela/shared";
 import { homedir } from "node:os";
+import { exportAssistantText, UiExportNumbering, type UiStateReader } from "./intelligent-ui-export";
 
 export interface ConversationExportInput {
   conversation: { id: string; title: string; cwd: string; createdAt: number; updatedAt: number };
@@ -22,6 +23,8 @@ export interface ConversationExportInput {
   checkpoints: CheckpointTimeline | null;
   locale: AppLocale;
   appVersion: string;
+  /** Reads the renderer's saved Intelligent UI state so exported UI shows the user's last inputs. */
+  readUiState?: UiStateReader;
   exportedAt?: Date;
   homeDir?: string;
 }
@@ -218,6 +221,13 @@ function buildBlocks(input: ConversationExportInput, settings: ConversationExpor
   }
 
   blocks.push({ t: "heading", level: 2, text: t("对话记录", "Conversation") });
+  const uiNumbering = new UiExportNumbering();
+  const uiContext = {
+    conversationId: input.conversation.id,
+    readUiState: input.readUiState,
+    label: t("交互界面（静态文字版）", "Interactive UI (static text)"),
+    omitted: t("[交互界面无法导出]", "[Interactive UI could not be exported]"),
+  };
   for (const turn of turns) {
     blocks.push({ t: "heading", level: 3, text: t("第 {0} 轮", "Turn {0}", turn.index + 1) });
     if (turn.user) {
@@ -229,12 +239,13 @@ function buildBlocks(input: ConversationExportInput, settings: ConversationExpor
     }
     for (const message of turn.assistants) {
       const stamp = message.timestamp === null ? "" : ` · ${exportTimestamp(message.timestamp)}`;
+      const uiMessageId = uiNumbering.next(message.text);
       if (settings.includeThinking && message.thinking.trim()) {
         blocks.push({ t: "details", summary: t("思考过程", "Thinking"), blocks: [{ t: "text", text: message.thinking }] });
       }
       if (message.text.trim()) {
         blocks.push({ t: "text", text: `**${t("助手", "Assistant")}**${stamp}` });
-        blocks.push({ t: "text", text: message.text });
+        blocks.push({ t: "text", text: exportAssistantText(message.text, uiMessageId, uiContext) });
       }
       for (const tool of message.tools) blocks.push(...toolBlocks(tool, input.conversation.cwd, settings, clipLabel));
     }

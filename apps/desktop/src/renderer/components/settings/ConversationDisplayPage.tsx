@@ -4,6 +4,7 @@ import type { PreferencesApi, ThinkingSummaryStyle, ToolDisplay, ToolFold } from
 import type { SettingsCopy } from "../settings-copy";
 import { groupAvailable, modelValue, parseModelValue } from "./model-helpers";
 import { Segmented, SettingsBlock } from "./primitives";
+import { IntelligentUiSetting } from "../intelligent-ui/IntelligentUiSetting";
 
 export function ConversationDisplayPage({
   copy,
@@ -116,6 +117,7 @@ export function ConversationDisplayPage({
           onChange={setThinkingSummaryStyle}
         />
       </SettingsBlock>
+      <IntelligentUiSetting />
     </section>
   );
 }

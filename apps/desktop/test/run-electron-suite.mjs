@@ -23,6 +23,7 @@ const suites = {
     { name: "memory-settings-ui", runner: "node" },
     { name: "chat-actions-ui", runner: "node" },
     { name: "updates-ui", runner: "node" },
+    { name: "intelligent-ui-ui", runner: "node" },
   ],
   smoke: [
     { name: "pi-sdk-electron-smoke", runner: "node" },

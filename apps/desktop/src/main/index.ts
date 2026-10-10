@@ -368,7 +368,7 @@ async function start(): Promise<void> {
     currentCwd: () => workspaceManager.getState().current ?? fallbackCwd,
   });
   host.register();
-  conversationExportHost = new ConversationExportHost(runtime, getApplicationLocale);
+  conversationExportHost = new ConversationExportHost(runtime, getApplicationLocale, key => uiStorage.getItem(key) ?? null);
   conversationExportHost.register();
   registerDevelopmentIpc(runtime, { isPackaged: app.isPackaged, home });
   scheduledTaskHost = new ScheduledTaskHost(scheduler);

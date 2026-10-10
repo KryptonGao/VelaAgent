@@ -3,6 +3,7 @@ import { IpcChannel, createLogger, type AppLocale, type CheckpointTimeline, type
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { UiStateReader } from "./intelligent-ui-export";
 import { buildConversationExport, conversationExportFileName, parseExportOptions } from "./conversation-export";
 
 const log = createLogger("conversation-export");
@@ -10,7 +11,11 @@ const log = createLogger("conversation-export");
 const failureDetailLimit = 50;
 
 export class ConversationExportHost {
-  constructor(private readonly runtime: AgentRuntime, private readonly locale: () => AppLocale) {}
+  constructor(
+    private readonly runtime: AgentRuntime,
+    private readonly locale: () => AppLocale,
+    private readonly readUiState?: UiStateReader,
+  ) {}
 
   register(): void {
     ipcMain.handle(IpcChannel.sessionExport, (event, rawId: unknown, rawOptions: unknown) => {
@@ -64,6 +69,7 @@ export class ConversationExportHost {
       checkpoints,
       locale: this.locale(),
       appVersion: app.getVersion(),
+      readUiState: this.readUiState,
     }, options);
     await writeFile(selection.filePath, document, "utf8");
     shell.showItemInFolder(selection.filePath);

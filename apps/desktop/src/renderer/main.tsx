@@ -4,6 +4,7 @@ import { App } from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { installRendererLogging } from "./logger";
 import "./styles.css";
+import "./components/intelligent-ui/intelligent-ui.css";
 import "./version-control.css";
 import "./version-control-p2.css";
 

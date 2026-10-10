@@ -18,6 +18,7 @@ import { RepoCard } from "./RepoCard";
 import { Composer } from "./Composer";
 import { useContentArrival } from "./BatchMotion";
 import { Markdown } from "./Markdown";
+import { AssistantMarkdown } from "./intelligent-ui/AssistantMarkdown";
 import { ConversationLinkContext } from "./ConversationLinkContext";
 import { OpenInAppButton } from "./OpenInAppButton";
 import { Thinking } from "./Thinking";
@@ -985,7 +986,7 @@ function AssistantMessageContent({
       ) : null}
       {showText && message.text ? (
         <div className="agent-reply-prose">
-          <Markdown text={message.text} streaming={streaming} />
+          <AssistantMarkdown messageId={message.id} text={message.text} streaming={streaming} />
         </div>
       ) : null}
       {changes ? <TurnChangesCard turnId={message.id} changes={changes} onOpenChanges={onOpenChanges} onReviewTurn={onReviewTurn} canManageChanges={canManageChanges} /> : null}
@@ -1065,7 +1066,7 @@ function ToolSequence({
         withEnter(
           node.id,
           node.messageId,
-          <div className="agent-reply-prose"><Markdown text={node.text} streaming={node.messageId === activeAssistantId} /></div>,
+          <div className="agent-reply-prose"><AssistantMarkdown messageId={node.messageId} text={node.text} streaming={node.messageId === activeAssistantId} /></div>,
         ),
       );
     }
@@ -1186,7 +1187,7 @@ const CompletedAssistantTurn = memo(function CompletedAssistantTurn({
         </div>
       </div>
       <div className="agent-reply-prose">
-        <Markdown text={finalReply.text} />
+        <AssistantMarkdown messageId={finalReply.id} text={finalReply.text} />
       </div>
       <PlanPreviewList planIds={collectPlanIds(messages)} />
       <ReplyActions

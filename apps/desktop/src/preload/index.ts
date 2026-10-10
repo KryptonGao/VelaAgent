@@ -128,6 +128,7 @@ import {
   type TerminalSessionInfo,
   type ThinkingLevel,
   type TranscriptMessage,
+  type UiPreference,
   LogsIpc,
   UpdatesIpc,
   type UpdateState,
@@ -325,6 +326,9 @@ const api: VelaApi = {
   getAgentSettings: () => ipcRenderer.invoke(IpcChannel.getAgentSettings) as Promise<AgentSettings>,
   saveAgentSettings: (settings: AgentSettings) =>
     ipcRenderer.invoke(IpcChannel.saveAgentSettings, settings) as Promise<AgentSettings>,
+  getIntelligentUi: () => ipcRenderer.invoke(IpcChannel.getIntelligentUi) as Promise<{ preference: UiPreference }>,
+  setIntelligentUi: (preference: UiPreference) =>
+    ipcRenderer.invoke(IpcChannel.setIntelligentUi, preference) as Promise<{ preference: UiPreference }>,
   listSkills: () => ipcRenderer.invoke(IpcChannel.listSkills) as Promise<SkillCatalog>,
   openSkillsDirectory: () => ipcRenderer.invoke(IpcChannel.openSkillsDir) as Promise<void>,
   scanExternalSkills: () => ipcRenderer.invoke(IpcChannel.scanExternalSkills) as Promise<ExternalSkillScan>,
