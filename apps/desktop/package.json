@@ -1,7 +1,7 @@
 {
   "name": "@vela/desktop",
-  "version": "1.0.8",
-  "shortVersion": "1.0.8",
+  "version": "1.1.0",
+  "shortVersion": "1.1.0",
   "private": true,
   "main": "./out/main/index.mjs",
   "scripts": {
@@ -53,6 +53,8 @@
     "test:scheduled-tasks:electron": "node test/scheduled-tasks-electron-smoke.mjs",
     "test:task-recipes": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --test test/task-recipes.test.ts test/task-recipes-p1.test.ts test/task-recipes-p2.test.ts test/task-recipes-team.test.ts ../../packages/agent/test/task-recipes.test.ts ../../packages/agent/test/recipe-generator.test.ts",
     "test:task-recipes:electron": "node test/task-recipes-electron-smoke.mjs",
+    "test:agent-inbox": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --experimental-test-module-mocks --test test/agent-inbox-service.test.ts test/agent-inbox-adapter.test.ts test/agent-inbox-host.test.ts test/agent-inbox-model.test.ts",
+    "test:resident-agent": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --experimental-test-module-mocks --test test/resident-agent-shared.test.ts test/resident-agent-supervisor.test.ts test/agent-inbox-notifier.test.ts test/resident-tray.test.ts test/resident-agent-host.test.ts test/proactive-rules.test.ts test/agent-inbox-adapter.test.ts ../../packages/agent/test/resident-tools.test.ts",
     "test:pr-inbox": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --experimental-test-module-mocks --test test/pr-inbox-model.test.ts test/pr-inbox-cache.test.ts test/pr-inbox-host.test.ts test/pr-review-response-service.test.ts test/diff-rows.test.ts",
     "test:updates": "node --import ../../packages/agent/test/register-ts.mjs --experimental-transform-types --test test/update-verify.test.ts test/update-service.test.ts test/update-installer.test.ts test/update-bundle.test.ts",
     "test:updates:ui": "node test/updates-ui.mjs",

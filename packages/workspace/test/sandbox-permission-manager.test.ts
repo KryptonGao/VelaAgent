@@ -390,3 +390,45 @@ it("scoped permissions coexist without mutating global settings or sharing risk 
     assert.equal(calls.at(-1)?.conversationId, "safe-task");
   }
 });
+
+it("reply 返回是否真正兑现了等待点,重复回复和未知 id 返回 false", async () => {
+  const { manager, events } = await createManager("ask");
+  const pending = manager.request({ kind: "bash", command: "ls", cwd: "/repo" });
+  await tick();
+  const id = pendingRequest(events)!;
+  assert.equal(manager.reply("unknown", true), false);
+  assert.equal(manager.reply(id, true), true);
+  assert.equal(await pending, true);
+  assert.equal(manager.reply(id, false), false);
+});
+
+describe("delegate approvals", () => {
+  const delegate = { kind: "delegate" as const, cwd: "/repo", workspace: "/repo", command: "检查构建", insideWorkspace: true };
+
+  it("ask 和 smart 模式都必须由用户批准，且不调用风险评估", async () => {
+    for (const mode of ["ask", "smart"] as const) {
+      let evaluated = 0;
+      const { manager, events } = await createManager(mode, async () => { evaluated += 1; return "safe"; });
+      const pending = manager.request(delegate);
+      await tick();
+      const id = pendingRequest(events);
+      assert.ok(id, `${mode} must open an approval`);
+      const event = events.find((entry) => entry.type === "request");
+      assert.equal(event?.type === "request" && event.request.kind, "delegate");
+      manager.reply(id, true);
+      assert.equal(await pending, true);
+      assert.equal(evaluated, 0);
+    }
+  });
+
+  it("拒绝会原样返回 false，full 模式沿用既有的全权限语义", async () => {
+    const { manager, events } = await createManager("ask");
+    const pending = manager.request(delegate);
+    await tick();
+    manager.reply(pendingRequest(events)!, false);
+    assert.equal(await pending, false);
+    const full = await createManager("full");
+    assert.equal(await full.manager.request(delegate), true);
+    assert.equal(full.events.length, 0);
+  });
+});

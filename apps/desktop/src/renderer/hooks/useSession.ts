@@ -547,6 +547,8 @@ export function useSession(notify: NotifySound = noSound) {
     available: typeof window.vela !== "undefined",
     state,
     messageStore,
+    /** 读取某个对话的历史消息（Resident 的隐藏会话不在对话列表里，需要单独载入）。 */
+    ensureTranscript: loadTranscript,
     agentHistory: activeConversationId ? agentHistory[activeConversationId] ?? emptyMessages : emptyMessages,
     conversations: state?.conversations ?? [],
     activeConversationId,

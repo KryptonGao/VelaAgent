@@ -2,6 +2,8 @@ export * from "./pr-inbox";
 export * from "./mcp";
 export * from "./memory";
 export * from "./scheduled-tasks";
+export * from "./agent-inbox";
+export * from "./resident-agent";
 export * from "./task-recipes";
 export * from "./recipe-validation";
 export * from "./recipe-workflow";
@@ -2519,7 +2521,8 @@ export interface SandboxExecutionContext {
   conversationId?: string;
 }
 
-export type SandboxApprovalKind = "bash" | "edit" | "write" | "mkdir" | "browser_repl" | "mcp";
+/** delegate：常驻 Agent 请求在某个工作区创建后台任务。 */
+export type SandboxApprovalKind = "bash" | "edit" | "write" | "mkdir" | "browser_repl" | "mcp" | "delegate";
 
 export interface SandboxMcpContext {
   server: string;
@@ -2725,6 +2728,8 @@ export interface VelaApi extends McpApi, PluginApi {
   development?: DevelopmentApi;
   taskRecipes?: import("./task-recipes").TaskRecipesApi;
   scheduledTasks?: import("./scheduled-tasks").ScheduledTasksApi;
+  agentInbox?: import("./agent-inbox").AgentInboxApi;
+  resident?: import("./resident-agent").ResidentAgentApi;
   /** 应用日志：写入、级别设置与诊断包导出。 */
   logs?: LogsApi;
   /** 应用内更新：从 GitHub Release 检查、下载并校验新版本。 */

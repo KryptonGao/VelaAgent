@@ -24,6 +24,7 @@ const suites = {
     { name: "chat-actions-ui", runner: "node" },
     { name: "updates-ui", runner: "node" },
     { name: "intelligent-ui-ui", runner: "node" },
+    { name: "agent-inbox-ui", runner: "node" },
   ],
   smoke: [
     { name: "pi-sdk-electron-smoke", runner: "node" },

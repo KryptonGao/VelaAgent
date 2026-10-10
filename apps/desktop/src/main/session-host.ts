@@ -47,6 +47,8 @@ export interface SessionHostHooks {
   currentCwd: () => string;
   /** 当前明确选择的工作区；null 表示未选择，执行目录仍可有效。 */
   currentWorkspace?: () => string | null;
+  /** 不在对话列表里显示的后台对话（常驻 Agent 的持久会话）。 */
+  hiddenConversation?: (id: string) => boolean;
 }
 
 export class SessionHost {
@@ -277,7 +279,9 @@ export class SessionHost {
     return {
       session: this.runtime.getSnapshot(),
       context: this.runtime.getUsage(activeId),
-      conversations: this.runtime.listConversations(),
+      conversations: this.hooks.hiddenConversation
+        ? this.runtime.listConversations().filter(conversation => !this.hooks.hiddenConversation!(conversation.id))
+        : this.runtime.listConversations(),
       activeConversationId: activeId,
       agents: this.runtime.getAgents(activeId),
     };

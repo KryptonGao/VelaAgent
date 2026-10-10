@@ -40,12 +40,14 @@ export class QuestionManager {
     });
   }
 
-  reply(id: string, answer: string | null): void {
+  /** 返回 false 表示该问题已不在等待(已回答、被中断或应用重启),调用方据此判断请求是否过期。 */
+  reply(id: string, answer: string | null): boolean {
     const pending = this.pending.get(id);
-    if (!pending) return;
+    if (!pending) return false;
     this.pending.delete(id);
     this.emit({ type: "resolved", id, answer });
     pending.resolve(answer);
+    return true;
   }
 
   /** 中断某个对话的全部待答问题(用户点停止时)。 */

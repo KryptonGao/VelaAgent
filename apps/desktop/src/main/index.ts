@@ -5,15 +5,16 @@ import {
   GitService,
   PullRequestService,
   SandboxPermissionManager,
+  sandboxApprovalTimeoutMs,
   WorkspaceFileService,
   WorkspaceManager,
   createSandboxedToolDefinitions,
   createWorktree, removeWorktree,
 } from "@vela/workspace";
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, session, shell, webContents } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, session, shell, Tray, webContents } from "electron";
 import type { BrowserWindowConstructorOptions } from "electron";
-import { createLogger, IpcChannel, isAgentBusy, isAppLocale, localizeZh } from "@vela/shared";
-import { writeFileSync } from "node:fs";
+import { createLogger, IpcChannel, isAgentBusy, isAppLocale, localizeZh, type ResidentSettings } from "@vela/shared";
+import { existsSync, readFileSync, statSync, watch as fsWatch, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ConversationExportHost } from "./conversation-export-host";
@@ -29,6 +30,14 @@ import { TaskRecipeService } from "./task-recipe-service";
 import { TaskRecipeHost } from "./task-recipe-host";
 import { executeScheduledRecipe } from './task-recipe-schedule';
 import { ScheduledTaskHost } from "./scheduled-task-host";
+import { AgentInboxService } from "./agent-inbox-service";
+import { AgentInboxAdapter } from "./agent-inbox-adapter";
+import { AgentInboxHost } from "./agent-inbox-host";
+import { AgentInboxNotifier } from "./agent-inbox-notifier";
+import { ResidentAgentSupervisor } from "./resident-agent-supervisor";
+import { ResidentAgentHost } from "./resident-agent-host";
+import { ProactiveRuleService } from "./proactive-rules";
+import { ResidentTray, type TrayAction } from "./resident-tray";
 import { McpHost } from "./mcp-host";
 import { MemoryHost } from "./memory-host";
 import { SecureCredentialStore } from "./plugin-credentials";
@@ -47,6 +56,7 @@ import { BrowserReplManager } from "./browser-repl";
 import { BrowserIpc, type BrowserUiCommand } from "../../../../packages/shared/src/browser";
 import { UI_BROWSER_PARTITION } from "../browser-policy";
 import appIconPath from "../../resources/icon.png?asset";
+import trayIconPath from "../../resources/tray-template.png?asset";
 
 const home = configureVelaProfile(app);
 // 日志最先就绪:之后的启动失败、崩溃都能落盘到 <home>/logs。
@@ -74,6 +84,16 @@ const preloadPath = join(rootDir, "../preload/index.js");
 let mcpHost: McpHost | null = null;
 let memoryHost: MemoryHost | null = null;
 let scheduledTaskHost: ScheduledTaskHost | null = null;
+let agentInboxAdapter: AgentInboxAdapter | null = null;
+let agentInboxHost: AgentInboxHost | null = null;
+let agentInboxNotifier: AgentInboxNotifier | null = null;
+let residentSupervisor: ResidentAgentSupervisor | null = null;
+let residentHost: ResidentAgentHost | null = null;
+let proactiveRules: ProactiveRuleService | null = null;
+let residentTray: ResidentTray | null = null;
+const activeNotifications = new Set<Notification>();
+/** 登录项启动且用户选择了后台待命：不弹出主窗口。 */
+let startHidden = false;
 let taskScheduler: ScheduledTaskScheduler | null = null;
 let taskRecipeHost: TaskRecipeHost | null = null;
 let taskRecipes: TaskRecipeService | null = null;
@@ -128,7 +148,8 @@ function createWindow(): BrowserWindow {
   win.once("closed", () => { browserRepl?.closeWindow(win.id); browserHost?.closeWindow(win.id); });
 
   win.once("ready-to-show", () => {
-    win.show();
+    if (!startHidden || process.env.VELA_CAPTURE) win.show();
+    startHidden = false;
     // 测试钩子:VELA_CAPTURE=<路径> 时渲染稳定后截图退出。
     const capturePath = process.env.VELA_CAPTURE;
     if (capturePath) {
@@ -186,6 +207,34 @@ function createWindow(): BrowserWindow {
   }
 
   return win;
+}
+
+/** 显示主窗口；没有窗口时重新创建（关闭窗口后应用仍在后台运行）。 */
+function showMainWindow(): BrowserWindow {
+  const existing = BrowserWindow.getAllWindows().find(window => !window.isDestroyed());
+  if (!existing) return createWindow();
+  if (existing.isMinimized()) existing.restore();
+  existing.show();
+  existing.focus();
+  return existing;
+}
+
+function applyLoginItem(settings: ResidentSettings): void {
+  // 开发版和未打包的应用不注册登录项，避免把 Electron 开发二进制写进系统。
+  if (!app.isPackaged || process.platform !== "darwin") return;
+  try { app.setLoginItemSettings({ openAtLogin: settings.launchAtLogin }); }
+  catch (error) { log.error("login item update failed", error); }
+}
+
+/** 已登记工作区里的 Git 目录；工作树里 .git 是指向真实目录的文件。 */
+function resolveGitDir(workspace: string): string | null {
+  const dotGit = join(workspace, ".git");
+  try {
+    if (statSync(dotGit).isDirectory()) return dotGit;
+    const match = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, "utf8"));
+    const target = match ? resolve(workspace, match[1]!.trim()) : null;
+    return target && existsSync(target) ? target : null;
+  } catch { return null; }
 }
 
 async function start(): Promise<void> {
@@ -273,6 +322,16 @@ async function start(): Promise<void> {
   // 开发版只提供手动检查，不在后台联网，也不会替换 Electron 开发二进制。
   if (app.isPackaged) updateHost.service.start();
   const runtime = new AgentRuntime({
+    // 常驻 Agent 的工具只读取 Supervisor 的真实记录；Supervisor 在运行时之后创建，所以这里延迟取用。
+    resident: {
+      conversationId: () => residentSupervisor?.getResidentConversationId() ?? null,
+      host: {
+        workspaces: () => residentSupervisor?.workspaces() ?? [],
+        tasks: () => residentSupervisor?.tasks() ?? [],
+        inbox: filter => residentSupervisor?.inbox(filter) ?? [],
+        delegate: input => residentSupervisor ? residentSupervisor.delegate(input) : Promise.resolve({ ok: false as const, reason: "常驻 Agent 尚未就绪" }),
+      },
+    },
     scheduledTasks: scheduler,
     pluginCredentialStore: new SecureCredentialStore(join(home, "integrations-auth.enc.json")),
     browserRepl,
@@ -350,6 +409,157 @@ async function start(): Promise<void> {
   // 「帮我批准」模式下由当前对话选择的模型判断操作风险。
   sandbox.setRiskEvaluator((input) => runtime.evaluateSandboxRisk(input));
 
+  // Agent Inbox 与常驻 Agent 运行在 main process，窗口隐藏或关闭时仍然接收审批、问题和任务结果。
+  try {
+    const inbox = new AgentInboxService(join(home, "agent-inbox.json"), {
+      approve: (id, allowed) => sandbox.reply(id, allowed),
+      answer: (id, answer) => runtime.replyQuestion(id, answer),
+    });
+    inbox.init();
+
+    const supervisor = new ResidentAgentSupervisor({
+      file: join(home, "resident-agent.json"),
+      residentDir: join(home, "resident"),
+      runtime,
+      inbox: {
+        pendingWaits: () => inbox.pendingWaits(),
+        pendingCount: () => inbox.pendingCount(),
+        recent: filter => inbox.summaries(filter),
+        subscribe: listener => inbox.subscribe(() => listener()),
+      },
+      approvals: { request: input => sandbox.request(input) },
+      power: {
+        isOnBattery: () => powerMonitor.isOnBatteryPower(),
+        subscribe: listener => {
+          const suspend = () => listener("suspend");
+          const resume = () => listener("resume");
+          const battery = () => listener("battery");
+          const ac = () => listener("ac");
+          powerMonitor.on("suspend", suspend);
+          powerMonitor.on("resume", resume);
+          powerMonitor.on("on-battery", battery);
+          powerMonitor.on("on-ac", ac);
+          return () => {
+            powerMonitor.removeListener("suspend", suspend);
+            powerMonitor.removeListener("resume", resume);
+            powerMonitor.removeListener("on-battery", battery);
+            powerMonitor.removeListener("on-ac", ac);
+          };
+        },
+      },
+      workspaces: registeredWorkspaces,
+      sandboxMode: () => sandbox.getMode(),
+    });
+    supervisor.init();
+    residentSupervisor = supervisor;
+    startHidden = process.platform === "darwin" && supervisor.getSettings().launchAtLogin && app.getLoginItemSettings().wasOpenedAtLogin;
+    applyLoginItem(supervisor.getSettings());
+
+    const rules = new ProactiveRuleService({
+      file: join(home, "proactive-rules.json"),
+      host: {
+        settings: () => supervisor.getSettings(),
+        flags: () => supervisor.getRuntimeFlags(),
+        globalRunsToday: () => supervisor.proactiveRunsToday(),
+        ruleRunning: ruleId => supervisor.hasActiveRuleTask(ruleId),
+        startTask: spec => supervisor.startTask(spec),
+        workspaces: registeredWorkspaces,
+        gitDir: resolveGitDir,
+        watch: (path, options, listener) => fsWatch(path, { recursive: options.recursive, persistent: false }, (_event, filename) => listener(filename === null ? null : String(filename))),
+      },
+    });
+    rules.init();
+    proactiveRules = rules;
+    // 新的失败事项可以触发订阅了「失败时分析」的规则。
+    const seenInboxItems = new Set(inbox.list({}).items.map(item => item.id));
+    inbox.subscribe(change => {
+      for (const item of change.upserts) {
+        if (seenInboxItems.has(item.id)) continue;
+        seenInboxItems.add(item.id);
+        rules.onInboxItem({ id: item.id, type: item.type, origin: item.origin, title: item.title, summary: item.summary, ...(item.workspaceId ? { workspaceId: item.workspaceId } : {}) });
+      }
+    });
+
+    agentInboxAdapter = new AgentInboxAdapter({
+      service: inbox, runtime, sandbox, scheduler, approvalTimeoutMs: sandboxApprovalTimeoutMs,
+      tasks: {
+        classify: conversationId => {
+          if (supervisor.isResidentConversation(conversationId)) return { isResident: true, origin: "resident" };
+          const task = supervisor.taskForConversation(conversationId);
+          if (!task) return null;
+          return {
+            isResident: false,
+            origin: task.source === "rule" ? "proactive" : "resident",
+            taskId: task.id,
+            title: task.title,
+            suggestion: task.source === "rule",
+            timedOut: task.timedOut,
+            ...(task.reason ? { reason: task.reason } : {}),
+          };
+        },
+      },
+    });
+    agentInboxAdapter.start();
+    agentInboxHost = new AgentInboxHost(inbox, runtime);
+    agentInboxHost.register();
+    residentHost = new ResidentAgentHost(supervisor, rules);
+    residentHost.register();
+
+    // 系统通知：点击后回到对应事项。
+    agentInboxNotifier = new AgentInboxNotifier({
+      settings: () => supervisor.getSettings(),
+      locale: getApplicationLocale,
+      appFocused: () => BrowserWindow.getAllWindows().some(window => !window.isDestroyed() && window.isFocused() && window.isVisible()),
+      show: note => {
+        if (!Notification.isSupported()) return;
+        const notification = new Notification({ title: note.title, body: note.body });
+        activeNotifications.add(notification);
+        const release = () => { activeNotifications.delete(notification); };
+        notification.once("close", release);
+        notification.once("failed", release);
+        notification.once("click", () => {
+          release();
+          showMainWindow();
+          agentInboxHost?.navigate(note.itemId ? { view: "item", itemId: note.itemId } : { view: "inbox" });
+        });
+        notification.show();
+      },
+    });
+    agentInboxNotifier.seed(inbox.list({}).items);
+    inbox.subscribe(change => agentInboxNotifier?.onChange(change));
+
+    // 菜单栏入口：状态、待处理数量、暂停与恢复。
+    const tray = new ResidentTray({
+      locale: getApplicationLocale,
+      create: () => {
+        const icon = nativeImage.createFromPath(trayIconPath).resize({ width: 16, height: 16 });
+        icon.setTemplateImage(true);
+        const handle = new Tray(icon);
+        return {
+          setToolTip: text => handle.setToolTip(text),
+          setTitle: text => { if (process.platform === "darwin") handle.setTitle(text); },
+          setMenu: items => handle.setContextMenu(Menu.buildFromTemplate(items)),
+          onClick: listener => { handle.on("click", listener); },
+          destroy: () => handle.destroy(),
+        };
+      },
+      onAction: (action: TrayAction) => {
+        if (action === "quit") { app.quit(); return; }
+        if (action === "toggle-pause") { if (supervisor.getSettings().paused) supervisor.resume(); else supervisor.pause(); return; }
+        showMainWindow();
+        agentInboxHost?.navigate(action === "open-resident" ? { view: "resident" } : { view: "inbox" });
+      },
+    });
+    residentTray = tray;
+    supervisor.subscribe(status => tray.update(status, supervisor.getSettings().showMenuBarIcon));
+    tray.update(supervisor.getStatus(), supervisor.getSettings().showMenuBarIcon);
+    supervisor.subscribeSettings(settings => {
+      applyLoginItem(settings);
+      rules.sync();
+      tray.update(supervisor.getStatus(), settings.showMenuBarIcon);
+    });
+  } catch (error) { log.error("agent inbox failed to start", error); }
+
   project = new ProjectHost({
     workspaceManager,
     git,
@@ -366,6 +576,7 @@ async function start(): Promise<void> {
     currentWorkspace: () => workspaceManager.getState().current,
     onAgentMutation: () => project?.notifyAgentMutation(),
     currentCwd: () => workspaceManager.getState().current ?? fallbackCwd,
+    hiddenConversation: id => residentSupervisor?.isResidentConversation(id) ?? false,
   });
   host.register();
   conversationExportHost = new ConversationExportHost(runtime, getApplicationLocale, key => uiStorage.getItem(key) ?? null);
@@ -429,7 +640,8 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  // macOS 上关闭窗口后应用继续在后台运行，除非用户在设置里选择了关闭窗口即退出。
+  if (process.platform !== "darwin" || residentSupervisor?.getSettings().quitWhenWindowsClosed) app.quit();
 });
 
 // 已下载的更新随退出安装；用户点「立即重启」时安装脚本会在装完后重新打开应用。
@@ -453,6 +665,14 @@ app.on("before-quit", (event) => {
   taskRecipeHost?.dispose(); taskRecipeHost = null;
   scheduledTaskHost?.dispose();
   scheduledTaskHost = null;
+  // 先于 runtime 释放：运行时关闭时会取消所有等待点，那不是用户的决策。
+  residentTray?.dispose(); residentTray = null;
+  agentInboxNotifier?.dispose(); agentInboxNotifier = null;
+  proactiveRules?.dispose(); proactiveRules = null;
+  residentSupervisor?.dispose();
+  residentHost?.dispose(); residentHost = null;
+  agentInboxAdapter?.stop(); agentInboxAdapter = null;
+  agentInboxHost?.dispose(); agentInboxHost = null;
   mcpHost?.dispose();
   mcpHost = null;
   memoryHost?.dispose();

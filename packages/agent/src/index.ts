@@ -43,3 +43,4 @@ export { MemoryCredentialStore, type CredentialStore } from "./mcp/credentials";
 export { parseThinkingSummaryInput } from "./thinking-summary";
 export { parseAiTextRequest, TextAssistService, parseGeneratedText, splitDiff } from "./text-assist";
 export { createBrowserTools, browserToolNames, browserUseInstructions, type BrowserReplService, type BrowserReplPermission, type BrowserReplContent } from "./browser-use";
+export { createResidentTools, residentInstructions, residentToolNames, type ResidentToolHost, type ResidentInboxSummary, type ResidentDelegateResult } from "./resident-tools";

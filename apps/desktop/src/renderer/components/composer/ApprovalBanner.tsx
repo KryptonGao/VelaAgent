@@ -10,6 +10,7 @@ const kindLabels: Record<SandboxApprovalRequest["kind"], [string, string]> = {
   edit: ["修改文件", "Edit file"],
   write: ["写入文件", "Write file"],
   mkdir: ["创建目录", "Create directory"],
+  delegate: ["创建后台任务", "Create background task"],
 };
 
 /**
@@ -48,6 +49,8 @@ export function ApprovalBanner({
         `${tr("工具", "Tool")}: ${approval.mcp?.tool ?? tr("(未知)", "(Unknown)")}`,
         `${tr("参数", "Parameters")}: ${JSON.stringify(approval.mcp?.parameters ?? null, null, 2)}`,
       ].join("\n")
+    : approval.kind === "delegate"
+      ? `${tr("工作区", "Workspace")}: ${approval.cwd ?? tr("(未知)", "(Unknown)")}\n${tr("任务", "Task")}: ${approval.command ?? tr("(未提供内容)", "(No content provided)")}`
     : (approval.kind === "bash" || approval.kind === "browser_repl")
       ? approval.command ?? tr("(未提供命令)", "(No command provided)")
       : approval.path ?? tr("(未提供路径)", "(No path provided)");

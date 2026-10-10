@@ -4,6 +4,12 @@ import {
   PrInboxIpc,
   TaskRecipesIpc,
   ScheduledTasksIpc,
+  AgentInboxIpc,
+  ResidentIpc,
+  type AgentInboxChange,
+  type AgentInboxNavigation,
+  type ProactiveRulesState,
+  type ResidentStatus,
   type ScheduledTasksState,
   type AgentControlAction,
   type AgentSettings,
@@ -193,6 +199,51 @@ const api: VelaApi = {
       const handler = (_event: IpcRendererEvent, state: ScheduledTasksState) => listener(state);
       ipcRenderer.on(ScheduledTasksIpc.state, handler);
       return () => { ipcRenderer.removeListener(ScheduledTasksIpc.state, handler); };
+    },
+  },
+  resident: {
+    getStatus: () => ipcRenderer.invoke(ResidentIpc.status),
+    submit: input => ipcRenderer.invoke(ResidentIpc.submit, input),
+    pause: () => ipcRenderer.invoke(ResidentIpc.pause),
+    resume: () => ipcRenderer.invoke(ResidentIpc.resume),
+    getSettings: () => ipcRenderer.invoke(ResidentIpc.getSettings),
+    updateSettings: patch => ipcRenderer.invoke(ResidentIpc.updateSettings, patch),
+    cancelTask: id => ipcRenderer.invoke(ResidentIpc.cancelTask, id),
+    getMessages: () => ipcRenderer.invoke(ResidentIpc.messages),
+    subscribe: listener => {
+      const handler = (_event: IpcRendererEvent, status: ResidentStatus) => listener(status);
+      ipcRenderer.on(ResidentIpc.statusChange, handler);
+      return () => { ipcRenderer.removeListener(ResidentIpc.statusChange, handler); };
+    },
+    rules: {
+      list: () => ipcRenderer.invoke(ResidentIpc.rulesList),
+      save: (input, id) => ipcRenderer.invoke(ResidentIpc.rulesSave, input, id),
+      remove: id => ipcRenderer.invoke(ResidentIpc.rulesRemove, id),
+      subscribe: listener => {
+        const handler = (_event: IpcRendererEvent, state: ProactiveRulesState) => listener(state);
+        ipcRenderer.on(ResidentIpc.rulesChange, handler);
+        return () => { ipcRenderer.removeListener(ResidentIpc.rulesChange, handler); };
+      },
+    },
+  },
+  agentInbox: {
+    list: query => ipcRenderer.invoke(AgentInboxIpc.list, query),
+    get: id => ipcRenderer.invoke(AgentInboxIpc.get, id),
+    getContent: id => ipcRenderer.invoke(AgentInboxIpc.content, id),
+    submitToSource: (id, text) => ipcRenderer.invoke(AgentInboxIpc.submit, id, text),
+    takeNavigation: () => ipcRenderer.invoke(AgentInboxIpc.takeNavigation),
+    onNavigate: listener => {
+      const handler = (_event: IpcRendererEvent, target: AgentInboxNavigation) => listener(target);
+      ipcRenderer.on(AgentInboxIpc.navigate, handler);
+      return () => { ipcRenderer.removeListener(AgentInboxIpc.navigate, handler); };
+    },
+    decide: request => ipcRenderer.invoke(AgentInboxIpc.decide, request),
+    markRead: id => ipcRenderer.invoke(AgentInboxIpc.markRead, id),
+    archive: (id, archived) => ipcRenderer.invoke(AgentInboxIpc.archive, id, archived),
+    subscribe: listener => {
+      const handler = (_event: IpcRendererEvent, change: AgentInboxChange) => listener(change);
+      ipcRenderer.on(AgentInboxIpc.change, handler);
+      return () => { ipcRenderer.removeListener(AgentInboxIpc.change, handler); };
     },
   },
   getPlugins: input => ipcRenderer.invoke("mcp:plugins", input),

@@ -5,12 +5,12 @@ import { createLogger } from "../logger";
 
 const log = createLogger("preferences");
 
-export const sidebarItemIds = ["prInbox", "scheduledTasks", "newChat", "recipes"] as const;
+export const sidebarItemIds = ["prInbox", "agentInbox", "scheduledTasks", "newChat", "recipes"] as const;
 export type SidebarItemId = (typeof sidebarItemIds)[number];
 export type SidebarItems = Record<SidebarItemId, boolean>;
 
 const key = "vela.sidebarItems";
-const defaults: SidebarItems = { prInbox: true, scheduledTasks: true, newChat: true, recipes: true };
+const defaults: SidebarItems = { prInbox: true, agentInbox: true, scheduledTasks: true, newChat: true, recipes: true };
 const accept = (value: unknown): value is Partial<SidebarItems> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
 

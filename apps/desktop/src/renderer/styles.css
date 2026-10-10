@@ -577,7 +577,8 @@ code,
 .workbench-panel::before,
 .settings-view::before,
 .scheduled-tasks-page-shell::before,
-.pr-inbox-page::before {
+.pr-inbox-page::before,
+.agent-inbox-page::before {
   content: "";
   position: absolute;
   top: 0;
@@ -596,7 +597,8 @@ code,
 .workbench-panel::after,
 .settings-view::after,
 .scheduled-tasks-page-shell::after,
-.pr-inbox-page::after {
+.pr-inbox-page::after,
+.agent-inbox-page::after {
   content: "";
   position: absolute;
   top: var(--header-height);
@@ -617,7 +619,8 @@ code,
 .workbench-panel::after,
 .settings-view::after,
 .scheduled-tasks-page-shell::after,
-.pr-inbox-page::after {
+.pr-inbox-page::after,
+.agent-inbox-page::after {
   border-radius: var(--paper-left-radius) var(--paper-right-radius) var(--paper-right-radius) var(--paper-left-radius);
 }
 /* 有实色背景的子区域也跟随纸面圆角,不裁掉输入框向上展开的菜单。 */
@@ -880,6 +883,20 @@ code,
   display: flex;
   align-items: center;
   gap: 9px;
+}
+/* Agent Inbox 的待处理数量，只统计真正需要用户决定的事项。 */
+.quick-action-badge {
+  min-width: 18px;
+  box-sizing: border-box;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--accent-blue);
+  color: var(--accent-contrast);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 @property --sidebar-scrollbar-color {

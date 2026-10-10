@@ -5,11 +5,13 @@ import { defaultToolPolicy, modeToolNames, type ToolAuthorizationResult, type To
 import { isMcpTool } from "./mcp-session";
 import { memoryDisabledInstructions, memoryReadToolName, memoryToolNames, memoryUpdateToolName } from "./memory-tools";
 import { recipeStageSubagentDenial } from "./recipe-stage";
+import { residentToolNames } from "./resident-tools";
 import { scheduledTaskToolNames } from "./scheduled-task-tools";
 import { agentToolNames, agentToolNamesFor } from "./subagent";
 
 /** 决定工具组合所需的对话状态。 */
 export interface ToolLoadoutConversation {
+  id?: string;
   snapshot: { mode: InteractionMode; executionPlan: unknown };
   recipeExecution?: unknown;
   scheduledTaskConversation?: boolean;
@@ -20,7 +22,12 @@ export interface ToolLoadoutOptions {
   scheduledTasks: boolean;
   browser: boolean;
   memoryEnabled: () => boolean;
+  /** 常驻 Agent 的会话：没有文件与命令工具，只有协调工具。 */
+  resident?: { isResident(entry: ToolLoadoutConversation): boolean };
 }
+
+const residentTools = ["ask_user_question", ...residentToolNames];
+const residentDenial = "常驻 Agent 不能读写文件或执行命令；请用 delegate_workspace_task 在工作区里创建后台任务";
 
 const memoryUpdateDenial = "当前模式或执行环境不允许写入长期记忆（Plan、子代理、定时任务和配方执行只能读取）";
 
@@ -43,11 +50,17 @@ export class ToolLoadout {
       ...memoryToolNames,
       ...(this.options.scheduledTasks ? scheduledTaskToolNames : []),
       ...(this.options.browser ? browserToolNames : []),
+      ...(this.options.resident ? residentToolNames : []),
     ];
+  }
+
+  isResident(entry: ToolLoadoutConversation): boolean {
+    return this.options.resident?.isResident(entry) === true;
   }
 
   /** 模式决定的原生工具；传入对话时附带它可用的记忆工具。 */
   native(mode: InteractionMode, plan: boolean, entry?: ToolLoadoutConversation): string[] {
+    if (entry && this.isResident(entry)) return [...residentTools];
     const scheduled = this.options.scheduledTasks ? (mode === "plan" ? ["list_scheduled_tasks"] : scheduledTaskToolNames) : [];
     const tools = [...defaultToolPolicy.availableTools(mode, plan), ...scheduled];
     if (entry) tools.push(...this.memory(entry));
@@ -56,6 +69,7 @@ export class ToolLoadout {
 
   /** 对话自身的原生工具加浏览器工具，不考虑配方阶段。 */
   private conversation(entry: ToolLoadoutConversation): string[] {
+    if (this.isResident(entry)) return [...residentTools];
     const tools = this.native(entry.snapshot.mode, entry.snapshot.executionPlan !== null, entry);
     if (this.options.browser && entry.snapshot.mode !== "plan") tools.push(...browserToolNames);
     return tools;
@@ -66,6 +80,7 @@ export class ToolLoadout {
    * MCP 桥也用它做激活计算和执行前的原生工具闸门，两边必须一致。
    */
   active(entry: ToolLoadoutConversation): string[] {
+    if (this.isResident(entry)) return [...residentTools];
     if (entry.recipeStageSideEffect === "read_only") return this.readOnlyStage(entry);
     if (entry.recipeStageSideEffect) {
       return this.native(entry.snapshot.mode, entry.snapshot.executionPlan !== null, entry).filter(name => !isAgentTool(name));
@@ -103,6 +118,8 @@ export class ToolLoadout {
 
   /** 根会话执行工具前的最后一道闸。 */
   authorize(call: ToolPolicyCall, entry: ToolLoadoutConversation): ToolAuthorizationResult {
+    if (this.isResident(entry)) return residentTools.includes(call.toolName) ? { allowed: true } : { allowed: false, reason: residentDenial };
+    if ((residentToolNames as readonly string[]).includes(call.toolName)) return { allowed: false, reason: "这个工具只属于常驻 Agent" };
     if (isMemoryTool(call.toolName) && !this.options.memoryEnabled()) return { allowed: false, reason: memoryDisabledInstructions };
     if (entry.recipeStageSideEffect && isAgentTool(call.toolName)) return { allowed: false, reason: recipeStageSubagentDenial };
     if (call.toolName === memoryUpdateToolName && !this.canUpdateMemory(entry)) return { allowed: false, reason: memoryUpdateDenial };

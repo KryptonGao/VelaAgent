@@ -103,4 +103,20 @@ describe("QuestionManager", () => {
     assert.equal(await pending, "好");
     assert.deepEqual(resolutions, ["好"]);
   });
+
+  it("reply 返回是否真正兑现了等待点,重复回复、未知 id 与中断后回复都返回 false", async () => {
+    const manager = new QuestionManager();
+    const requests = recordRequests(manager);
+    const pending = ask(manager, "c1", "是否兑现");
+    await tick();
+    assert.equal(manager.reply("unknown", "好"), false);
+    assert.equal(manager.reply(requests[0].id, "好"), true);
+    assert.equal(await pending, "好");
+    assert.equal(manager.reply(requests[0].id, "否"), false);
+    const cancelled = ask(manager, "c2", "被中断");
+    await tick();
+    manager.cancelConversation("c2");
+    assert.equal(await cancelled, null);
+    assert.equal(manager.reply(requests[1].id, "好"), false);
+  });
 });

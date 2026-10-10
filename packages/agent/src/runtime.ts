@@ -96,6 +96,7 @@ import { MemoryService } from "./memory";
 import { MemorySettings } from "./memory-settings";
 import { IntelligentUiSettings } from "./intelligent-ui-settings";
 import { intelligentUiInstructions } from "./intelligent-ui-prompt";
+import { createResidentTools, residentInstructions, type ResidentToolHost } from "./resident-tools";
 import { createMemoryContextExtension } from "./memory-context";
 import { createMemoryTools, memoryDisabledInstructions, memoryInstructions, memoryReadOnlyInstructions, type MemoryWritePermission } from "./memory-tools";
 import { openCodeSessionHeaders } from "./provider-headers";
@@ -179,6 +180,8 @@ export type RuntimeEvent =
   | { type: "error"; conversationId: string; message: string };
 
 export interface AgentRuntimeOptions {
+  /** 常驻 Agent：持久会话的身份与它可用的协调工具。没有提供时不注册这些工具。 */
+  resident?: { conversationId(): string | null; host: ResidentToolHost };
   scheduledTasks?: ScheduledTaskService;
   cwd: string;
   /** Vela 自己的模型目录，不读取本机 Pi 配置。 */
@@ -340,6 +343,8 @@ export class AgentRuntime {
   readonly memory: MemoryService;
   private readonly memorySettings: MemorySettings;
   private readonly intelligentUiSettings: IntelligentUiSettings;
+  /** 本进程里创建或恢复为常驻 Agent 的会话；重启后由 options.resident 重新指认。 */
+  private readonly residentIds = new Set<string>();
 
   constructor(private readonly options: AgentRuntimeOptions) {
     this.currentCwd = options.cwd;
@@ -351,6 +356,7 @@ export class AgentRuntime {
       scheduledTasks: Boolean(options.scheduledTasks),
       browser: Boolean(options.browserRepl),
       memoryEnabled: () => this.memorySettings.enabled,
+      ...(options.resident ? { resident: { isResident: entry => this.isResident(entry.id) } } : {}),
     });
     this.traces = new ConversationTraces({
       agentDir: options.agentDir,
@@ -487,8 +493,8 @@ export class AgentRuntime {
   }
 
   /** 用户对某个待答问题的回复;answer 为 null 表示跳过。 */
-  replyQuestion(id: string, answer: string | null): void {
-    this.questions.reply(id, answer);
+  replyQuestion(id: string, answer: string | null): boolean {
+    return this.questions.reply(id, answer);
   }
 
   /** 新建一个绑定 cwd 的对话并激活它。 */
@@ -610,10 +616,10 @@ export class AgentRuntime {
   }
 
   /** Scheduler entry point: create a persisted background chat without changing the selected workspace. */
-  async runScheduledTask(cwd: string, text: string, onCreated: (id: string) => void, execution: Pick<ScheduledTaskInput, "model" | "thinkingLevel" | "sandboxMode"> = {}): Promise<void> {
+  async runScheduledTask(cwd: string, text: string, onCreated: (id: string) => void, execution: Pick<ScheduledTaskInput, "model" | "thinkingLevel" | "sandboxMode"> & { mode?: "agent" | "plan" } = {}): Promise<void> {
     const entry = await this.exclusive(async () => {
       await this.ready();
-      const entry = this.addEntry(cwd, { activate: false, mode: "agent" });
+      const entry = this.addEntry(cwd, { activate: false, mode: execution.mode ?? "agent" });
       entry.scheduledSandboxMode = execution.sandboxMode;
       entry.scheduledTaskConversation = true;
       onCreated(entry.id);
@@ -641,6 +647,60 @@ export class AgentRuntime {
       if (failure) throw new Error(failure);
       if (entry.stopRequested) throw new Error("任务执行已停止");
     } finally { unsubscribe(); }
+  }
+
+  private isResident(id: string | undefined): boolean {
+    if (!id || !this.options.resident) return false;
+    return this.residentIds.has(id) || this.options.resident.conversationId() === id;
+  }
+
+  /**
+   * 常驻 Agent 的持久会话：不激活、不改变当前工作区，工具集只有协调工具。
+   * 已有对话（重启后按会话文件）直接恢复，只在没有时新建；返回会话 id。
+   */
+  async ensureResidentConversation(cwd: string, knownId: string | null): Promise<string> {
+    if (!this.options.resident) throw new Error("常驻 Agent 未启用");
+    return this.exclusive(async () => {
+      await this.ready();
+      let entry = knownId ? this.conversations.get(knownId) : undefined;
+      if (!entry) {
+        entry = this.addEntry(cwd, { activate: false, mode: "agent", hasWorkspace: false, title: "Resident Agent" });
+        entry.titleManuallySet = true;
+        entry.titleGenerationStarted = true;
+      }
+      // 先指认再启动：启动时按会话身份决定注册哪些工具。
+      this.residentIds.add(entry.id);
+      if (!entry.session) {
+        const directory = await this.readyDirectory();
+        await this.startInternal(entry, this.conversationSelection(directory));
+        if (!entry.session || entry.snapshot.status === "error") throw new Error(entry.snapshot.error ?? "无法启动常驻 Agent");
+      }
+      return entry.id;
+    });
+  }
+
+  /**
+   * 向一个后台对话发消息，不切换当前对话；必要时先启动会话。
+   * 对话正在运行时进入队列，不打断当前任务。
+   */
+  async promptBackground(conversationId: string, text: string): Promise<void> {
+    const entry = this.conversations.get(conversationId);
+    if (!entry) throw new Error("对话不存在或已结束");
+    if (!entry.session) {
+      await this.exclusive(async () => {
+        await this.ready();
+        if (!entry.session) await this.startInternal(entry);
+      });
+    }
+    const running = Boolean(entry.driving || entry.session?.isStreaming);
+    if (!running) this.emit({ type: "user_message", conversationId, text });
+    await this.prompt(conversationId, text, undefined, running ? "queue" : undefined);
+  }
+
+  /** 对话是否存在、状态与正在使用的模型；供宿主展示常驻 Agent 状态。 */
+  getConversationInfo(conversationId: string): { status: SessionStatus; model: string | null } | null {
+    const entry = this.conversations.get(conversationId);
+    return entry ? { status: entry.snapshot.status, model: entry.snapshot.model } : null;
   }
 
   /**
@@ -2190,12 +2250,14 @@ export class AgentRuntime {
             event.systemPromptOptions.appendSystemPrompt += `\n\n任务时间上下文：${new Date().toISOString()}；本机时区：${Intl.DateTimeFormat().resolvedOptions().timeZone}`;
           }); }) as ExtensionFactory,
         }] : []), ...mcp.factories()],
-        appendSystemPromptOverride: (base) => [
-          ...base,
-          ...(instructions ? [instructions] : []),
-          ...(this.options.scheduledTasks ? [scheduledTaskInstructions] : []),
-          ...(this.options.browserRepl ? [browserUseInstructions] : []),
-        ],
+        appendSystemPromptOverride: (base) => this.isResident(entry.id)
+          ? [...base, ...(instructions ? [instructions] : []), residentInstructions]
+          : [
+            ...base,
+            ...(instructions ? [instructions] : []),
+            ...(this.options.scheduledTasks ? [scheduledTaskInstructions] : []),
+            ...(this.options.browserRepl ? [browserUseInstructions] : []),
+          ],
       });
       await resourceLoader.reload();
       const control = new AgentControl({
@@ -2236,6 +2298,7 @@ export class AgentRuntime {
               askUser: (input) => this.askUser(entry, input),
             }),
             ...control.createAgentTools(entry.id),
+            ...(this.options.resident && this.isResident(entry.id) ? createResidentTools(this.options.resident.host) : []),
           ],
         });
         session = created.session;
@@ -3140,7 +3203,8 @@ export class AgentRuntime {
     const session = entry.session;
     const bridge = session ? this.mcpBridges.get(session) : undefined;
     bridge?.refresh();
-    const active = session && bridge ? this.mcpActiveTools(session, tools) : tools;
+    // 常驻 Agent 不加载外部 MCP 工具：它只负责协调，外部能力由工作区里的任务使用。
+    const active = session && bridge && !this.isResident(entry.id) ? this.mcpActiveTools(session, tools) : tools;
     session?.setActiveToolsByName(active);
     this.patchEntry(entry, { tools: active });
     for (const [child, other] of this.mcpBridges) {

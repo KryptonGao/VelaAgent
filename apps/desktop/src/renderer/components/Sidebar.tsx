@@ -2,7 +2,7 @@ import type { ConversationSummary } from "@vela/shared";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { isBooleanRecord, useStoredState } from "../hooks/useStoredState";
 import { modKeyLabel } from "../platform";
-import { tr, useAppLocale } from "../locale";
+import { tr, trf, useAppLocale } from "../locale";
 import type { SidebarResize } from "../hooks/useSidebarResize";
 import { MotionList } from "./BatchMotion";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
@@ -17,12 +17,16 @@ import {
   type SidebarView,
 } from "./conversation-activity";
 import { ConversationSearchDialog } from "./ConversationSearchDialog";
-import { ClockIcon } from "./icons";
+import { ClockIcon, InboxIcon } from "./icons";
 import { useSidebarItems } from "../hooks/useSidebarItems";
 
 interface SidebarProps {
   onOpenPrInbox: () => void;
   prInboxOpen: boolean;
+  onOpenAgentInbox: () => void;
+  agentInboxOpen: boolean;
+  /** 需要用户处理的事项数；为 0 时不显示徽标。 */
+  agentInboxBadge: number;
   onOpenRecipes: () => void;
   recipesOpen: boolean;
   onOpenScheduledTasks: () => void;
@@ -46,6 +50,9 @@ interface SidebarProps {
 export function Sidebar({
   onOpenPrInbox,
   prInboxOpen,
+  onOpenAgentInbox,
+  agentInboxOpen,
+  agentInboxBadge,
   onOpenRecipes,
   recipesOpen,
   onOpenScheduledTasks,
@@ -206,6 +213,11 @@ export function Sidebar({
       {Object.values(items).some(Boolean) ? <div className="sidebar-quick-actions">
         {items.prInbox ? <button className="quick-action-item" type="button" aria-current={prInboxOpen ? "page" : undefined} onClick={onOpenPrInbox}>
           <span className="quick-action-item-left"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="6" cy="5" r="3"/><circle cx="6" cy="19" r="3"/><circle cx="18" cy="19" r="3"/><path d="M6 8v8M18 16V9a4 4 0 0 0-4-4h-2m2-2-2 2 2 2"/></svg><span>Pull Request</span></span>
+        </button> : null}
+        {items.agentInbox ? <button className="quick-action-item" type="button" aria-current={agentInboxOpen ? "page" : undefined}
+          aria-label={agentInboxBadge > 0 ? trf("Agent 收件箱，{0} 项需要处理", "Agent Inbox, {0} need your attention", agentInboxBadge) : undefined} onClick={onOpenAgentInbox}>
+          <span className="quick-action-item-left"><InboxIcon size={16} /><span>{tr("Agent 收件箱", "Agent Inbox")}</span></span>
+          {agentInboxBadge > 0 ? <span className="quick-action-badge" aria-hidden="true">{agentInboxBadge > 99 ? "99+" : agentInboxBadge}</span> : null}
         </button> : null}
         {items.scheduledTasks ? <button className="quick-action-item" type="button" aria-current={scheduledTasksOpen ? "page" : undefined} onClick={onOpenScheduledTasks}>
           <span className="quick-action-item-left"><ClockIcon /><span>{tr("定时任务", "Scheduled Tasks")}</span></span>

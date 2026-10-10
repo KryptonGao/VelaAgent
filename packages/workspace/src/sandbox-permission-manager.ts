@@ -12,7 +12,9 @@ import type {
   SandboxRiskVerdict,
 } from "@vela/shared";
 
-const approvalTimeoutMs = 5 * 60_000;
+/** 无人回复时自动拒绝的等待时间；Agent Inbox 据此区分「拒绝」与「超时」。 */
+export const sandboxApprovalTimeoutMs = 5 * 60_000;
+const approvalTimeoutMs = sandboxApprovalTimeoutMs;
 /** 判定结论缓存上限,避免长时间会话里无限增长。 */
 const verdictCacheLimit = 200;
 
@@ -96,8 +98,10 @@ export class SandboxPermissionManager {
     if (input.signal?.aborted) return false;
     const mode = input.sandboxMode ?? this.mode;
     if (mode === "full") return true;
-    if (mode === "ask" && input.kind !== "bash" && input.kind !== "browser_repl" && input.kind !== "mcp" && input.insideWorkspace === true) return true;
-    if (mode === "smart" && this.riskEvaluator) {
+    // 常驻 Agent 创建后台任务不是文件或命令操作，模型无法判断其风险：smart 模式下也交给用户。
+    const alwaysAsk = input.kind === "delegate";
+    if (!alwaysAsk && mode === "ask" && input.kind !== "bash" && input.kind !== "browser_repl" && input.kind !== "mcp" && input.insideWorkspace === true) return true;
+    if (!alwaysAsk && mode === "smart" && this.riskEvaluator) {
       const verdict = await withApprovalAbort(this.evaluateRisk(input), input.signal);
       if (input.signal?.aborted) return false;
       if (verdict === "safe") return true;
@@ -129,8 +133,12 @@ export class SandboxPermissionManager {
     });
   }
 
-  reply(id: string, allowed: boolean): void {
-    this.pending.get(id)?.(allowed);
+  /** 返回 false 表示该请求已不在等待(已回复、超时、被中断或应用重启)。 */
+  reply(id: string, allowed: boolean): boolean {
+    const finish = this.pending.get(id);
+    if (!finish) return false;
+    finish(allowed);
+    return true;
   }
 
   private async evaluateRisk(input: SandboxExecutionContext & {
